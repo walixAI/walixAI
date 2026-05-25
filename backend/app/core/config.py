@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     REDIS_URL: str
     LANGFUSE_PUBLIC_KEY: str
     LANGFUSE_SECRET_KEY: str
+    LANGFUSE_HOST: str = "https://us.cloud.langfuse.com"
     APP_ENV: str = "development"
     SECRET_KEY: str
     FRONTEND_URL: str = "http://localhost:3000"

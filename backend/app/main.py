@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import webhooks
+from app.api import auth, leads, webhooks
 from app.core.config import settings
 
 logging.basicConfig(
@@ -26,6 +26,8 @@ app.add_middleware(
 )
 
 
+app.include_router(auth.router, prefix="/api")
+app.include_router(leads.router, prefix="/api")
 app.include_router(webhooks.router, prefix="/api")
 
 

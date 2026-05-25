@@ -10,5 +10,5 @@ langfuse
 httpx
 redis
 python-jose[cryptography]
-passlib[bcrypt]
+bcrypt
 python-multipart
