@@ -4,10 +4,13 @@ import json
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
+from sqlalchemy import select
 
+from app.ai.bot_engine import process_message
 from app.core.config import settings
+from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_client
-from app.services.whatsapp import process_incoming_message
+from app.models.tenant import Branch
 
 logger = logging.getLogger(__name__)
 
@@ -58,19 +61,41 @@ async def receive_whatsapp_webhook(
         for change in entry.get("changes", []):
             value = change.get("value", {})
             wa_phone_number_id = value.get("metadata", {}).get("phone_number_id")
-            for message in value.get("messages", []):
+            messages = value.get("messages", [])
+            if not messages or not wa_phone_number_id:
+                # Delivery/read receipts (value.statuses) and other event types
+                # land here. Nothing to process — ack and move on.
+                continue
+
+            # Resolve the branch this WhatsApp number belongs to. One lookup per
+            # `change` since all its messages share the same metadata.
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(Branch).where(
+                        Branch.wa_phone_number_id == wa_phone_number_id
+                    )
+                )
+                branch = result.scalar_one_or_none()
+
+            if branch is None:
+                logger.warning(
+                    "Webhook for unknown wa_phone_number_id=%s — dropping %d message(s)",
+                    wa_phone_number_id,
+                    len(messages),
+                )
+                continue
+
+            for message in messages:
                 message_id = message.get("id")
                 wa_phone = message.get("from")
                 message_body = (message.get("text") or {}).get("body")
 
-                # Skip non-text messages (audio/image/status events). The webhook
-                # also receives delivery/read receipts under value.statuses — those
-                # have no `messages` array and naturally fall through.
+                # Skip non-text messages (audio/image/etc.) — they have no text.body.
                 if not message_id or not wa_phone or message_body is None:
                     continue
 
-                # Atomic SET NX EX: only sets if not present; truthy when newly
-                # claimed, None when another request already processed this id.
+                # Atomic SET NX EX: truthy when newly claimed, None when another
+                # request already processed this message id.
                 try:
                     claimed = await redis_client.set(
                         f"msg:{message_id}",
@@ -88,10 +113,11 @@ async def receive_whatsapp_webhook(
                     continue
 
                 background_tasks.add_task(
-                    process_incoming_message,
+                    process_message,
                     wa_phone=wa_phone,
                     message_body=message_body,
-                    wa_phone_number_id=wa_phone_number_id,
+                    branch_id=branch.id,
+                    tenant_id=branch.tenant_id,
                     message_id=message_id,
                 )
 
