@@ -12,9 +12,12 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     DATABASE_PUBLIC_URL: str | None = None
     ANTHROPIC_API_KEY: str
-    META_WHATSAPP_TOKEN: str
-    META_PHONE_NUMBER_ID: str
-    META_WEBHOOK_SECRET: str
+    # Verify Token: arbitrary string echoed during webhook setup (GET handshake).
+    # Pick any value, set it both here and in Meta's webhook UI.
+    META_VERIFY_TOKEN: str
+    # App Secret: Meta-generated value used to validate the HMAC-SHA256 signature
+    # on POST webhooks. Found at Meta dashboard → Settings → Basic → App Secret.
+    META_APP_SECRET: str
     REDIS_URL: str
     LANGFUSE_PUBLIC_KEY: str
     LANGFUSE_SECRET_KEY: str

@@ -34,7 +34,7 @@ async def verify_whatsapp_webhook(
     hub_verify_token: str = Query(alias="hub.verify_token"),
     hub_challenge: str = Query(alias="hub.challenge"),
 ) -> Response:
-    if hub_verify_token != settings.META_WEBHOOK_SECRET:
+    if hub_verify_token != settings.META_VERIFY_TOKEN:
         raise HTTPException(status_code=403, detail="Invalid verify token")
     return Response(content=hub_challenge, media_type="text/plain")
 
@@ -47,7 +47,7 @@ async def receive_whatsapp_webhook(
     raw_body = await request.body()
     signature = request.headers.get("X-Hub-Signature-256")
 
-    if not _verify_signature(raw_body, signature, settings.META_WEBHOOK_SECRET):
+    if not _verify_signature(raw_body, signature, settings.META_APP_SECRET):
         raise HTTPException(status_code=403, detail="Invalid signature")
 
     try:

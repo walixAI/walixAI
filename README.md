@@ -8,9 +8,18 @@ CRM conversacional sobre WhatsApp para PyMEs mexicanas. Sprint 1: bot para una c
 - **Frontend**: Next.js 14 (App Router) + Tailwind
 - **Infra**: Postgres en Railway, Redis en Upstash, Claude Haiku para el bot, Langfuse para observabilidad, Meta WhatsApp Business API
 
-## Cómo correrlo en local
+## Flujo de trabajo
 
-Requisitos: Python 3.13, Node 20+, `backend/.env` con las credenciales (ver `Configurar WhatsApp Business API` más abajo para `META_*`).
+```
+desarrollo local con test_webhook.py  →  git push main  →  Railway deploy automático  →  WhatsApp real apuntando a Railway
+```
+
+- **Local** no recibe mensajes reales de WhatsApp. Se prueba con `scripts/test_webhook.py` que firma un POST con HMAC válido.
+- **Railway** es el único host que ve a Meta. El webhook de Meta apunta a la URL pública de Railway, no a localhost ni a ngrok.
+
+## Correrlo en local
+
+Requisitos: Python 3.13, Node 20+, `backend/.env` con las credenciales.
 
 ```bash
 # backend (terminal 1)
@@ -36,86 +45,155 @@ Login de prueba (creado por `seed.py`):
 | `asesor.sf@clinica.com` | asesor (Santa Fe CDMX) | `walix2026` |
 | `asesor.con@clinica.com` | asesor (Condesa CDMX) | `walix2026` |
 
-## Scripts
-
-- `backend/scripts/seed.py` — semilla de datos (idempotente)
-- `backend/scripts/test_webhook.py` — simula un mensaje entrante de WhatsApp firmado con HMAC contra `localhost:8000`. Útil para probar el flujo bot → Claude → DB sin Meta real.
+### Probar el bot localmente sin Meta
 
 ```bash
 cd backend
 .venv/bin/python scripts/test_webhook.py
 ```
 
-## Configurar WhatsApp Business API
+El script construye un payload con formato Meta, lo firma con HMAC-SHA256 usando `META_APP_SECRET` del `.env`, y POSTea a `localhost:8000/api/webhooks/whatsapp`. Dispara el flujo completo: HMAC verify → resolve branch → crear lead → llamar a Claude → guardar mensajes → intentar send a WhatsApp (fallará si `branches.wa_token` está vacío, no afecta al test).
 
-Esto vincula tu número de WhatsApp real con el backend. Hay 4 pasos. La primera vez toma ~30 minutos.
+Vas iterando en local hasta que el bot responda como quieres, sin gastar mensajes de la cuota gratuita de Meta.
 
-### a) Crear una app en developers.facebook.com
+## Variables de entorno del backend
 
-1. Entra a [developers.facebook.com](https://developers.facebook.com) con tu cuenta personal de Facebook.
-2. Arriba a la derecha: **My Apps** → **Create App**.
-3. *Use case*: **Other**. Continúa.
-4. *App type*: **Business**. Continúa.
-5. Ingresa nombre (ej. "Walix"), email de contacto y vincula (o crea) una **Business Account** en Meta Business Suite.
-6. **Create App**.
+| Variable | Donde se usa | Notas |
+|---|---|---|
+| `DATABASE_URL` | conexión interna a Postgres | En Railway lo enchufas con `${{Postgres.DATABASE_URL}}`. En local, ignorado en favor de `DATABASE_PUBLIC_URL` cuando `APP_ENV=development`. |
+| `DATABASE_PUBLIC_URL` | conexión externa a Postgres | Solo necesario en local (la URL interna `.railway.internal` no resuelve fuera de Railway). |
+| `REDIS_URL` | cache, dedup de webhooks, historial de conversación | Upstash con esquema `rediss://`. |
+| `ANTHROPIC_API_KEY` | llamadas al modelo | console.anthropic.com → API Keys. |
+| `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST` | traces del bot | langfuse.com → Project → Settings → API Keys. |
+| `META_VERIFY_TOKEN` | webhook handshake GET (Meta envía `hub.verify_token`, comparas con esto) | String arbitrario que tú eliges. Lo escribes en el campo "Verify Token" de Meta y aquí. |
+| `META_APP_SECRET` | firma HMAC-SHA256 de cada POST entrante de Meta | Meta → Settings → Basic → **App Secret** → Show. |
+| `APP_ENV` | `development` o `production` | En dev fuerza `DATABASE_PUBLIC_URL` y `echo=True` en SQLAlchemy. |
+| `SECRET_KEY` | firma JWT del login | En prod: `openssl rand -hex 32`. |
+| `FRONTEND_URL` | CORS | En prod = tu URL de Vercel. |
 
-### b) Agregar el producto WhatsApp
+## Configurar WhatsApp Business API contra Railway
 
-1. En el dashboard de la app, scroll abajo → **Add a product** → busca **WhatsApp** → **Set up**.
-2. Meta crea automáticamente:
-   - Un **número de prueba** (test number) que puedes usar gratis sin verificación.
-   - Un **Phone Number ID** (string numérico, ej. `123456789012345`).
-   - Una **WhatsApp Business Account (WABA)**.
-   - Un **token temporal de 24 horas** para empezar a probar.
+Meta necesita una URL pública HTTPS. La nuestra es la de Railway directamente — no se usa ngrok.
 
-> Para producción necesitas tu propio número (no el de prueba). Eso se hace en **WhatsApp** → **API Setup** → **Add phone number**, y requiere verificación por SMS/llamada.
+**Conceptos rápidos:**
 
-### c) Configurar el webhook apuntando a tu URL de Railway
+| Concepto | Vive en | Para qué sirve |
+|---|---|---|
+| `META_VERIFY_TOKEN` | env var (.env + Railway Variables) | string que tú eliges; Meta lo manda en el GET de verificación. |
+| `META_APP_SECRET` | env var | string que Meta generó para tu app; valida HMAC de los POST. |
+| `wa_phone_number_id` | columna `branches` | ID del número (`+15551907107` → un número de 15 dígitos). |
+| `wa_token` | columna `branches` | bearer token para enviar mensajes salientes. |
 
-1. Despliega el backend a Railway (`railway up` o conecta el repo en railway.app).
-2. Tu URL queda como `https://walix-backend-production.up.railway.app` (o similar).
-3. En la app de Meta: **WhatsApp** → **Configuration** (menú izquierdo) → sección **Webhook** → **Edit**.
-4. Llena:
-   - **Callback URL**: `https://TU-APP.up.railway.app/api/webhooks/whatsapp`
-   - **Verify token**: el mismo string que pusiste en `backend/.env` como `META_WEBHOOK_SECRET`.
-5. **Verify and save**. Meta hace `GET /api/webhooks/whatsapp?hub.verify_token=...&hub.challenge=...` — el backend compara el token con `META_WEBHOOK_SECRET` y echa el challenge. Si ves "Failed to validate callback URL" revisa logs del backend en Railway.
-6. Una vez verificado, abajo **Webhook fields** → suscríbete a `messages`. (Opcionalmente también `message_status` si te interesan los read receipts.)
+### Pasos (una sola vez)
 
-### d) Obtener `META_WHATSAPP_TOKEN` y `META_PHONE_NUMBER_ID`
+**1. App + WhatsApp en developers.facebook.com**
 
-1. **WhatsApp** → **API Setup**.
-2. **Phone Number ID**: aparece arriba del número seleccionado en el dropdown "From". Cópialo a `backend/.env` como `META_PHONE_NUMBER_ID`.
-3. **Access token**:
-   - **Para desarrollo rápido (24h)**: en la misma página, sección **Temporary access token** → **Copy**.
-   - **Para producción (token permanente)**:
-     1. Entra a [business.facebook.com](https://business.facebook.com) → **Business Settings** → **Users** → **System Users** → **Add**.
-     2. Crea un System User con rol *Admin*.
-     3. **Add Assets** → selecciona tu **WhatsApp Account** → marca *Manage* y guarda.
-     4. **Generate New Token** → elige la app, scopes `whatsapp_business_messaging` y `whatsapp_business_management` → **Generate**.
-     5. Copia el token (no se vuelve a mostrar) a `backend/.env` como `META_WHATSAPP_TOKEN`.
-4. Reinicia el backend en Railway para que cargue el nuevo `.env` (o agrega las vars en el panel de Variables de Railway).
+[developers.facebook.com](https://developers.facebook.com) → **My Apps** → **Create App** → tipo **Business**. Después en el dashboard de la app: **Add a product** → **WhatsApp** → **Set up**. Meta te asigna automáticamente:
+- Número de prueba (en este caso `+15551907107`)
+- Su Phone Number ID
+- Un token temporal (24h)
 
-### Vincular el número a una sucursal
+**2. Sacar el App Secret**
 
-El `Phone Number ID` también debe quedar en la columna `branches.wa_phone_number_id` para que el webhook resuelva qué sucursal responde. Lo más rápido:
+Meta dashboard → **Settings** → **Basic** → **App Secret** → **Show** → copia. Este es el valor de `META_APP_SECRET`.
+
+**3. Setear env vars en Railway**
+
+En el panel de Railway → tu servicio backend → **Variables**:
+
+```
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+REDIS_URL=rediss://default:...@allowed-jaguar-70088.upstash.io:6379
+ANTHROPIC_API_KEY=sk-ant-...
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://us.cloud.langfuse.com
+META_VERIFY_TOKEN=walix_webhook_secret_2026
+META_APP_SECRET=<App Secret de Meta>
+APP_ENV=production
+SECRET_KEY=<openssl rand -hex 32>
+FRONTEND_URL=https://<tu-proyecto>.vercel.app
+```
+
+**Importante**: `DATABASE_PUBLIC_URL` **NO** se pone en Railway (sólo en local). `META_VERIFY_TOKEN` tiene que ser exactamente el mismo string que pongas en el UI de Meta.
+
+**4. Push a GitHub → Railway redeploya**
+
+```bash
+git push origin main
+```
+
+Railway detecta el push, instala deps, corre `alembic upgrade head` y arranca uvicorn (definido en `backend/Procfile`). Espera unos 60s y revisa el log en el panel de Railway: tiene que llegar a `Uvicorn running on http://0.0.0.0:PORT`.
+
+Tu URL queda como `https://<servicio>-production.up.railway.app`. Anótala.
+
+**5. Configurar el webhook en Meta apuntando a Railway**
+
+Meta → **WhatsApp** → **Configuration** → sección **Webhook** → **Edit**:
+
+- **Callback URL**: `https://<servicio>-production.up.railway.app/api/webhooks/whatsapp`
+- **Verify token**: el mismo valor que pusiste en `META_VERIFY_TOKEN` en Railway Variables.
+
+Click **Verify and save**. Meta hace un GET al webhook con `hub.verify_token` y `hub.challenge`. Tu backend en Railway lo verifica y devuelve el challenge. Si dice "Failed to validate callback URL":
+- Revisa los logs de Railway — `META_VERIFY_TOKEN` mal escrito es la causa más común.
+- Confirma que `/health` responde 200 abriendo `https://<servicio>.up.railway.app/health` en el browser.
+
+Una vez verificado, abajo en **Webhook fields** → suscríbete a `messages`.
+
+**6. Vincular el número a una sucursal (DB update)**
+
+El **Phone Number ID** y el **access token** van en la fila de `branches` que vaya a manejar ese número. Saca ambos de Meta → **WhatsApp** → **API Setup**:
+
+- Phone Number ID: arriba del dropdown "From".
+- Access token: copia el "Temporary access token" (24h), o genera uno permanente vía System User en Business Manager.
+
+Luego conecta al Postgres con tu `DATABASE_PUBLIC_URL` y corre:
 
 ```sql
 UPDATE branches
-SET wa_phone_number_id = '123456789012345',
-    wa_token           = 'EAAxxxx_tu_token_permanente'
+SET wa_phone_number_id = '<phone_number_id_de_meta>',
+    wa_token           = '<access_token_de_meta>'
 WHERE name = 'Monterrey';
 ```
 
-`seed.py` deja placeholders (`PENDIENTE_MTY`, `PENDIENTE_SF`, `PENDIENTE_CON`) que se reemplazan con los IDs reales cuando configures cada número en Meta.
+El seed dejó placeholders `PENDIENTE_MTY`, `PENDIENTE_SF`, `PENDIENTE_CON`. Sólo `Monterrey` quedará respondiendo hasta que asignes el resto de números.
 
-### Probar punta a punta
+**7. Probar de verdad**
 
-Después de configurar Meta y actualizar la fila de la sucursal, manda un WhatsApp **desde tu celular personal** al número de la WABA. Deberías ver en los logs del backend:
+Desde tu celular (`+5215535637687`) manda un WhatsApp al número de prueba (`+15551907107`). En los logs de Railway debería aparecer:
 
 ```
-INFO ... bot_engine: Incoming msg from 521xxxxxxxxxx
-INFO ... Claude latency_ms=...
-INFO ... WhatsApp API 200
+INFO app.api.webhooks: POST /api/webhooks/whatsapp 200 OK
+INFO app.ai.bot_engine: Claude latency_ms=... tokens_used=...
+INFO app.services.whatsapp: WhatsApp API 200
 ```
 
-Si necesitas debuggear sin mandar mensajes reales, usa `scripts/test_webhook.py` — simula la llamada de Meta con HMAC válido contra tu backend local.
+Y la respuesta de Wali llega a tu chat.
+
+## Frontend en Vercel
+
+En Vercel → tu proyecto → **Settings** → **Environment Variables**:
+
+```
+NEXT_PUBLIC_API_URL=https://<servicio>-production.up.railway.app
+```
+
+Aplica para Production, Preview y Development. Después del primer set, fuerza un redeploy desde el dashboard.
+
+## Flujo de release
+
+```
+git push origin main
+    ↓
+Railway: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+Vercel:  npm run build
+```
+
+Ambos hacen build automáticamente al detectar el push. Si rompes algo, Railway/Vercel mantienen el último deploy bueno hasta que el nuevo pase build.
+
+## Scripts útiles
+
+```bash
+backend/scripts/seed.py          # crea tenant + 3 sucursales + 4 users (idempotente)
+backend/scripts/test_webhook.py  # POST firmado con HMAC contra localhost:8000
+```
