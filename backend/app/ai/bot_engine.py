@@ -102,15 +102,8 @@ async def process_message(
         # 2. Conversation
         conversation = await _get_or_create_active_conversation(db, lead)
 
-        # 3. Human in control — bot stays silent (still commit any new rows).
-        if conversation.handled_by == ConversationHandler.HUMAN:
-            await db.commit()
-            logger.info(
-                "Conversation %s under human control — bot silent", conversation.id
-            )
-            return
-
-        # 4. Persist the user message.
+        # 3. Persist the user message regardless of handler so the agent can
+        #    see it in the dashboard even when in human control mode.
         db.add(
             Message(
                 conversation_id=conversation.id,
@@ -119,6 +112,15 @@ async def process_message(
                 content=message_body,
             )
         )
+
+        # 4. Human in control — save the message but let bot stay silent.
+        if conversation.handled_by == ConversationHandler.HUMAN:
+            await db.commit()
+            logger.info(
+                "Conversation %s under human control — bot silent", conversation.id
+            )
+            return
+
         await db.commit()
 
         # 5. Pull conversation history from Redis (chronological list of
