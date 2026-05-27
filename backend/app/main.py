@@ -17,9 +17,15 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Convertimos el string de FRONTEND_URL en una lista, limpiando espacios y diagonales finales
+origins = []
+if settings.FRONTEND_URL:
+    origins = [o.strip().rstrip("/") for o in settings.FRONTEND_URL.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.FRONTEND_URL],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
