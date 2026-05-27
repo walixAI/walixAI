@@ -59,11 +59,28 @@ function formatTime(iso: string): string {
   });
 }
 
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function formatDateLabel(dateStr: string): string {
+  const today = todayStr();
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  if (dateStr === today) return "Hoy";
+  if (dateStr === yesterday) return "Ayer";
+  return new Date(dateStr + "T12:00:00").toLocaleDateString("es-MX", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserMe | null>(null);
   const [leads, setLeads] = useState<LeadListItem[]>([]);
   const [filter, setFilter] = useState<LeadStatus | "all">("all");
+  const [date, setDate] = useState<string>(todayStr());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,9 +100,9 @@ export default function DashboardPage() {
 
     async function load() {
       try {
-        const res = await api.listLeads(
-          filter === "all" ? {} : { status: filter },
-        );
+        const opts: Parameters<typeof api.listLeads>[0] = { date };
+        if (filter !== "all") opts.status = filter;
+        const res = await api.listLeads(opts);
         if (cancelled) return;
         setLeads(res.items);
         setError(null);
@@ -103,7 +120,21 @@ export default function DashboardPage() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [filter]);
+  }, [filter, date]);
+
+  function prevDay() {
+    const d = new Date(date + "T12:00:00");
+    d.setDate(d.getDate() - 1);
+    setDate(d.toISOString().slice(0, 10));
+    setLoading(true);
+  }
+
+  function nextDay() {
+    const d = new Date(date + "T12:00:00");
+    d.setDate(d.getDate() + 1);
+    setDate(d.toISOString().slice(0, 10));
+    setLoading(true);
+  }
 
   function logout() {
     clearToken();
@@ -132,6 +163,28 @@ export default function DashboardPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-4">
+        {/* Date navigation */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={prevDay}
+            className="p-1.5 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-100 transition"
+            aria-label="Día anterior"
+          >
+            ←
+          </button>
+          <span className="text-sm font-medium text-slate-700 min-w-[5rem] text-center">
+            {formatDateLabel(date)}
+          </span>
+          <button
+            onClick={nextDay}
+            disabled={date >= todayStr()}
+            className="p-1.5 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
+            aria-label="Día siguiente"
+          >
+            →
+          </button>
+        </div>
+
         <div className="flex gap-2 flex-wrap">
           {STATUS_FILTERS.map((s) => {
             const active = filter === s.value;
