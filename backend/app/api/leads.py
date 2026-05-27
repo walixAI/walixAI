@@ -94,21 +94,22 @@ async def _get_lead_in_branch(
 async def list_leads(
     status_filter: LeadStatus | None = Query(default=None, alias="status"),
     on_date: date | None = Query(default=None, alias="date"),
+    all_dates: bool = Query(default=False, alias="all"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LeadListResponse:
     branch_id = _require_branch(current_user)
-    target_date = on_date or datetime.now(timezone.utc).date()
-    start = datetime.combine(target_date, time.min, tzinfo=timezone.utc)
-    end = start + timedelta(days=1)
 
-    base = select(Lead).where(
-        Lead.branch_id == branch_id,
-        Lead.created_at >= start,
-        Lead.created_at < end,
-    )
+    base = select(Lead).where(Lead.branch_id == branch_id)
+
+    if not all_dates:
+        target_date = on_date or datetime.now(timezone.utc).date()
+        start = datetime.combine(target_date, time.min, tzinfo=timezone.utc)
+        end = start + timedelta(days=1)
+        base = base.where(Lead.created_at >= start, Lead.created_at < end)
+
     if status_filter is not None:
         base = base.where(Lead.status == status_filter)
 

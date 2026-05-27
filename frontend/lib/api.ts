@@ -151,12 +151,14 @@ export const api = {
   listLeads: (opts: {
     status?: LeadStatus;
     date?: string;
+    all?: boolean;
     limit?: number;
     offset?: number;
   } = {}) => {
     const qs = new URLSearchParams();
     if (opts.status) qs.set("status", opts.status);
-    if (opts.date) qs.set("date", opts.date);
+    if (opts.all) qs.set("all", "true");
+    else if (opts.date) qs.set("date", opts.date);
     if (opts.limit !== undefined) qs.set("limit", String(opts.limit));
     if (opts.offset !== undefined) qs.set("offset", String(opts.offset));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";

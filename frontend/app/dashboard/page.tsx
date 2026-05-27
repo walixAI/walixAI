@@ -81,6 +81,7 @@ export default function DashboardPage() {
   const [leads, setLeads] = useState<LeadListItem[]>([]);
   const [filter, setFilter] = useState<LeadStatus | "all">("all");
   const [date, setDate] = useState<string>(todayStr());
+  const [allDates, setAllDates] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,7 +101,7 @@ export default function DashboardPage() {
 
     async function load() {
       try {
-        const opts: Parameters<typeof api.listLeads>[0] = { date };
+        const opts: Parameters<typeof api.listLeads>[0] = allDates ? { all: true } : { date };
         if (filter !== "all") opts.status = filter;
         const res = await api.listLeads(opts);
         if (cancelled) return;
@@ -120,7 +121,7 @@ export default function DashboardPage() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [filter, date]);
+  }, [filter, date, allDates]);
 
   function prevDay() {
     const d = new Date(date + "T12:00:00");
@@ -167,21 +168,32 @@ export default function DashboardPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={prevDay}
-            className="p-1.5 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-100 transition"
+            disabled={allDates}
+            className="p-1.5 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
             aria-label="Día anterior"
           >
             ←
           </button>
           <span className="text-sm font-medium text-slate-700 min-w-[5rem] text-center">
-            {formatDateLabel(date)}
+            {allDates ? "Todos" : formatDateLabel(date)}
           </span>
           <button
             onClick={nextDay}
-            disabled={date >= todayStr()}
+            disabled={allDates || date >= todayStr()}
             className="p-1.5 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
             aria-label="Día siguiente"
           >
             →
+          </button>
+          <button
+            onClick={() => { setAllDates((v) => !v); setLoading(true); }}
+            className={`ml-1 px-3 py-1.5 text-sm rounded-full border transition ${
+              allDates
+                ? "bg-slate-900 text-white border-slate-900"
+                : "bg-white border-slate-300 text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            Todos
           </button>
         </div>
 
