@@ -206,6 +206,35 @@ async def update_lead_status(
     return LeadDetail.model_validate(lead)
 
 
+@router.post("/{lead_id}/return-to-bot", response_model=LeadDetail)
+async def return_to_bot(
+    lead_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LeadDetail:
+    branch_id = _require_branch(current_user)
+    lead = await _get_lead_in_branch(db, lead_id, branch_id)
+
+    conv_result = await db.execute(
+        select(Conversation)
+        .where(
+            Conversation.lead_id == lead.id,
+            Conversation.status != ConversationStatus.CLOSED,
+        )
+        .order_by(Conversation.started_at.desc())
+    )
+    conversation = conv_result.scalars().first()
+    if conversation is not None:
+        conversation.handled_by = ConversationHandler.BOT
+        conversation.status = ConversationStatus.ACTIVE
+
+    lead.status = LeadStatus.EN_CALIFICACION
+
+    await db.commit()
+    await db.refresh(lead)
+    return LeadDetail.model_validate(lead)
+
+
 @router.post("/{lead_id}/handoff", response_model=LeadDetail)
 async def handoff_lead(
     lead_id: uuid.UUID,

@@ -93,6 +93,19 @@ export default function LeadDetailPage() {
     }
   }
 
+  async function returnToBot() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.returnToBot(id);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al devolver al bot");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-sm text-slate-500">
@@ -192,9 +205,18 @@ export default function LeadDetailPage() {
             </button>
           )}
           {isHuman && (
-            <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm p-3 rounded-md">
-              Estás manejando esta conversación manualmente. El bot no
-              responderá hasta que cierres el handoff.
+            <div className="space-y-2">
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm p-3 rounded-md">
+                Estás manejando esta conversación manualmente. El bot no
+                responderá hasta que lo reactives.
+              </div>
+              <button
+                onClick={returnToBot}
+                disabled={busy}
+                className="w-full bg-slate-700 text-white py-2 rounded-md font-medium hover:bg-slate-800 disabled:opacity-50 transition"
+              >
+                {busy ? "Reactivando…" : "Devolver al bot"}
+              </button>
             </div>
           )}
 

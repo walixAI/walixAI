@@ -179,4 +179,7 @@ export const api = {
 
   handoff: (id: string) =>
     request<LeadDetail>(`/api/leads/${id}/handoff`, { method: "POST" }),
+
+  returnToBot: (id: string) =>
+    request<LeadDetail>(`/api/leads/${id}/return-to-bot`, { method: "POST" }),
 };
