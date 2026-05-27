@@ -32,9 +32,13 @@ CONV_HISTORY_TTL_SECONDS = 86_400  # 24h
 CONV_HISTORY_MAX_MESSAGES = 10
 
 ESCALATION_PHRASES: tuple[str, ...] = (
-    "conectarte con",
-    "especialista",
-    "te contactará",
+    "te voy a conectar con",
+    "voy a conectarte con",
+    "conectarte con un asesor",
+    "un asesor te contactará",
+    "un especialista te contactará",
+    "te contactará en breve",
+    "escalando tu caso",
 )
 
 anthropic_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)

@@ -78,6 +78,8 @@ export default function LeadDetailPage() {
       return;
     }
     load();
+    const interval = setInterval(load, 5_000);
+    return () => clearInterval(interval);
   }, [router, load]);
 
   async function takeOver() {
