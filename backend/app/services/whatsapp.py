@@ -7,6 +7,14 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+def _normalize_mx_phone(phone: str) -> str:
+    # Meta's webhook delivers Mexican mobiles as 521XXXXXXXXXX (13 digits).
+    # The Graph API rejects that format — it expects 52XXXXXXXXXX (12 digits).
+    if phone.startswith("521") and len(phone) == 13:
+        return "52" + phone[3:]
+    return phone
+
+
 class WhatsAppService:
     BASE_URL = "https://graph.facebook.com/v19.0"
     TIMEOUT_SECONDS = 10.0
@@ -19,6 +27,7 @@ class WhatsAppService:
         phone_number_id: str,
         token: str,
     ) -> bool:
+        to_phone = _normalize_mx_phone(to_phone)
         payload = {
             "messaging_product": "whatsapp",
             "to": to_phone,
