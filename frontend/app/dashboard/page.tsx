@@ -87,7 +87,7 @@ export default function DashboardPage() {
   const [leads, setLeads] = useState<LeadListItem[]>([]);
   const [filter, setFilter] = useState<LeadStatus | "all">("all");
   const [date, setDate] = useState<string>(todayStr());
-  const [allDates, setAllDates] = useState(false);
+  const [allDates, setAllDates] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
