@@ -9,10 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.prompts import build_system_prompt
+from app.ai.retrieval import format_rag_context, retrieve_context
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_client
-from app.services.rag import retrieve_context
 from app.models.conversation import (
     Conversation,
     ConversationHandler,
@@ -140,16 +140,12 @@ async def process_message(
         # 6.5 RAG: retrieve relevant KB chunks and inject into system prompt.
         rag_chunks: list[dict] = []
         try:
-            rag_chunks = await retrieve_context(message_body, tenant_id, db)
+            rag_chunks = await retrieve_context(message_body, str(tenant_id))
             if rag_chunks:
                 lead.last_rag_context = {
                     "query": message_body,
                     "chunks": [
-                        {
-                            "title": c["document_title"],
-                            "section": c["section"],
-                            "similarity": c["similarity"],
-                        }
+                        {"filename": c["filename"], "rrf_score": c["rrf_score"]}
                         for c in rag_chunks
                     ],
                 }
@@ -161,7 +157,7 @@ async def process_message(
         except Exception:
             logger.exception("RAG retrieval failed — continuing without context")
 
-        system_prompt = build_system_prompt(rag_chunks)
+        system_prompt = build_system_prompt(format_rag_context(rag_chunks))
 
         # 7 & 8. Call Claude and measure latency.
         start = time.monotonic()

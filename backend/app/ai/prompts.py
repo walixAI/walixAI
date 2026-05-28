@@ -50,24 +50,8 @@ CHANNEL_RULES_PROMPT = """REGLAS DE CANAL WHATSAPP:
 SYSTEM_PROMPT = f"{PERSONA_PROMPT}\n\n{CHANNEL_RULES_PROMPT}"
 
 
-def build_system_prompt(context_chunks: list[dict]) -> str:
-    """Construye el system prompt inyectando chunks de la KB como contexto."""
-    if not context_chunks:
+def build_system_prompt(rag_context: str = "") -> str:
+    """Builds the system prompt, optionally injecting pre-formatted RAG context."""
+    if not rag_context:
         return SYSTEM_PROMPT
-
-    lines = ["INFORMACIÓN DE REFERENCIA (usa esto para responder con precisión):"]
-    for chunk in context_chunks:
-        header_parts = [chunk["document_title"]]
-        if chunk.get("section"):
-            header_parts.append(chunk["section"])
-        lines.append(f"[{' › '.join(header_parts)}]")
-        lines.append(chunk["content"])
-        lines.append("")
-
-    lines.append(
-        "Usa esta información cuando sea relevante. "
-        "Si la respuesta no está aquí, responde con tu conocimiento general del tema."
-    )
-
-    kb_block = "\n".join(lines)
-    return f"{SYSTEM_PROMPT}\n\n{kb_block}"
+    return f"{SYSTEM_PROMPT}\n\n{rag_context}"
