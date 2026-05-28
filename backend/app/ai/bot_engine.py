@@ -8,10 +8,11 @@ from langfuse import Langfuse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.prompts import SYSTEM_PROMPT
+from app.ai.prompts import build_system_prompt
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_client
+from app.services.rag import retrieve_context
 from app.models.conversation import (
     Conversation,
     ConversationHandler,
@@ -136,12 +137,38 @@ async def process_message(
         # 6. Build messages payload for Anthropic: history + current user turn.
         anthropic_messages = history + [{"role": "user", "content": message_body}]
 
+        # 6.5 RAG: retrieve relevant KB chunks and inject into system prompt.
+        rag_chunks: list[dict] = []
+        try:
+            rag_chunks = await retrieve_context(message_body, tenant_id, db)
+            if rag_chunks:
+                lead.last_rag_context = {
+                    "query": message_body,
+                    "chunks": [
+                        {
+                            "title": c["document_title"],
+                            "section": c["section"],
+                            "similarity": c["similarity"],
+                        }
+                        for c in rag_chunks
+                    ],
+                }
+                logger.info(
+                    "RAG: %d chunks retrieved for conversation %s",
+                    len(rag_chunks),
+                    conversation.id,
+                )
+        except Exception:
+            logger.exception("RAG retrieval failed — continuing without context")
+
+        system_prompt = build_system_prompt(rag_chunks)
+
         # 7 & 8. Call Claude and measure latency.
         start = time.monotonic()
         response = await anthropic_client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=CLAUDE_MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            system=system_prompt,
             messages=anthropic_messages,
         )
         latency_ms = int((time.monotonic() - start) * 1000)
