@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     SECRET_KEY: str
     FRONTEND_URL: str = "http://localhost:3000"
+    # OpenAI — solo requerido para scripts/ingest_kb.py
+    OPENAI_API_KEY: str | None = None
 
     @property
     def effective_database_url(self) -> str:

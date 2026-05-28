@@ -13,3 +13,5 @@ python-jose[cryptography]
 bcrypt
 python-multipart
 pgvector
+openai
+tiktoken
