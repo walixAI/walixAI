@@ -12,3 +12,4 @@ redis
 python-jose[cryptography]
 bcrypt
 python-multipart
+pgvector

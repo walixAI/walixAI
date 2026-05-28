@@ -12,7 +12,7 @@ from app.models.base import Base
 
 # Import every model module so its tables register on Base.metadata
 # before Alembic introspects it for autogenerate.
-from app.models import conversation, lead, tenant, user  # noqa: F401
+from app.models import conversation, knowledge, lead, tenant, user  # noqa: F401
 
 config = context.config
 

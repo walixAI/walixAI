@@ -2,7 +2,7 @@ import enum
 import uuid
 from typing import Any
 
-from sqlalchemy import Enum, ForeignKey, String
+from sqlalchemy import Enum, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -83,3 +83,8 @@ class Lead(Base):
         nullable=False,
         default=LeadSource.WHATSAPP_INBOUND,
     )
+    last_rag_context: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True
+    )
+    qualification_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    qualification_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
