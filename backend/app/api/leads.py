@@ -1,6 +1,9 @@
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
+
+MX_TZ = ZoneInfo("America/Mexico_City")
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
@@ -105,8 +108,8 @@ async def list_leads(
     base = select(Lead).where(Lead.branch_id == branch_id)
 
     if not all_dates:
-        target_date = on_date or datetime.now(timezone.utc).date()
-        start = datetime.combine(target_date, time.min, tzinfo=timezone.utc)
+        target_date = on_date or datetime.now(MX_TZ).date()
+        start = datetime.combine(target_date, time.min, tzinfo=MX_TZ)
         end = start + timedelta(days=1)
         base = base.where(Lead.created_at >= start, Lead.created_at < end)
 

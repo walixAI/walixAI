@@ -59,15 +59,21 @@ function formatTime(iso: string): string {
   });
 }
 
+const MX_TZ = "America/Mexico_City";
+
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Date().toLocaleDateString("en-CA", { timeZone: MX_TZ });
+}
+
+function yesterdayStr(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toLocaleDateString("en-CA", { timeZone: MX_TZ });
 }
 
 function formatDateLabel(dateStr: string): string {
-  const today = todayStr();
-  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-  if (dateStr === today) return "Hoy";
-  if (dateStr === yesterday) return "Ayer";
+  if (dateStr === todayStr()) return "Hoy";
+  if (dateStr === yesterdayStr()) return "Ayer";
   return new Date(dateStr + "T12:00:00").toLocaleDateString("es-MX", {
     weekday: "short",
     day: "numeric",
