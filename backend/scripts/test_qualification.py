@@ -23,7 +23,9 @@ from app.core.config import settings
 
 BASE_URL       = "http://localhost:8000"
 WEBHOOK_URL    = f"{BASE_URL}/api/webhooks/whatsapp"
-PHONE_NUMBER_ID = "PENDIENTE_MTY"   # must match branches.wa_phone_number_id in local DB
+# Must match branches.wa_phone_number_id in the DB you're pointing at.
+# Railway: 1091416687392593  |  local seed: PENDIENTE_MTY
+PHONE_NUMBER_ID = "1091416687392593"
 
 # Use a distinct test number so it doesn't collide with other test leads
 WA_PHONE = "5215500000001"
@@ -97,16 +99,23 @@ def _send_message(client: httpx.Client, body: str, idx: int) -> bool:
     return status_ok
 
 
+_LOGIN_CANDIDATES = [
+    "asistente@clinica.com",   # Railway / post add_test_users.py
+    "asesor.mty@clinica.com",  # local seed
+]
+
 def _get_jwt(client: httpx.Client) -> str | None:
-    resp = client.post(
-        f"{BASE_URL}/api/auth/login",
-        json={"email": "asistente@clinica.com", "password": "walix2026"},
-        timeout=10.0,
-    )
-    if resp.status_code != 200:
-        print(f"Login falló ({resp.status_code}): {resp.text}")
-        return None
-    return resp.json()["access_token"]
+    for email in _LOGIN_CANDIDATES:
+        resp = client.post(
+            f"{BASE_URL}/api/auth/login",
+            json={"email": email, "password": "walix2026"},
+            timeout=10.0,
+        )
+        if resp.status_code == 200:
+            print(f"        Login como: {email}")
+            return resp.json()["access_token"]
+    print(f"Login falló para todos los candidatos: {_LOGIN_CANDIDATES}")
+    return None
 
 
 def _find_lead(client: httpx.Client, token: str) -> dict | None:
@@ -144,18 +153,25 @@ def main() -> None:
                 print(f"        Esperando {DELAY_SECONDS}s…")
                 time.sleep(DELAY_SECONDS)
 
-        # 2. Wait for qualifier background task
-        extra_wait = 5
-        print(f"\nEsperando {extra_wait}s para que el qualifier procese el último mensaje…")
-        time.sleep(extra_wait)
-
-        # 3. Fetch lead result
+        # 2. Wait for qualifier — poll until status changes or timeout
         print("\n─── Resultado ───────────────────────────────────────────────")
         token = _get_jwt(client)
         if token is None:
             sys.exit(1)
 
-        lead = _find_lead(client, token)
+        lead = None
+        for attempt in range(15):
+            time.sleep(2)
+            lead = _find_lead(client, token)
+            if lead is None:
+                print(f"  [{attempt+1}/15] Lead no encontrado aún…")
+                continue
+            status = lead.get("status", "nuevo")
+            score = lead.get("qualification_score")
+            print(f"  [{attempt+1}/15] status={status!r}  score={score}")
+            if status != "nuevo":
+                break
+
         if lead is None:
             print(f"Lead con phone={WA_PHONE} no encontrado. ¿Está el PHONE_NUMBER_ID bien configurado?")
             sys.exit(1)

@@ -77,7 +77,7 @@ async def retrieve_context(
     query: str,
     tenant_id: str,
     top_k: int = 3,
-    min_score: float = 0.65,
+    min_score: float = 0.45,
 ) -> list[dict]:
     """Hybrid vector + BM25 retrieval fused with Reciprocal Rank Fusion.
 

@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import time
@@ -46,9 +45,6 @@ ESCALATION_PHRASES: tuple[str, ...] = (
 
 anthropic_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 whatsapp_service = WhatsAppService()
-
-# Keeps strong references to background tasks so they aren't GC'd mid-execution.
-_background_tasks: set[asyncio.Task] = set()
 
 langfuse_client = Langfuse(
     public_key=settings.LANGFUSE_PUBLIC_KEY,
@@ -102,10 +98,10 @@ def _needs_escalation(text: str) -> bool:
 def get_lead_profile(lead: Lead) -> str:
     """Returns a formatted string of already-collected lead data to inject into the prompt."""
     qdata = lead.qualification_data or {}
-    nombre = qdata.get("nombre") or lead.name or "pendiente"
-    edad = qdata.get("edad_nino") or "pendiente"
-    motivo = qdata.get("motivo_consulta") or "pendiente"
-    ciudad = qdata.get("ciudad") or "pendiente"
+    nombre = qdata.get("parent_name") or lead.name or "pendiente"
+    edad = qdata.get("child_age") or "pendiente"
+    motivo = qdata.get("consultation_reason") or "pendiente"
+    ciudad = qdata.get("parent_city") or "pendiente"
     return (
         "DATOS YA RECOPILADOS (no volver a preguntar):\n"
         f"- Nombre: {nombre}\n"
@@ -256,14 +252,7 @@ async def process_message(
         ]
         updated_history = updated_history[-CONV_HISTORY_MAX_MESSAGES:]
 
-        # 12. Background qualification — pass full history so Claude sees both sides.
-        task = asyncio.create_task(
-            qualify_lead(updated_history, lead.id, branch_id)
-        )
-        _background_tasks.add(task)
-        task.add_done_callback(_background_tasks.discard)
-
-        # 13. Persist history in Redis, 24h TTL.
+        # 12. Persist history in Redis, 24h TTL.
         await redis_client.set(
             history_key,
             json.dumps(updated_history),
@@ -284,7 +273,11 @@ async def process_message(
                 token=branch.wa_token,
             )
 
-    # 13. Langfuse trace. Observability must not break message processing,
+    # 14. Run qualifier after the session is closed and the WA reply is sent.
+    #     process_message is already a background task, so awaiting here is safe.
+    await qualify_lead(updated_history, lead.id, branch_id)
+
+    # 15. Langfuse trace. Observability must not break message processing,
     #     so failures here are logged and swallowed.
     try:
         with langfuse_client.start_as_current_observation(
