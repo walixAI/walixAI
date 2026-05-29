@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import time
@@ -9,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.prompts import build_system_prompt
+from app.ai.qualifier import qualify_lead
 from app.ai.retrieval import format_rag_context, retrieve_context
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -220,7 +222,7 @@ async def process_message(
         output_tokens = response.usage.output_tokens
         total_tokens = input_tokens + output_tokens
 
-        # 9. Persist the assistant message.
+        # 9b. Persist the assistant message.
         db.add(
             Message(
                 conversation_id=conversation.id,
@@ -231,7 +233,7 @@ async def process_message(
             )
         )
 
-        # 11. Escalation check on the assistant's reply.
+        # 10. Escalation check on the assistant's reply.
         if _needs_escalation(assistant_text):
             conversation.status = ConversationStatus.HANDOFF
             conversation.handled_by = ConversationHandler.HUMAN
@@ -244,7 +246,12 @@ async def process_message(
 
         await db.commit()
 
-        # 10. Update Redis with both turns, keep only the most recent N, 24h TTL.
+        # 10. Background qualification — does not block the WhatsApp reply.
+        asyncio.create_task(
+            qualify_lead(anthropic_messages, lead.id, branch_id)
+        )
+
+        # 11. Update Redis with both turns, keep only the most recent N, 24h TTL.
         updated_history = anthropic_messages + [
             {"role": "assistant", "content": assistant_text}
         ]
@@ -255,7 +262,7 @@ async def process_message(
             ex=CONV_HISTORY_TTL_SECONDS,
         )
 
-        # 12. Send the reply via WhatsApp using the branch's credentials.
+        # 13. Send the reply via WhatsApp using the branch's credentials.
         branch = await db.get(Branch, branch_id)
         if branch is None or not branch.wa_phone_number_id or not branch.wa_token:
             logger.error(
