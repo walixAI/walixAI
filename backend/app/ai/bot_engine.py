@@ -46,6 +46,10 @@ ESCALATION_PHRASES: tuple[str, ...] = (
 
 anthropic_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 whatsapp_service = WhatsAppService()
+
+# Keeps strong references to background tasks so they aren't GC'd mid-execution.
+_background_tasks: set[asyncio.Task] = set()
+
 langfuse_client = Langfuse(
     public_key=settings.LANGFUSE_PUBLIC_KEY,
     secret_key=settings.LANGFUSE_SECRET_KEY,
@@ -246,16 +250,20 @@ async def process_message(
 
         await db.commit()
 
-        # 10. Background qualification — does not block the WhatsApp reply.
-        asyncio.create_task(
-            qualify_lead(anthropic_messages, lead.id, branch_id)
-        )
-
-        # 11. Update Redis with both turns, keep only the most recent N, 24h TTL.
+        # 11. Build full history (user + assistant) for Redis and qualifier.
         updated_history = anthropic_messages + [
             {"role": "assistant", "content": assistant_text}
         ]
         updated_history = updated_history[-CONV_HISTORY_MAX_MESSAGES:]
+
+        # 12. Background qualification — pass full history so Claude sees both sides.
+        task = asyncio.create_task(
+            qualify_lead(updated_history, lead.id, branch_id)
+        )
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
+        # 13. Persist history in Redis, 24h TTL.
         await redis_client.set(
             history_key,
             json.dumps(updated_history),

@@ -23,7 +23,7 @@ from app.models.conversation import (
     ConversationHandler,
     ConversationStatus,
 )
-from app.models.lead import Lead, LeadStatus
+from app.models.lead import Lead, LeadSentiment, LeadStatus
 from app.models.tenant import Branch
 from app.models.user import User
 from app.services.whatsapp import WhatsAppService
@@ -56,6 +56,13 @@ _STATUS_MAP: dict[str, LeadStatus] = {
     "no_calificado": LeadStatus.PERDIDO,
     "incompleto": LeadStatus.EN_CALIFICACION,
     "escalar": LeadStatus.ESCALADO,
+}
+
+_SENTIMENT_MAP: dict[str, LeadSentiment] = {
+    "calificado": LeadSentiment.INTERESADO,
+    "no_calificado": LeadSentiment.NEGATIVO,
+    "incompleto": LeadSentiment.NEUTRAL,
+    "escalar": LeadSentiment.URGENTE,
 }
 
 _anthropic = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -136,17 +143,22 @@ async def qualify_lead(
         if result.get("escalation_reason"):
             lead.qualification_notes = result["escalation_reason"]
 
-        new_status = _STATUS_MAP.get(result.get("qualification_status", ""))
+        q_status_str = result.get("qualification_status", "")
+
+        new_status = _STATUS_MAP.get(q_status_str)
         if new_status:
             lead.status = new_status
+
+        new_sentiment = _SENTIMENT_MAP.get(q_status_str)
+        if new_sentiment:
+            lead.sentiment = new_sentiment
 
         await db.commit()
         await db.refresh(lead)
 
-        q_status = result.get("qualification_status")
-        if q_status == "calificado":
+        if q_status_str == "calificado":
             await notify_assistant(lead, db)
-        elif q_status == "escalar":
+        elif q_status_str == "escalar":
             await escalate_to_human(lead, db)
 
     logger.info(
@@ -172,11 +184,17 @@ async def notify_assistant(lead: Lead, db: AsyncSession) -> None:
         )
         user = result.scalar_one_or_none()
 
-    if user is None or not user.wa_phone:
-        logger.info(
-            "notify_assistant: no user with wa_phone for branch %s — skipping",
-            lead.branch_id,
-        )
+    if user is None:
+        logger.info("notify_assistant: no active user for branch %s — skipping", lead.branch_id)
+        return
+
+    # Assign lead to this user so it's visible in the dashboard
+    if lead.assigned_to is None:
+        lead.assigned_to = user.id
+        await db.commit()
+
+    if not user.wa_phone:
+        logger.info("notify_assistant: user %s has no wa_phone — skipping WA message", user.id)
         return
 
     # Load branch credentials
