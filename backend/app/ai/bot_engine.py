@@ -30,7 +30,7 @@ CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 CLAUDE_MAX_TOKENS = 300
 
 CONV_HISTORY_TTL_SECONDS = 86_400  # 24h
-CONV_HISTORY_MAX_MESSAGES = 10
+CONV_HISTORY_MAX_MESSAGES = 8
 
 ESCALATION_PHRASES: tuple[str, ...] = (
     "te voy a conectar con",
@@ -93,6 +93,45 @@ def _needs_escalation(text: str) -> bool:
     return any(phrase in lowered for phrase in ESCALATION_PHRASES)
 
 
+def get_lead_profile(lead: Lead) -> str:
+    """Returns a formatted string of already-collected lead data to inject into the prompt."""
+    qdata = lead.qualification_data or {}
+    nombre = qdata.get("nombre") or lead.name or "pendiente"
+    edad = qdata.get("edad_nino") or "pendiente"
+    motivo = qdata.get("motivo_consulta") or "pendiente"
+    ciudad = qdata.get("ciudad") or "pendiente"
+    return (
+        "DATOS YA RECOPILADOS (no volver a preguntar):\n"
+        f"- Nombre: {nombre}\n"
+        f"- Edad del niño: {edad}\n"
+        f"- Motivo de consulta: {motivo}\n"
+        f"- Ciudad: {ciudad}"
+    )
+
+
+async def get_conversation_context(
+    conversation_id: uuid.UUID,
+    db: AsyncSession,
+) -> list[dict[str, str]]:
+    """Returns conversation history as [{role, content}] list.
+
+    Reads from Redis first; falls back to the last N DB messages when the
+    Redis key has expired or is missing (e.g. after a Railway redeploy).
+    """
+    raw = await redis_client.get(f"conv:{conversation_id}")
+    if raw:
+        return json.loads(raw)
+
+    result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc())
+        .limit(CONV_HISTORY_MAX_MESSAGES)
+    )
+    messages = result.scalars().all()
+    return [{"role": m.role.value, "content": m.content} for m in reversed(messages)]
+
+
 async def process_message(
     wa_phone: str,
     message_body: str,
@@ -128,16 +167,14 @@ async def process_message(
 
         await db.commit()
 
-        # 5. Pull conversation history from Redis (chronological list of
-        #    {role, content} dicts).
+        # 5. Pull conversation history (Redis first, DB fallback).
         history_key = f"conv:{conversation.id}"
-        raw_history = await redis_client.get(history_key)
-        history: list[dict[str, str]] = json.loads(raw_history) if raw_history else []
+        history = await get_conversation_context(conversation.id, db)
 
-        # 6. Build messages payload for Anthropic: history + current user turn.
+        # 6. Build messages payload: history + current user turn.
         anthropic_messages = history + [{"role": "user", "content": message_body}]
 
-        # 6.5 RAG: retrieve relevant KB chunks and inject into system prompt.
+        # 7. RAG: retrieve relevant KB chunks.
         rag_chunks: list[dict] = []
         try:
             rag_chunks = await retrieve_context(message_body, str(tenant_id))
@@ -145,7 +182,11 @@ async def process_message(
                 lead.last_rag_context = {
                     "query": message_body,
                     "chunks": [
-                        {"filename": c["filename"], "rrf_score": c["rrf_score"]}
+                        {
+                            "id": c["id"],
+                            "filename": c["filename"],
+                            "rrf_score": c["rrf_score"],
+                        }
                         for c in rag_chunks
                     ],
                 }
@@ -157,9 +198,14 @@ async def process_message(
         except Exception:
             logger.exception("RAG retrieval failed — continuing without context")
 
-        system_prompt = build_system_prompt(format_rag_context(rag_chunks))
+        # 8. Build 4-layer system prompt: persona + channel rules + RAG + lead profile.
+        lead_profile = get_lead_profile(lead)
+        system_prompt = build_system_prompt(
+            rag_context=format_rag_context(rag_chunks),
+            lead_profile=lead_profile,
+        )
 
-        # 7 & 8. Call Claude and measure latency.
+        # 9. Call Claude and measure latency.
         start = time.monotonic()
         response = await anthropic_client.messages.create(
             model=CLAUDE_MODEL,
@@ -240,6 +286,9 @@ async def process_message(
                 "branch_id": str(branch_id),
                 "tenant_id": str(tenant_id),
                 "conversation_id": str(conversation.id),
+                "rag_chunks_count": len(rag_chunks),
+                "rag_chunks_sources": [c["filename"] for c in rag_chunks],
+                "qualification_score": lead.qualification_score,
             },
         ):
             pass

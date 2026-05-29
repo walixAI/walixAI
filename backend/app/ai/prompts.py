@@ -50,8 +50,11 @@ CHANNEL_RULES_PROMPT = """REGLAS DE CANAL WHATSAPP:
 SYSTEM_PROMPT = f"{PERSONA_PROMPT}\n\n{CHANNEL_RULES_PROMPT}"
 
 
-def build_system_prompt(rag_context: str = "") -> str:
-    """Builds the system prompt, optionally injecting pre-formatted RAG context."""
-    if not rag_context:
-        return SYSTEM_PROMPT
-    return f"{SYSTEM_PROMPT}\n\n{rag_context}"
+def build_system_prompt(rag_context: str = "", lead_profile: str = "") -> str:
+    """Builds the 4-layer system prompt: persona + channel rules + RAG context + lead profile."""
+    parts = [SYSTEM_PROMPT]
+    if rag_context:
+        parts.append(rag_context)
+    if lead_profile:
+        parts.append(lead_profile)
+    return "\n\n".join(parts)
