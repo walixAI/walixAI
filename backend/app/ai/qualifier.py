@@ -107,7 +107,7 @@ async def qualify_lead(
 
     # 1. Ask Claude to extract qualification data
     formatted = _format_history(conversation_history)
-    prompt = _QUALIFICATION_PROMPT.format(conversation=formatted)
+    prompt = _QUALIFICATION_PROMPT.replace("{conversation}", formatted)
 
     try:
         response = await _anthropic.messages.create(
