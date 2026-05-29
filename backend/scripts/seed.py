@@ -40,9 +40,27 @@ BRANCH_SPECS: list[dict[str, str]] = [
 
 USER_SPECS: list[dict[str, str | None]] = [
     {
-        "name": "Asesor Monterrey",
-        "email": "asesor.mty@clinica.com",
+        "name": "Owner Clínica",
+        "email": "owner@clinica.com",
+        "role": "owner",
+        "branch": None,
+    },
+    {
+        "name": "Asistente Médica",
+        "email": "asistente@clinica.com",
         "role": "asesor",
+        "branch": "Monterrey",
+    },
+    {
+        "name": "Dr. González",
+        "email": "doctor@clinica.com",
+        "role": "doctor",
+        "branch": "Monterrey",
+    },
+    {
+        "name": "Soporte IT",
+        "email": "it@clinica.com",
+        "role": "it",
         "branch": "Monterrey",
     },
     {
@@ -56,12 +74,6 @@ USER_SPECS: list[dict[str, str | None]] = [
         "email": "asesor.con@clinica.com",
         "role": "asesor",
         "branch": "Condesa CDMX",
-    },
-    {
-        "name": "Owner Clínica",
-        "email": "owner@clinica.com",
-        "role": "owner",
-        "branch": None,
     },
 ]
 

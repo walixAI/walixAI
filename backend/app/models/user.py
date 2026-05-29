@@ -12,6 +12,7 @@ class UserRole(str, enum.Enum):
     OWNER = "owner"
     GERENTE = "gerente"
     ASESOR = "asesor"
+    DOCTOR = "doctor"
     SOPORTE = "soporte"
     IT = "it"
 
