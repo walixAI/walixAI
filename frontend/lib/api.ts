@@ -51,6 +51,7 @@ export interface LeadListItem {
   source: LeadSource;
   assigned_to: string | null;
   contact_phone: string | null;
+  qualification_score: number | null;
   created_at: string;
   updated_at: string;
 }

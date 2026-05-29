@@ -13,7 +13,7 @@ import {
   type UserMe,
 } from "@/lib/api";
 
-const POLL_INTERVAL_MS = 30_000;
+const POLL_INTERVAL_MS = 15_000;
 
 const STATUS_FILTERS: { value: LeadStatus | "all"; label: string }[] = [
   { value: "all", label: "Todos" },
@@ -24,20 +24,13 @@ const STATUS_FILTERS: { value: LeadStatus | "all"; label: string }[] = [
   { value: "perdido", label: "Perdidos" },
 ];
 
-function statusBadgeClass(s: LeadStatus): string {
-  switch (s) {
-    case "nuevo":
-      return "bg-blue-100 text-blue-700 ring-blue-200";
-    case "en_calificacion":
-      return "bg-amber-100 text-amber-700 ring-amber-200";
-    case "calificado":
-      return "bg-emerald-100 text-emerald-700 ring-emerald-200";
-    case "escalado":
-      return "bg-red-100 text-red-700 ring-red-200";
-    case "perdido":
-      return "bg-slate-100 text-slate-600 ring-slate-200";
-  }
-}
+const STATUS_META: Record<LeadStatus, { label: string; cls: string }> = {
+  nuevo:           { label: "Nuevo",           cls: "bg-blue-100 text-blue-700 ring-blue-200" },
+  en_calificacion: { label: "En calificación", cls: "bg-amber-100 text-amber-700 ring-amber-200" },
+  calificado:      { label: "Calificado",      cls: "bg-emerald-100 text-emerald-700 ring-emerald-200" },
+  escalado:        { label: "Escalado",        cls: "bg-red-100 text-red-700 ring-red-200" },
+  perdido:         { label: "Perdido",         cls: "bg-slate-100 text-slate-600 ring-slate-200" },
+};
 
 function sentimentLabel(s: LeadSentiment): string {
   switch (s) {
@@ -237,40 +230,58 @@ export default function DashboardPage() {
             </div>
           ) : (
             <ul className="divide-y divide-slate-200">
-              {leads.map((l) => (
-                <li key={l.id}>
-                  <Link
-                    href={`/dashboard/leads/${l.id}`}
-                    className="flex items-center gap-4 px-4 py-3 hover:bg-slate-50"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate">
-                        {l.name ?? "(sin nombre)"}
-                      </div>
-                      <div className="text-sm text-slate-500">{l.wa_phone}</div>
-                    </div>
-                    <span
-                      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ring-1 ${statusBadgeClass(
-                        l.status,
-                      )}`}
+              {leads.map((l) => {
+                const sm = STATUS_META[l.status];
+                const scorePct = l.qualification_score != null
+                  ? Math.round(l.qualification_score * 100)
+                  : null;
+                const barColor =
+                  l.qualification_score == null ? "bg-slate-200"
+                  : l.qualification_score >= 0.8 ? "bg-emerald-500"
+                  : l.qualification_score >= 0.5 ? "bg-amber-400"
+                  : "bg-red-400";
+                return (
+                  <li key={l.id}>
+                    <Link
+                      href={`/dashboard/leads/${l.id}`}
+                      className="flex items-center gap-4 px-4 py-3 hover:bg-slate-50"
                     >
-                      {l.status}
-                    </span>
-                    <span className="hidden sm:block text-sm text-slate-500 w-24 text-right">
-                      {sentimentLabel(l.sentiment)}
-                    </span>
-                    <span className="text-sm text-slate-500 w-16 text-right">
-                      {formatTime(l.created_at)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">
+                          {l.name ?? "(sin nombre)"}
+                        </div>
+                        <div className="text-sm text-slate-500">{l.wa_phone}</div>
+                      </div>
+                      <div className="hidden sm:flex flex-col items-end gap-0.5 w-20 shrink-0">
+                        <span className="text-xs text-slate-500">
+                          {scorePct != null ? `${scorePct}%` : "—"}
+                        </span>
+                        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${barColor}`}
+                            style={{ width: scorePct != null ? `${scorePct}%` : "0%" }}
+                          />
+                        </div>
+                      </div>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ring-1 ${sm.cls}`}>
+                        {sm.label}
+                      </span>
+                      <span className="hidden md:block text-sm text-slate-500 w-20 text-right">
+                        {sentimentLabel(l.sentiment)}
+                      </span>
+                      <span className="text-sm text-slate-500 w-16 text-right shrink-0">
+                        {formatTime(l.created_at)}
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
 
         <p className="text-xs text-slate-400">
-          Se actualiza automáticamente cada 30 segundos.
+          Se actualiza automáticamente cada 15 segundos.
         </p>
       </main>
     </div>

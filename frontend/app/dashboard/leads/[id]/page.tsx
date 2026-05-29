@@ -131,7 +131,29 @@ export default function LeadDetailPage() {
   const isHuman = conversation?.handled_by === "human";
   const messages = conversation?.messages ?? [];
   const qd = lead.qualification_data ?? {};
-  const hasQualification = Object.keys(qd).length > 0;
+  const score = lead.qualification_score ?? 0;
+  const scorePct = Math.round(score * 100);
+  const scoreBarColor =
+    score >= 0.8 ? "bg-emerald-500" : score >= 0.5 ? "bg-amber-400" : "bg-red-400";
+
+  const qStatus = String(qd.qualification_status ?? "");
+  const qStatusBadge: Record<string, { label: string; cls: string }> = {
+    calificado:    { label: "Calificado ✓",  cls: "bg-emerald-100 text-emerald-700 ring-emerald-200" },
+    incompleto:    { label: "En proceso...",  cls: "bg-amber-100 text-amber-700 ring-amber-200" },
+    no_calificado: { label: "No califica",    cls: "bg-slate-100 text-slate-600 ring-slate-200" },
+    escalar:       { label: "Escalado",       cls: "bg-red-100 text-red-700 ring-red-200" },
+  };
+  const badge = qStatusBadge[qStatus] ?? { label: "Sin evaluar", cls: "bg-slate-100 text-slate-500 ring-slate-200" };
+
+  const QUAL_FIELDS: { key: string; label: string }[] = [
+    { key: "parent_name",        label: "Nombre del padre" },
+    { key: "child_age",          label: "Edad del niño" },
+    { key: "consultation_reason",label: "Motivo" },
+    { key: "parent_city",        label: "Ciudad" },
+  ];
+  const missingFields = QUAL_FIELDS.filter(
+    (f) => qd[f.key] == null || qd[f.key] === ""
+  ).map((f) => f.label.toLowerCase());
 
   return (
     <div className="min-h-screen">
@@ -196,49 +218,60 @@ export default function LeadDetailPage() {
             </dl>
           </section>
 
-          <section className="bg-white border border-slate-200 rounded-lg p-4">
-            <h2 className="font-medium mb-3">Calificación</h2>
-            {!hasQualification ? (
-              <p className="text-sm text-slate-500">Sin datos aún.</p>
-            ) : (
-              <dl className="space-y-2 text-sm">
-                {qd.parent_name && (
-                  <div>
-                    <dt className="text-slate-500">Padre/Madre</dt>
-                    <dd>{String(qd.parent_name)}</dd>
+          <section className="bg-white border border-slate-200 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="font-medium">Calificación</h2>
+              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ring-1 ${badge.cls}`}>
+                {badge.label}
+              </span>
+            </div>
+
+            {/* Progress bar */}
+            <div>
+              <div className="flex justify-between text-xs text-slate-500 mb-1">
+                <span>Progreso</span>
+                <span>{scorePct}%</span>
+              </div>
+              <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${scoreBarColor}`}
+                  style={{ width: `${scorePct}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Data fields */}
+            <dl className="space-y-1.5 text-sm">
+              {QUAL_FIELDS.map((f) => {
+                const val = qd[f.key];
+                const display =
+                  f.key === "child_age" && val != null
+                    ? `${val} años`
+                    : val != null && val !== ""
+                    ? String(val)
+                    : null;
+                return (
+                  <div key={f.key} className="flex justify-between gap-2">
+                    <dt className="text-slate-500 shrink-0">{f.label}</dt>
+                    <dd className={display ? "text-right" : "text-slate-300 text-right"}>
+                      {display ?? "pendiente"}
+                    </dd>
                   </div>
-                )}
-                {qd.child_age != null && (
-                  <div>
-                    <dt className="text-slate-500">Edad del niño</dt>
-                    <dd>{String(qd.child_age)} años</dd>
-                  </div>
-                )}
-                {qd.consultation_reason && (
-                  <div>
-                    <dt className="text-slate-500">Motivo</dt>
-                    <dd>{String(qd.consultation_reason)}</dd>
-                  </div>
-                )}
-                {qd.parent_city && (
-                  <div>
-                    <dt className="text-slate-500">Ciudad</dt>
-                    <dd>{String(qd.parent_city)}</dd>
-                  </div>
-                )}
-                {qd.branch_suggested && (
-                  <div>
-                    <dt className="text-slate-500">Sucursal sugerida</dt>
-                    <dd>{String(qd.branch_suggested)}</dd>
-                  </div>
-                )}
-                {lead.qualification_score != null && (
-                  <div>
-                    <dt className="text-slate-500">Score</dt>
-                    <dd>{(Number(lead.qualification_score) * 100).toFixed(0)}%</dd>
-                  </div>
-                )}
-              </dl>
+                );
+              })}
+              {qd.branch_suggested && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-slate-500 shrink-0">Sucursal</dt>
+                  <dd className="text-right">{String(qd.branch_suggested)}</dd>
+                </div>
+              )}
+            </dl>
+
+            {/* Missing fields hint */}
+            {missingFields.length > 0 && (
+              <p className="text-xs text-slate-400">
+                Falta: {missingFields.join(", ")}
+              </p>
             )}
           </section>
 

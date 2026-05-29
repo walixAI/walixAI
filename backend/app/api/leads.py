@@ -34,6 +34,7 @@ class LeadListItem(BaseModel):
     source: LeadSource
     assigned_to: uuid.UUID | None
     contact_phone: str | None
+    qualification_score: float | None = None
     created_at: datetime
     updated_at: datetime
 
