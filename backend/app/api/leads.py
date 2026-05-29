@@ -33,6 +33,7 @@ class LeadListItem(BaseModel):
     sentiment: LeadSentiment
     source: LeadSource
     assigned_to: uuid.UUID | None
+    contact_phone: str | None
     created_at: datetime
     updated_at: datetime
 

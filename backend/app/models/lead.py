@@ -88,3 +88,4 @@ class Lead(Base):
     )
     qualification_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     qualification_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)

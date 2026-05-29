@@ -42,6 +42,7 @@ clínica de endocrinología pediátrica. Responde ÚNICAMENTE con JSON válido:
   "reason_qualifies": true si es talla baja/crecimiento lento/déficit hormonal, false si no, null si no se mencionó,
   "parent_name": nombre del padre/madre o null,
   "parent_city": ciudad mencionada o null,
+  "contact_phone": número de teléfono de contacto si el padre mencionó uno DIFERENTE al número de WhatsApp, de lo contrario null,
   "branch_suggested": "Monterrey" o "Santa Fe CDMX" o "Condesa CDMX" o "fuera_cobertura" o null,
   "qualification_status": "calificado" si tiene los 3 criterios, "no_calificado" si explícitamente no cumple, "incompleto" si falta info, "escalar" si hay urgencia médica,
   "qualification_score": float 0.0 a 1.0 según qué tan completa está la calificación,
@@ -137,6 +138,10 @@ async def qualify_lead(
         # Always sync lead.name from the extracted parent_name
         if result.get("parent_name"):
             lead.name = result["parent_name"]
+
+        # Capture alternative contact phone if provided
+        if result.get("contact_phone"):
+            lead.contact_phone = result["contact_phone"]
 
         lead.qualification_score = result.get("qualification_score")
 

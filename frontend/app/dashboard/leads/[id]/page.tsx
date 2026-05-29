@@ -163,6 +163,12 @@ export default function LeadDetailPage() {
                 <dt className="text-slate-500">Teléfono WhatsApp</dt>
                 <dd>{lead.wa_phone}</dd>
               </div>
+              {lead.contact_phone && (
+                <div>
+                  <dt className="text-slate-500">Teléfono de contacto</dt>
+                  <dd>{lead.contact_phone}</dd>
+                </div>
+              )}
               <div>
                 <dt className="text-slate-500">Status</dt>
                 <dd>{lead.status}</dd>

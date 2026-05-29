@@ -50,6 +50,7 @@ export interface LeadListItem {
   sentiment: LeadSentiment;
   source: LeadSource;
   assigned_to: string | null;
+  contact_phone: string | null;
   created_at: string;
   updated_at: string;
 }
