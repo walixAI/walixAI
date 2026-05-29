@@ -259,10 +259,10 @@ export default function LeadDetailPage() {
                   </div>
                 );
               })}
-              {qd.branch_suggested && (
+              {typeof qd.branch_suggested === "string" && qd.branch_suggested && (
                 <div className="flex justify-between gap-2">
                   <dt className="text-slate-500 shrink-0">Sucursal</dt>
-                  <dd className="text-right">{String(qd.branch_suggested)}</dd>
+                  <dd className="text-right">{qd.branch_suggested}</dd>
                 </div>
               )}
             </dl>
