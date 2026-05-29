@@ -128,9 +128,17 @@ def _find_lead(client: httpx.Client, token: str) -> dict | None:
         print(f"GET /api/leads falló ({resp.status_code}): {resp.text}")
         return None
     items = resp.json().get("items", [])
-    for lead in items:
-        if lead["wa_phone"].endswith(WA_PHONE[-10:]):
-            return lead
+    for item in items:
+        if item["wa_phone"].endswith(WA_PHONE[-10:]):
+            # Fetch full detail so qualification_data is included
+            detail_resp = client.get(
+                f"{BASE_URL}/api/leads/{item['id']}",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10.0,
+            )
+            if detail_resp.status_code == 200:
+                return detail_resp.json()
+            return item
     return None
 
 
