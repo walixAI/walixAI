@@ -69,6 +69,7 @@ Vas iterando en local hasta que el bot responda como quieres, sin gastar mensaje
 | `META_APP_SECRET` | firma HMAC-SHA256 de cada POST entrante de Meta | Meta → Settings → Basic → **App Secret** → Show. |
 | `APP_ENV` | `development` o `production` | En dev fuerza `DATABASE_PUBLIC_URL` y `echo=True` en SQLAlchemy. |
 | `SECRET_KEY` | firma JWT del login | En prod: `openssl rand -hex 32`. |
+| `OPENAI_API_KEY` | embeddings para RAG | platform.openai.com → API Keys. Solo necesario si se usa la KB (Sprint 2+). |
 | `FRONTEND_URL` | CORS | En prod = tu URL de Vercel. |
 
 ## Configurar WhatsApp Business API contra Railway
@@ -191,9 +192,61 @@ Vercel:  npm run build
 
 Ambos hacen build automáticamente al detectar el push. Si rompes algo, Railway/Vercel mantienen el último deploy bueno hasta que el nuevo pase build.
 
+## Sprint 2 — Setup (RAG + Calificación automática)
+
+### Variables de entorno adicionales
+
+Agrega en `backend/.env` y en Railway Variables:
+
+```
+OPENAI_API_KEY=sk-proj-...
+```
+
+### Pasos (una sola vez por entorno)
+
+```bash
+# 1. Aplicar migraciones nuevas (pgvector, knowledge_chunks, contact_phone, doctor role)
+cd backend
+.venv/bin/alembic upgrade head
+
+# 2. Indexar la knowledge base en pgvector
+.venv/bin/python scripts/ingest_kb.py
+# Output esperado:
+#   ✓ 00_INDEX.md: 3 chunks indexados
+#   ✓ 01_protocolo_calificacion.md: 12 chunks indexados
+#   ...
+#   Total: 7 documento(s) indexado(s), 98 chunks, estimado $0.0009 USD
+
+# 3. Verificar que el retrieval funciona
+.venv/bin/python scripts/test_rag.py
+# Debe mostrar fragmentos relevantes para las 5 queries de prueba
+
+# 4. Crear usuarios de prueba (asistente, doctor, IT) si no existen
+.venv/bin/python scripts/add_test_users.py
+```
+
+### Probar la calificación automática end-to-end
+
+Con el backend corriendo (`uvicorn app.main:app --reload --port 8000`):
+
+```bash
+.venv/bin/python scripts/test_qualification.py
+```
+
+Envía 4 mensajes al webhook local simulando a una mamá que llega por el anuncio. Al final muestra el lead creado con su `qualification_data` y `qualification_score`.
+
+### Re-indexar la KB desde el dashboard (producción)
+
+Llama a `POST /api/kb/reindex` con un token de usuario `owner` o `it`.
+Consulta el estado con `GET /api/kb/status`.
+
 ## Scripts útiles
 
 ```bash
-backend/scripts/seed.py          # crea tenant + 3 sucursales + 4 users (idempotente)
-backend/scripts/test_webhook.py  # POST firmado con HMAC contra localhost:8000
+backend/scripts/seed.py               # crea tenant + 3 sucursales + users (idempotente)
+backend/scripts/add_test_users.py     # agrega asistente/doctor/it a tenant existente
+backend/scripts/test_webhook.py       # un mensaje de prueba firmado contra localhost:8000
+backend/scripts/test_rag.py           # verifica retrieval híbrido con 5 queries
+backend/scripts/test_qualification.py # conversación completa de calificación end-to-end
+backend/scripts/ingest_kb.py          # indexa backend/scripts/walix_kb/*.md en pgvector
 ```
