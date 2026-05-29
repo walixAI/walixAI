@@ -160,7 +160,7 @@ export default function LeadDetailPage() {
                 <dd>{lead.name ?? "—"}</dd>
               </div>
               <div>
-                <dt className="text-slate-500">Teléfono</dt>
+                <dt className="text-slate-500">Teléfono WhatsApp</dt>
                 <dd>{lead.wa_phone}</dd>
               </div>
               <div>
@@ -172,12 +172,16 @@ export default function LeadDetailPage() {
                 <dd>{lead.sentiment}</dd>
               </div>
               <div>
-                <dt className="text-slate-500">Origen</dt>
-                <dd>{lead.source}</dd>
+                <dt className="text-slate-500">Asignado a</dt>
+                <dd>{lead.assigned_to_name ?? "Sin asignar"}</dd>
               </div>
               <div>
                 <dt className="text-slate-500">Manejado por</dt>
                 <dd>{conversation?.handled_by ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">Origen</dt>
+                <dd>{lead.source}</dd>
               </div>
               <div>
                 <dt className="text-slate-500">Creado</dt>
@@ -191,9 +195,44 @@ export default function LeadDetailPage() {
             {!hasQualification ? (
               <p className="text-sm text-slate-500">Sin datos aún.</p>
             ) : (
-              <pre className="text-xs bg-slate-50 p-2 rounded border border-slate-200 overflow-auto max-h-80">
-                {JSON.stringify(qd, null, 2)}
-              </pre>
+              <dl className="space-y-2 text-sm">
+                {qd.parent_name && (
+                  <div>
+                    <dt className="text-slate-500">Padre/Madre</dt>
+                    <dd>{String(qd.parent_name)}</dd>
+                  </div>
+                )}
+                {qd.child_age != null && (
+                  <div>
+                    <dt className="text-slate-500">Edad del niño</dt>
+                    <dd>{String(qd.child_age)} años</dd>
+                  </div>
+                )}
+                {qd.consultation_reason && (
+                  <div>
+                    <dt className="text-slate-500">Motivo</dt>
+                    <dd>{String(qd.consultation_reason)}</dd>
+                  </div>
+                )}
+                {qd.parent_city && (
+                  <div>
+                    <dt className="text-slate-500">Ciudad</dt>
+                    <dd>{String(qd.parent_city)}</dd>
+                  </div>
+                )}
+                {qd.branch_suggested && (
+                  <div>
+                    <dt className="text-slate-500">Sucursal sugerida</dt>
+                    <dd>{String(qd.branch_suggested)}</dd>
+                  </div>
+                )}
+                {lead.qualification_score != null && (
+                  <div>
+                    <dt className="text-slate-500">Score</dt>
+                    <dd>{(Number(lead.qualification_score) * 100).toFixed(0)}%</dd>
+                  </div>
+                )}
+              </dl>
             )}
           </section>
 

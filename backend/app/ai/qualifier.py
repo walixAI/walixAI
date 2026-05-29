@@ -134,8 +134,8 @@ async def qualify_lead(
                 qdata[field] = value
         lead.qualification_data = qdata
 
-        # Sync lead.name from parent_name if not yet set
-        if result.get("parent_name") and not lead.name:
+        # Always sync lead.name from the extracted parent_name
+        if result.get("parent_name"):
             lead.name = result["parent_name"]
 
         lead.qualification_score = result.get("qualification_score")

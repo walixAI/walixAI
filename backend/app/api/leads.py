@@ -20,7 +20,7 @@ from app.models.conversation import (
     MessageRole,
 )
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
-from app.models.user import User
+from app.models.user import User  # noqa: F401  (also used by get_current_user)
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -50,6 +50,8 @@ class LeadDetail(LeadListItem):
     branch_id: uuid.UUID
     tenant_id: uuid.UUID
     qualification_data: dict[str, Any]
+    qualification_score: float | None = None
+    assigned_to_name: str | None = None
 
 
 class MessageOut(BaseModel):
@@ -137,7 +139,11 @@ async def get_lead(
 ) -> LeadDetail:
     branch_id = _require_branch(current_user)
     lead = await _get_lead_in_branch(db, lead_id, branch_id)
-    return LeadDetail.model_validate(lead)
+    detail = LeadDetail.model_validate(lead)
+    if lead.assigned_to:
+        assignee = await db.get(User, lead.assigned_to)
+        detail.assigned_to_name = assignee.name if assignee else None
+    return detail
 
 
 @router.get("/{lead_id}/conversation", response_model=ConversationOut)

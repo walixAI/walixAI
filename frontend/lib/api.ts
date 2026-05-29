@@ -65,6 +65,8 @@ export interface LeadDetail extends LeadListItem {
   branch_id: string;
   tenant_id: string;
   qualification_data: Record<string, unknown>;
+  qualification_score: number | null;
+  assigned_to_name: string | null;
 }
 
 export interface MessageOut {
