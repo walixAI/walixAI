@@ -376,7 +376,8 @@ export default function Settings() {
 
   // The active branch: from user profile if set, else first of fetched list
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
-  const branchId = user?.branch_id ?? (selectedBranchId || branches[0]?.id ?? "");
+  const resolvedBranchId = selectedBranchId || (branches[0]?.id ?? "");
+  const branchId = user?.branch_id ?? resolvedBranchId;
 
   const { data: config, isLoading: configLoading } = useQuery({
     queryKey: ["meta-config", branchId],
