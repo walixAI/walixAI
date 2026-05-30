@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle, ChevronLeft } from "lucide-react";
 import { api } from "@/lib/api";
+import type { MessageOut } from "@/lib/api";
 import { toast } from "sonner";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,8 @@ import { EmptyState } from "@/components/walix/EmptyState";
 import { EmptyIllustration } from "@/components/walix/empty/EmptyIllustration";
 import { ConversationList } from "@/components/whatsapp/ConversationList";
 import { ChatHeader } from "@/components/whatsapp/ChatHeader";
-import { MessageList } from "@/components/whatsapp/MessageList";
+import { ConversationBanner } from "@/components/whatsapp/ConversationBanner";
+import { MessageList, type PendingMsg } from "@/components/whatsapp/MessageList";
 import { Composer } from "@/components/whatsapp/Composer";
 import { ContactSidePanel } from "@/components/whatsapp/ContactSidePanel";
 
@@ -22,7 +24,19 @@ export default function Whatsapp() {
   const [activeLeadId, setActiveLeadId] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
 
-  // Fetch all leads
+  // Reply composer state — controlled from here so we can preserve text on error
+  const [draft, setDraft] = useState("");
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const [pendingMessages, setPendingMessages] = useState<PendingMsg[]>([]);
+
+  // Reset composer state when switching leads
+  useEffect(() => {
+    setDraft("");
+    setReplyError(null);
+    setPendingMessages([]);
+  }, [activeLeadId]);
+
+  // Fetch all leads — 5 s refresh for real-time inbox
   const { data: leadsData, isLoading: leadsLoading } = useQuery({
     queryKey: ["leads", "whatsapp"],
     queryFn: () => api.listLeads({ all: true }),
@@ -41,19 +55,17 @@ export default function Whatsapp() {
       setSearchParams(next, { replace: true });
       return;
     }
-    if (!activeLeadId && leads.length) {
-      setActiveLeadId(leads[0].id);
-    }
+    if (!activeLeadId && leads.length) setActiveLeadId(leads[0].id);
   }, [leads, searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch active lead detail
+  // Active lead detail
   const { data: activeLead } = useQuery({
     queryKey: ["lead", activeLeadId],
     queryFn: () => api.getLead(activeLeadId!),
     enabled: !!activeLeadId,
   });
 
-  // Fetch conversation
+  // Conversation — 5 s refresh so asistente sees new messages in real time
   const { data: conversation, isLoading: convLoading } = useQuery({
     queryKey: ["conversation", activeLeadId],
     queryFn: () => api.getConversation(activeLeadId!),
@@ -62,26 +74,30 @@ export default function Whatsapp() {
   });
 
   const messages = conversation?.messages ?? [];
+  const isHuman = conversation?.current_handler === "human";
 
-  // Fetch assignees for active lead
+  // When a server refresh arrives, drop any pending msg already included
+  useEffect(() => {
+    if (!messages.length) return;
+    const serverIds = new Set(messages.map((m) => m.id));
+    setPendingMessages((prev) => prev.filter((p) => !serverIds.has(p.id)));
+  }, [messages]);
+
+  // Assignees
   const { data: assignees = [] } = useQuery({
     queryKey: ["assignees", activeLeadId],
     queryFn: () => api.getAssignees(activeLeadId!),
     enabled: !!activeLeadId,
   });
 
-  // Send message
-  const sendMutation = useMutation({
-    mutationFn: (text: string) => api.sendMessage(activeLeadId!, text),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["conversation", activeLeadId] });
-    },
-    onError: (e: any) => {
-      toast.error("Error al enviar", { description: e?.message ?? "Intenta de nuevo" });
-    },
-  });
+  // Resolve handler display name from assignees list
+  const handlerName = useMemo(() => {
+    if (!conversation?.handler_user_id) return "Asistente";
+    return assignees.find((a) => a.id === conversation.handler_user_id)?.name ?? "Asistente";
+  }, [conversation?.handler_user_id, assignees]);
 
-  // Handoff
+  // ── Mutations ──────────────────────────────────────────────────────────────
+
   const handoffMutation = useMutation({
     mutationFn: () => api.handoff(activeLeadId!),
     onSuccess: () => {
@@ -90,26 +106,23 @@ export default function Whatsapp() {
       qc.invalidateQueries({ queryKey: ["leads", "whatsapp"] });
       toast.success("Control tomado — modo humano activo");
     },
-    onError: (e: any) => {
-      toast.error("Error", { description: e?.message });
-    },
+    onError: (e: Error) => toast.error("Error", { description: e.message }),
   });
 
-  // Return to bot
   const returnToBotMutation = useMutation({
     mutationFn: () => api.returnToBot(activeLeadId!),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["lead", activeLeadId] });
       qc.invalidateQueries({ queryKey: ["conversation", activeLeadId] });
       qc.invalidateQueries({ queryKey: ["leads", "whatsapp"] });
+      setDraft("");
+      setReplyError(null);
+      setPendingMessages([]);
       toast.success("Devuelto al bot");
     },
-    onError: (e: any) => {
-      toast.error("Error", { description: e?.message });
-    },
+    onError: (e: Error) => toast.error("Error", { description: e.message }),
   });
 
-  // Assign
   const assignMutation = useMutation({
     mutationFn: (userId: string) => api.assignLead(activeLeadId!, userId),
     onSuccess: (updated) => {
@@ -117,10 +130,52 @@ export default function Whatsapp() {
       qc.invalidateQueries({ queryKey: ["leads", "whatsapp"] });
       toast.success("Asignado a " + (updated.assigned_to_name ?? "usuario"));
     },
-    onError: (e: any) => {
-      toast.error("Error al asignar", { description: e?.message });
+    onError: (e: Error) => toast.error("Error al asignar", { description: e.message }),
+  });
+
+  const replyMutation = useMutation({
+    mutationFn: (text: string) => api.reply(activeLeadId!, text),
+    onMutate: (text) => {
+      // Optimistic message — temp id prefixed so we can identify it
+      const tempId = `pending-${Date.now()}`;
+      const optimistic: PendingMsg = {
+        id: tempId,
+        role: "assistant",
+        content: text,
+        tokens_used: null,
+        latency_ms: null,
+        created_at: new Date().toISOString(),
+        sent_by_user_id: "pending",   // non-null → renders as human bubble
+        _status: "sending",
+      };
+      setPendingMessages((prev) => [...prev, optimistic]);
+      setReplyError(null);
+      return { tempId };
+    },
+    onSuccess: (_data, _vars, ctx) => {
+      setDraft("");
+      // Remove the optimistic msg — the 5 s refresh will load the real one
+      setPendingMessages((prev) => prev.filter((m) => m.id !== ctx?.tempId));
+      qc.invalidateQueries({ queryKey: ["conversation", activeLeadId] });
+    },
+    onError: (e: Error, _vars, ctx) => {
+      // Mark the optimistic message as errored; keep draft for re-send
+      setPendingMessages((prev) =>
+        prev.map((m) =>
+          m.id === ctx?.tempId
+            ? { ...m, _status: "error" as const, _errorText: e.message }
+            : m
+        )
+      );
+      setReplyError(e.message);
     },
   });
+
+  const handleSend = () => {
+    const text = draft.trim();
+    if (!text || replyMutation.isPending) return;
+    replyMutation.mutate(text);
+  };
 
   const activeLead$ = useMemo(
     () => leads.find((l) => l.id === activeLeadId) ?? null,
@@ -128,11 +183,8 @@ export default function Whatsapp() {
   );
 
   const loadingAction =
-    handoffMutation.isPending ||
-    returnToBotMutation.isPending ||
-    assignMutation.isPending;
+    handoffMutation.isPending || returnToBotMutation.isPending || assignMutation.isPending;
 
-  // Mobile layout
   const showList = !isMobile || !activeLeadId;
   const showChat = !isMobile || !!activeLeadId;
 
@@ -202,12 +254,37 @@ export default function Whatsapp() {
                       />
                     )}
 
-                    <MessageList messages={messages} loading={convLoading} />
+                    {/* Handoff status banner */}
+                    {conversation && (
+                      <ConversationBanner
+                        currentHandler={conversation.current_handler}
+                        handlerName={handlerName}
+                        onHandoff={() => handoffMutation.mutate()}
+                        onReturnToBot={() => returnToBotMutation.mutate()}
+                        loading={loadingAction}
+                      />
+                    )}
 
-                    <Composer
-                      onSend={(text) => sendMutation.mutate(text)}
-                      sending={sendMutation.isPending}
+                    <MessageList
+                      messages={messages}
+                      pendingMessages={pendingMessages}
+                      loading={convLoading}
                     />
+
+                    {/* Composer only visible when human has control */}
+                    {isHuman && (
+                      <Composer
+                        value={draft}
+                        onChange={(v) => {
+                          setDraft(v);
+                          if (replyError) setReplyError(null);
+                        }}
+                        onSend={handleSend}
+                        sending={replyMutation.isPending}
+                        sendError={replyError}
+                        placeholder={`Escribe tu mensaje a ${activeLead?.name ?? activeLead?.wa_phone ?? "el lead"}...`}
+                      />
+                    )}
                   </>
                 )}
               </div>

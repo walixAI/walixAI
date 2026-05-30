@@ -46,6 +46,13 @@ export interface MessageOut {
   tokens_used: number | null;
   latency_ms: number | null;
   created_at: string;
+  sent_by_user_id: string | null;
+}
+
+export interface ReplyResponse {
+  message_id: string;
+  sent_at: string;
+  status: string;
 }
 
 export interface ConversationOut {
@@ -148,6 +155,13 @@ export const api = {
     return request(`/api/leads/${leadId}/messages`, {
       method: "POST",
       body: JSON.stringify({ text }),
+    });
+  },
+
+  async reply(leadId: string, message: string): Promise<ReplyResponse> {
+    return request(`/api/leads/${leadId}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
     });
   },
 
