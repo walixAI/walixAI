@@ -74,6 +74,11 @@ class LeadDetail(LeadListItem):
     qualification_data: dict[str, Any]
     qualification_score: float | None = None
     assigned_to_name: str | None = None
+    handoff_at: datetime | None = None
+    handoff_by: uuid.UUID | None = None
+    meta_lead_id: str | None = None
+    meta_form_id: str | None = None
+    meta_ad_id: str | None = None
 
 
 class MessageOut(BaseModel):
@@ -83,6 +88,7 @@ class MessageOut(BaseModel):
     tokens_used: int | None
     latency_ms: int | None
     created_at: datetime
+    sent_by_user_id: uuid.UUID | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
