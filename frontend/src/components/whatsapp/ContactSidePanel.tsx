@@ -20,10 +20,9 @@ const SENTIMENT_VARIANT: Record<string, "neutral" | "info" | "danger" | "warning
 
 interface Props {
   lead: LeadDetail;
-  isHuman?: boolean;
 }
 
-export function ContactSidePanel({ lead, isHuman = false }: Props) {
+export function ContactSidePanel({ lead }: Props) {
   const qData = lead.qualification_data as Record<string, unknown>;
 
   const qualFields = [
@@ -96,15 +95,13 @@ export function ContactSidePanel({ lead, isHuman = false }: Props) {
             </section>
           )}
 
-          {/* Asignacion — solo visible en modo humano */}
-          {isHuman && (
-            <section>
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                Asignacion
-              </h3>
-              <AssignmentDropdown lead={lead} />
-            </section>
-          )}
+          {/* Asignacion */}
+          <section>
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+              Asignacion
+            </h3>
+            <AssignmentDropdown lead={lead} />
+          </section>
 
           {/* Info del lead */}
           <section>

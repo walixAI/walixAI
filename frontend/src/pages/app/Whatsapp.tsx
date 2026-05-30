@@ -290,7 +290,7 @@ export default function Whatsapp() {
               </div>
 
               {activeLead && panelOpen && !isMobile && (
-                <ContactSidePanel lead={activeLead} isHuman={isHuman} />
+                <ContactSidePanel lead={activeLead} />
               )}
             </main>
           )}
