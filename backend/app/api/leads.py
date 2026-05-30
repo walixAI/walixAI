@@ -23,6 +23,7 @@ from app.models.conversation import (
     Message,
     MessageRole,
 )
+from app.core.config import settings
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.tenant import Branch
 from app.models.user import User  # noqa: F401  (also used by get_current_user)
@@ -595,7 +596,7 @@ async def assign_lead(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LeadDetail:
-    """Assigns a lead to a user (typically the doctor on duty)."""
+    """Assigns a lead to a user (doctor or asesor) and notifies them via WhatsApp."""
     branch_id = _require_branch(current_user)
     lead = await _get_lead_in_branch(db, lead_id, branch_id)
 
@@ -606,6 +607,7 @@ async def assign_lead(
             detail="Usuario no encontrado en esta sucursal",
         )
 
+    old_assigned_to = lead.assigned_to
     lead.assigned_to = body.user_id
 
     db.add(LeadActivity(
@@ -613,11 +615,60 @@ async def assign_lead(
         tenant_id=lead.tenant_id,
         actor_id=current_user.id,
         activity_type=ActivityType.ASSIGN,
-        payload={"assigned_to_user_id": str(body.user_id), "assigned_to_name": assignee.name},
+        payload={
+            "from": str(old_assigned_to) if old_assigned_to else None,
+            "to": str(body.user_id),
+            "assigned_to_name": assignee.name,
+        },
     ))
 
     await db.commit()
     await db.refresh(lead)
+
+    # Notify the assignee via WhatsApp if they have a wa_phone configured.
+    if assignee.wa_phone:
+        branch = await db.get(Branch, lead.branch_id)
+        if branch and branch.wa_phone_number_id and branch.wa_token:
+            qdata = lead.qualification_data or {}
+            parent_name = qdata.get("parent_name") or lead.name or "—"
+            child_age = qdata.get("child_age")
+            age_str = f"{child_age} años" if child_age is not None else "—"
+            consultation_reason = qdata.get("consultation_reason") or "—"
+            parent_city = qdata.get("parent_city") or "—"
+            score = lead.qualification_score
+            score_str = f"{score * 100:.0f}%" if score is not None else "—"
+
+            wa_message = (
+                f"🩺 Lead asignado — Walix\n\n"
+                f"Hola {assignee.name}, tienes un nuevo lead asignado:\n\n"
+                f"Nombre: {parent_name}\n"
+                f"Edad del niño: {age_str}\n"
+                f"Motivo: {consultation_reason}\n"
+                f"Ciudad: {parent_city}\n"
+                f"Calificación: {score_str}\n\n"
+                f"Conversación completa:\n"
+                f"{settings.FRONTEND_URL}/dashboard/leads/{lead.id}"
+            )
+            try:
+                await _whatsapp.send_text_message(
+                    to_phone=assignee.wa_phone,
+                    message=wa_message,
+                    phone_number_id=branch.wa_phone_number_id,
+                    token=branch.wa_token,
+                )
+            except Exception:
+                logger.exception(
+                    "assign_lead: WA notification failed for user %s", assignee.id
+                )
+        else:
+            logger.warning(
+                "assign_lead: branch %s has no WA credentials — skipping notification",
+                lead.branch_id,
+            )
+    else:
+        logger.info(
+            "assign_lead: user %s has no wa_phone — skipping WA notification", assignee.id
+        )
 
     detail = LeadDetail.model_validate(lead)
     detail.assigned_to_name = assignee.name
