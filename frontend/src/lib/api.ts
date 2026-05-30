@@ -78,6 +78,21 @@ export interface AgentOut {
   wa_phone: string | null;
 }
 
+export interface MetaConfigOut {
+  page_id: string;
+  form_ids: string[];
+  field_mapping: Record<string, string>;
+  is_active: boolean;
+  verify_token: string;
+}
+
+export interface MetaConfigIn {
+  page_id: string;
+  page_access_token: string;
+  form_ids: string[];
+  field_mapping: Record<string, string>;
+}
+
 export interface WalixUser {
   id: string;
   name: string;
@@ -187,6 +202,21 @@ export const api = {
 
   async getBranchAgents(branchId: string): Promise<AgentOut[]> {
     return request(`/api/branches/${branchId}/agents`);
+  },
+
+  async getMetaConfig(branchId: string): Promise<MetaConfigOut | null> {
+    return request(`/api/branches/${branchId}/meta-config`);
+  },
+
+  async saveMetaConfig(branchId: string, data: MetaConfigIn): Promise<MetaConfigOut> {
+    return request(`/api/branches/${branchId}/meta-config`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async deleteMetaConfig(branchId: string): Promise<void> {
+    return request(`/api/branches/${branchId}/meta-config`, { method: "DELETE" });
   },
 
   async assignLead(leadId: string, userId: string): Promise<LeadDetail> {

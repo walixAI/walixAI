@@ -19,6 +19,7 @@ import NotFound from "@/pages/NotFound";
 // Lazy: heavy pages
 const Dashboard = lazy(() => import("@/pages/app/Dashboard"));
 const Whatsapp = lazy(() => import("@/pages/app/Whatsapp"));
+const SettingsPage = lazy(() => import("@/pages/app/Settings"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -82,17 +83,7 @@ const AppRoutes = () => {
                 />
               }
             />
-            <Route
-              path="/settings"
-              element={
-                <Stub
-                  icon={Settings}
-                  title="Configuracion"
-                  description="Configuracion de cuenta y agentes proximamente."
-                  badge="Proximo"
-                />
-              }
-            />
+            <Route path="/settings" element={<SettingsPage />} />
             <Route
               path="/pipeline"
               element={

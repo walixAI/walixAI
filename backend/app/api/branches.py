@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -6,8 +7,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.lead import Lead, LeadStatus
+from app.models.meta_ads import MetaLeadConfig
 from app.models.tenant import Branch
 from app.models.user import User, UserRole
 
@@ -89,3 +92,123 @@ async def list_branch_agents(
 
     agents.sort(key=lambda a: (role_order.get(UserRole(a.role), 9), a.active_leads))
     return agents
+
+
+# ── Meta Lead Ads config ───────────────────────────────────────────────────────
+
+_META_ROLES = (UserRole.OWNER, UserRole.IT)
+
+_DEFAULT_FIELD_MAPPING: dict[str, str] = {
+    "full_name": "name",
+    "phone_number": "wa_phone",
+    "city": "parent_city",
+}
+
+
+class MetaConfigIn(BaseModel):
+    page_id: str
+    page_access_token: str
+    form_ids: list[str] = []
+    field_mapping: dict[str, Any] = _DEFAULT_FIELD_MAPPING
+
+
+class MetaConfigOut(BaseModel):
+    page_id: str
+    form_ids: list[str]
+    field_mapping: dict[str, Any]
+    is_active: bool
+    verify_token: str
+
+
+async def _require_meta_access(user: User, branch_id: uuid.UUID, db: AsyncSession) -> Branch:
+    branch = await db.get(Branch, branch_id)
+    if not branch or branch.tenant_id != user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sucursal no encontrada")
+    if user.role not in _META_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo owner o IT pueden gestionar esta configuracion")
+    return branch
+
+
+@router.get("/{branch_id}/meta-config", response_model=MetaConfigOut | None)
+async def get_meta_config(
+    branch_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MetaConfigOut | None:
+    await _require_meta_access(current_user, branch_id, db)
+    result = await db.execute(
+        select(MetaLeadConfig).where(
+            MetaLeadConfig.branch_id == branch_id,
+            MetaLeadConfig.is_active.is_(True),
+        )
+    )
+    cfg = result.scalars().first()
+    if not cfg:
+        return None
+    return MetaConfigOut(
+        page_id=cfg.page_id,
+        form_ids=cfg.form_ids or [],
+        field_mapping=cfg.field_mapping or _DEFAULT_FIELD_MAPPING,
+        is_active=cfg.is_active,
+        verify_token=settings.META_VERIFY_TOKEN,
+    )
+
+
+@router.post("/{branch_id}/meta-config", response_model=MetaConfigOut)
+async def save_meta_config(
+    branch_id: uuid.UUID,
+    body: MetaConfigIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MetaConfigOut:
+    branch = await _require_meta_access(current_user, branch_id, db)
+
+    result = await db.execute(
+        select(MetaLeadConfig).where(MetaLeadConfig.branch_id == branch_id)
+    )
+    cfg = result.scalars().first()
+
+    if cfg:
+        cfg.page_id = body.page_id
+        cfg.page_access_token = body.page_access_token  # stored as-is (same as wa_token)
+        cfg.form_ids = body.form_ids
+        cfg.field_mapping = body.field_mapping
+        cfg.is_active = True
+    else:
+        cfg = MetaLeadConfig(
+            id=uuid.uuid4(),
+            branch_id=branch_id,
+            tenant_id=branch.tenant_id,
+            page_id=body.page_id,
+            page_access_token=body.page_access_token,
+            form_ids=body.form_ids,
+            field_mapping=body.field_mapping,
+            is_active=True,
+        )
+        db.add(cfg)
+
+    await db.commit()
+
+    return MetaConfigOut(
+        page_id=cfg.page_id,
+        form_ids=cfg.form_ids or [],
+        field_mapping=cfg.field_mapping or _DEFAULT_FIELD_MAPPING,
+        is_active=cfg.is_active,
+        verify_token=settings.META_VERIFY_TOKEN,
+    )
+
+
+@router.delete("/{branch_id}/meta-config", status_code=204)
+async def delete_meta_config(
+    branch_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await _require_meta_access(current_user, branch_id, db)
+    result = await db.execute(
+        select(MetaLeadConfig).where(MetaLeadConfig.branch_id == branch_id)
+    )
+    cfg = result.scalars().first()
+    if cfg:
+        cfg.is_active = False
+        await db.commit()
