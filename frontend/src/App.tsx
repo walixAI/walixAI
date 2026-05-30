@@ -1,0 +1,129 @@
+import { lazy, Suspense } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { Toaster } from "@/components/ui/toaster";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { useInitAuth } from "@/hooks/useAuth";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
+import { ErrorBoundary } from "@/components/walix/ErrorBoundary";
+import { LoadingSpinner } from "@/components/walix/LoadingSpinner";
+import { Stub } from "@/pages/app/Stub";
+import { Users, BarChart3, Settings } from "lucide-react";
+
+// Eager: critical
+import Login from "@/pages/Login";
+import NotFound from "@/pages/NotFound";
+
+// Lazy: heavy pages
+const Dashboard = lazy(() => import("@/pages/app/Dashboard"));
+const Whatsapp = lazy(() => import("@/pages/app/Whatsapp"));
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      staleTime: 30_000,
+    },
+  },
+});
+
+function RouteFallback() {
+  return (
+    <div className="min-h-[40vh] flex items-center justify-center" role="status" aria-label="Cargando">
+      <LoadingSpinner />
+    </div>
+  );
+}
+
+const AppRoutes = () => {
+  useInitAuth();
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          {/* Public */}
+          <Route path="/login" element={<Login />} />
+
+          {/* Root redirect */}
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+
+          {/* Protected app layout */}
+          <Route
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/whatsapp" element={<Whatsapp />} />
+            <Route
+              path="/contacts"
+              element={
+                <Stub
+                  icon={Users}
+                  title="Contactos"
+                  description="Gestion de contactos proximamente."
+                  badge="Proximo"
+                />
+              }
+            />
+            <Route
+              path="/reports"
+              element={
+                <Stub
+                  icon={BarChart3}
+                  title="Reportes"
+                  description="Reportes y analiticas proximamente."
+                  badge="Proximo"
+                />
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <Stub
+                  icon={Settings}
+                  title="Configuracion"
+                  description="Configuracion de cuenta y agentes proximamente."
+                  badge="Proximo"
+                />
+              }
+            />
+            <Route
+              path="/pipeline"
+              element={
+                <Stub
+                  icon={BarChart3}
+                  title="Pipeline"
+                  description="Pipeline de ventas proximamente."
+                  badge="Proximo"
+                />
+              }
+            />
+          </Route>
+
+          {/* 404 */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+    </ErrorBoundary>
+  );
+};
+
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
+    </TooltipProvider>
+  </QueryClientProvider>
+);
+
+export default App;

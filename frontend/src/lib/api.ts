@@ -1,0 +1,171 @@
+// ── Walix API client ── connects to FastAPI backend ──────────────────────────
+
+const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8000";
+const TOKEN_KEY = "walix_token";
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+export function setToken(t: string): void {
+  localStorage.setItem(TOKEN_KEY, t);
+}
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export type LeadStatus = "nuevo" | "en_calificacion" | "calificado" | "escalado" | "perdido";
+export type Sentiment = "neutral" | "interesado" | "urgente" | "negativo";
+
+export interface LeadListItem {
+  id: string;
+  wa_phone: string;
+  name: string | null;
+  status: LeadStatus;
+  sentiment: Sentiment;
+  source: string;
+  assigned_to: string | null;
+  contact_phone: string | null;
+  qualification_score: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LeadDetail extends LeadListItem {
+  branch_id: string;
+  tenant_id: string;
+  qualification_data: Record<string, unknown>;
+  assigned_to_name: string | null;
+}
+
+export interface MessageOut {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  tokens_used: number | null;
+  latency_ms: number | null;
+  created_at: string;
+}
+
+export interface ConversationOut {
+  conversation_id: string | null;
+  status: "active" | "handoff" | "closed" | null;
+  handled_by: "bot" | "human" | null;
+  messages: MessageOut[];
+}
+
+export interface UserBrief {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+}
+
+export interface WalixUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  branch_id: string | null;
+  tenant_id: string;
+  is_active?: boolean;
+}
+
+export interface LeadListResponse {
+  items: LeadListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// ── HTTP core ─────────────────────────────────────────────────────────────────
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (init.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+
+  if (res.status === 401) {
+    clearToken();
+    window.location.replace("/login");
+    throw new Error("Unauthorized");
+  }
+  if (!res.ok) {
+    let detail: string | undefined;
+    try {
+      const d = await res.json();
+      detail = typeof d.detail === "string" ? d.detail : undefined;
+    } catch {
+      // ignore parse error
+    }
+    throw new Error(detail ?? `HTTP ${res.status}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+// ── API object ────────────────────────────────────────────────────────────────
+
+export const api = {
+  // Auth
+  async login(email: string, password: string): Promise<{ access_token: string; user: WalixUser }> {
+    return request("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+  },
+
+  async me(): Promise<WalixUser> {
+    return request("/api/auth/me");
+  },
+
+  // Leads
+  async listLeads(params?: { all?: boolean; status?: LeadStatus; date?: string }): Promise<LeadListResponse> {
+    const qs = new URLSearchParams();
+    if (params?.all != null) qs.set("all", String(params.all));
+    if (params?.status) qs.set("status", params.status);
+    if (params?.date) qs.set("date", params.date);
+    const q = qs.toString() ? `?${qs}` : "";
+    return request(`/api/leads${q}`);
+  },
+
+  async getLead(id: string): Promise<LeadDetail> {
+    return request(`/api/leads/${id}`);
+  },
+
+  async getConversation(leadId: string): Promise<ConversationOut> {
+    return request(`/api/leads/${leadId}/conversation`);
+  },
+
+  async sendMessage(leadId: string, text: string): Promise<MessageOut> {
+    return request(`/api/leads/${leadId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+  },
+
+  async handoff(leadId: string): Promise<LeadDetail> {
+    return request(`/api/leads/${leadId}/handoff`, { method: "POST" });
+  },
+
+  async returnToBot(leadId: string): Promise<LeadDetail> {
+    return request(`/api/leads/${leadId}/return-to-bot`, { method: "POST" });
+  },
+
+  async getAssignees(leadId: string): Promise<UserBrief[]> {
+    return request(`/api/leads/${leadId}/assignees`);
+  },
+
+  async assignLead(leadId: string, userId: string): Promise<LeadDetail> {
+    return request(`/api/leads/${leadId}/assign`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    });
+  },
+};

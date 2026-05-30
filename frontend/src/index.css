@@ -1,0 +1,146 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Phone input internal styles (overrides react-phone-number-input defaults) */
+.wx-phone-input .PhoneInputInput {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+}
+.wx-phone-input .PhoneInputInput::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+.wx-phone-input .PhoneInputCountry {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-right: 0.25rem;
+}
+.wx-phone-input .PhoneInputCountrySelect {
+  background: transparent;
+  color: hsl(var(--foreground));
+}
+
+/* Walix.ai design system. All colors HSL. */
+
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 215 28% 17%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 28% 17%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 28% 17%;
+
+    --primary: 239 84% 60%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 234 89% 74%;
+    --primary-deep: 244 75% 25%;
+
+    --secondary: 217 33% 96%;
+    --secondary-foreground: 215 28% 17%;
+
+    --accent: 189 94% 43%;
+    --accent-foreground: 0 0% 100%;
+    --accent-soft: 187 92% 94%;
+
+    --muted: 215 28% 95%;
+    --muted-foreground: 215 16% 47%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --danger: 0 84% 60%;
+    --danger-foreground: 0 0% 100%;
+    --info: 217 91% 60%;
+    --info-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 215 25% 90%;
+    --input: 215 25% 90%;
+    --ring: 239 84% 60%;
+
+    --radius: 0.75rem;
+
+    --gradient-brand: linear-gradient(135deg, hsl(239 84% 60%), hsl(189 94% 43%));
+    --gradient-hero: linear-gradient(135deg, hsl(244 75% 18%), hsl(239 84% 35%));
+    --gradient-soft: linear-gradient(180deg, hsl(210 40% 98%), hsl(217 33% 96%));
+
+    --shadow-sm: 0 1px 2px 0 hsl(215 28% 17% / 0.05);
+    --shadow-md: 0 4px 12px -2px hsl(215 28% 17% / 0.08);
+    --shadow-glow: 0 8px 32px -8px hsl(239 84% 60% / 0.35);
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 215 25% 27%;
+    --sidebar-primary: 239 84% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 28% 95%;
+    --sidebar-accent-foreground: 239 84% 60%;
+    --sidebar-border: 215 25% 92%;
+    --sidebar-ring: 239 84% 60%;
+  }
+
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 239 84% 67%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --accent: 189 94% 50%;
+    --accent-foreground: 222 47% 6%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --destructive: 0 63% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 239 84% 67%;
+    --sidebar-background: 222 47% 8%;
+    --sidebar-foreground: 210 40% 90%;
+    --sidebar-primary: 239 84% 67%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 217 33% 14%;
+    --sidebar-accent-foreground: 239 84% 78%;
+    --sidebar-border: 217 33% 14%;
+    --sidebar-ring: 239 84% 67%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  .bg-gradient-brand { background-image: var(--gradient-brand); }
+  .bg-gradient-hero { background-image: var(--gradient-hero); }
+  .bg-gradient-soft { background-image: var(--gradient-soft); }
+  .shadow-card { box-shadow: var(--shadow-sm); }
+  .shadow-card-hover { box-shadow: var(--shadow-md); }
+  .shadow-glow { box-shadow: var(--shadow-glow); }
+  .text-gradient-brand {
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
