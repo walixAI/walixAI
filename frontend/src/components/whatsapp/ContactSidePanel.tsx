@@ -2,6 +2,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatusBadge } from "./StatusBadge";
 import type { LeadDetail } from "@/lib/api";
 import { WBadge } from "@/components/walix/Badge";
+import { AssignmentDropdown } from "./AssignmentDropdown";
 
 const SENTIMENT_LABELS: Record<string, string> = {
   neutral: "Neutral",
@@ -19,9 +20,10 @@ const SENTIMENT_VARIANT: Record<string, "neutral" | "info" | "danger" | "warning
 
 interface Props {
   lead: LeadDetail;
+  isHuman?: boolean;
 }
 
-export function ContactSidePanel({ lead }: Props) {
+export function ContactSidePanel({ lead, isHuman = false }: Props) {
   const qData = lead.qualification_data as Record<string, unknown>;
 
   const qualFields = [
@@ -91,6 +93,16 @@ export function ContactSidePanel({ lead }: Props) {
                     </div>
                   ))}
               </div>
+            </section>
+          )}
+
+          {/* Asignacion — solo visible en modo humano */}
+          {isHuman && (
+            <section>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                Asignacion
+              </h3>
+              <AssignmentDropdown lead={lead} />
             </section>
           )}
 

@@ -70,6 +70,14 @@ export interface UserBrief {
   role: string;
 }
 
+export interface AgentOut {
+  id: string;
+  name: string;
+  role: string;
+  active_leads: number;
+  wa_phone: string | null;
+}
+
 export interface WalixUser {
   id: string;
   name: string;
@@ -175,6 +183,10 @@ export const api = {
 
   async getAssignees(leadId: string): Promise<UserBrief[]> {
     return request(`/api/leads/${leadId}/assignees`);
+  },
+
+  async getBranchAgents(branchId: string): Promise<AgentOut[]> {
+    return request(`/api/branches/${branchId}/agents`);
   },
 
   async assignLead(leadId: string, userId: string): Promise<LeadDetail> {
