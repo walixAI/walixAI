@@ -188,4 +188,10 @@ export const api = {
 
   returnToBot: (id: string) =>
     request<LeadDetail>(`/api/leads/${id}/return-to-bot`, { method: "POST" }),
+
+  sendMessage: (id: string, text: string) =>
+    request<MessageOut>(`/api/leads/${id}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
 };

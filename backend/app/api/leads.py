@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -6,7 +7,7 @@ from zoneinfo import ZoneInfo
 MX_TZ = ZoneInfo("America/Mexico_City")
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +21,12 @@ from app.models.conversation import (
     MessageRole,
 )
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
+from app.models.tenant import Branch
 from app.models.user import User  # noqa: F401  (also used by get_current_user)
+from app.services.whatsapp import WhatsAppService
+
+logger = logging.getLogger(__name__)
+_whatsapp = WhatsAppService()
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -77,6 +83,17 @@ class ConversationOut(BaseModel):
 class LeadStatusUpdate(BaseModel):
     status: LeadStatus
     note: str | None = None
+
+
+class SendMessageBody(BaseModel):
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("El mensaje no puede estar vacío")
+        return v
 
 
 def _require_branch(user: User) -> uuid.UUID:
@@ -245,6 +262,59 @@ async def return_to_bot(
     await db.commit()
     await db.refresh(lead)
     return LeadDetail.model_validate(lead)
+
+
+@router.post("/{lead_id}/messages", response_model=MessageOut)
+async def send_message(
+    lead_id: uuid.UUID,
+    body: SendMessageBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MessageOut:
+    """Send a message from the asistente through the clinic's WhatsApp number."""
+    branch_id = _require_branch(current_user)
+    lead = await _get_lead_in_branch(db, lead_id, branch_id)
+
+    conv_result = await db.execute(
+        select(Conversation)
+        .where(
+            Conversation.lead_id == lead_id,
+            Conversation.status != ConversationStatus.CLOSED,
+        )
+        .order_by(Conversation.started_at.desc())
+    )
+    conversation = conv_result.scalars().first()
+    if conversation is None or conversation.handled_by != ConversationHandler.HUMAN:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La conversación no está bajo control humano",
+        )
+
+    msg = Message(
+        conversation_id=conversation.id,
+        role=MessageRole.ASSISTANT,
+        content=body.text.strip(),
+    )
+    db.add(msg)
+    await db.flush()
+
+    branch = await db.get(Branch, lead.branch_id)
+    if branch and branch.wa_phone_number_id and branch.wa_token:
+        try:
+            await _whatsapp.send_text_message(
+                to_phone=lead.wa_phone,
+                message=body.text.strip(),
+                phone_number_id=branch.wa_phone_number_id,
+                token=branch.wa_token,
+            )
+        except Exception:
+            logger.exception("send_message: WA delivery failed for lead %s", lead_id)
+    else:
+        logger.warning("send_message: branch %s has no WA credentials", lead.branch_id)
+
+    await db.commit()
+    await db.refresh(msg)
+    return MessageOut.model_validate(msg)
 
 
 @router.post("/{lead_id}/handoff", response_model=LeadDetail)

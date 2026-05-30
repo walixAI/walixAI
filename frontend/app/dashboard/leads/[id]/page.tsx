@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -55,6 +55,9 @@ export default function LeadDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -81,6 +84,32 @@ export default function LeadDetailPage() {
     const interval = setInterval(load, 5_000);
     return () => clearInterval(interval);
   }, [router, load]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [conversation?.messages]);
+
+  async function sendMessage() {
+    if (!draft.trim() || sending) return;
+    setSending(true);
+    setError(null);
+    try {
+      await api.sendMessage(id, draft.trim());
+      setDraft("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al enviar mensaje");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
 
   async function takeOver() {
     setBusy(true);
@@ -308,8 +337,13 @@ export default function LeadDetailPage() {
         </aside>
 
         <section className="lg:col-span-2 bg-white border border-slate-200 rounded-lg flex flex-col h-[70vh]">
-          <div className="px-4 py-3 border-b border-slate-200 font-medium">
-            Conversación
+          <div className="px-4 py-3 border-b border-slate-200 font-medium flex items-center justify-between">
+            <span>Conversación</span>
+            {isHuman && (
+              <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                Control manual
+              </span>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {messages.length === 0 ? (
@@ -319,7 +353,29 @@ export default function LeadDetailPage() {
             ) : (
               messages.map((m) => <MessageBubble key={m.id} message={m} />)
             )}
+            <div ref={messagesEndRef} />
           </div>
+
+          {isHuman && (
+            <div className="border-t border-slate-200 p-3 flex gap-2 items-end">
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Escribe un mensaje… (Enter para enviar, Shift+Enter para nueva línea)"
+                rows={2}
+                disabled={sending}
+                className="flex-1 resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-50"
+              />
+              <button
+                onClick={sendMessage}
+                disabled={sending || !draft.trim()}
+                className="shrink-0 bg-amber-500 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-amber-600 disabled:opacity-40 transition"
+              >
+                {sending ? "…" : "Enviar"}
+              </button>
+            </div>
+          )}
         </section>
       </main>
     </div>
