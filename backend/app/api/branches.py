@@ -17,6 +17,28 @@ from app.models.user import User, UserRole
 router = APIRouter(prefix="/branches", tags=["branches"])
 
 _ACTIVE_STATUSES = (LeadStatus.CALIFICADO, LeadStatus.EN_CALIFICACION)
+
+
+class BranchOut(BaseModel):
+    id: uuid.UUID
+    name: str
+
+
+@router.get("", response_model=list[BranchOut])
+async def list_branches(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[BranchOut]:
+    """Returns all branches the user can access (their own branch, or all in the tenant for owner/IT)."""
+    if current_user.role in (UserRole.OWNER, UserRole.IT):
+        rows = await db.execute(
+            select(Branch).where(Branch.tenant_id == current_user.tenant_id).order_by(Branch.name)
+        )
+    elif current_user.branch_id:
+        rows = await db.execute(select(Branch).where(Branch.id == current_user.branch_id))
+    else:
+        return []
+    return [BranchOut(id=b.id, name=b.name) for b in rows.scalars().all()]
 _AGENT_ROLES = (UserRole.DOCTOR, UserRole.ASESOR, UserRole.GERENTE)
 
 

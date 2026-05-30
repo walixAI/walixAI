@@ -70,6 +70,11 @@ export interface UserBrief {
   role: string;
 }
 
+export interface BranchOut {
+  id: string;
+  name: string;
+}
+
 export interface AgentOut {
   id: string;
   name: string;
@@ -198,6 +203,10 @@ export const api = {
 
   async getAssignees(leadId: string): Promise<UserBrief[]> {
     return request(`/api/leads/${leadId}/assignees`);
+  },
+
+  async listBranches(): Promise<BranchOut[]> {
+    return request("/api/branches");
   },
 
   async getBranchAgents(branchId: string): Promise<AgentOut[]> {

@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8000";
@@ -363,17 +364,28 @@ function ConnectedCard({
 
 export default function Settings() {
   const { user } = useAuth();
-  const branchId = user?.branch_id ?? "";
   const canManage = user?.role === "owner" || user?.role === "it";
+  const needsBranchSelect = canManage && !user?.branch_id;
 
-  const { data: config, isLoading } = useQuery({
+  // For owner/IT with no branch_id: fetch all branches they can manage
+  const { data: branches = [], isLoading: branchesLoading } = useQuery({
+    queryKey: ["branches"],
+    queryFn: () => api.listBranches(),
+    enabled: needsBranchSelect,
+  });
+
+  // The active branch: from user profile if set, else first of fetched list
+  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const branchId = user?.branch_id ?? selectedBranchId || branches[0]?.id ?? "";
+
+  const { data: config, isLoading: configLoading } = useQuery({
     queryKey: ["meta-config", branchId],
     queryFn: () => api.getMetaConfig(branchId),
     enabled: !!branchId && canManage,
   });
 
   const [editing, setEditing] = useState(false);
-
+  const isLoading = branchesLoading || configLoading;
   const isConnected = !!config && config.is_active;
 
   return (
@@ -410,11 +422,33 @@ export default function Settings() {
           </span>
         </div>
 
+        {/* Branch selector — shown when owner/IT manages multiple branches */}
+        {needsBranchSelect && branches.length > 1 && (
+          <div className="space-y-1.5">
+            <Label className="text-xs">Sucursal</Label>
+            <Select
+              value={branchId}
+              onValueChange={(v) => { setSelectedBranchId(v); setEditing(false); }}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="Selecciona una sucursal..." />
+              </SelectTrigger>
+              <SelectContent>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id} className="text-xs">{b.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         {/* Body */}
         {!canManage ? (
           <p className="text-xs text-muted-foreground">
             Solo el owner o el equipo de IT puede gestionar esta integración.
           </p>
+        ) : !branchId ? (
+          <p className="text-xs text-muted-foreground">Selecciona una sucursal para continuar.</p>
         ) : isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
             <Loader2 className="h-4 w-4 animate-spin" />
