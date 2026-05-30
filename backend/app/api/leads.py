@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
+from app.models.activity import ActivityType, LeadActivity
 from app.models.conversation import (
     Conversation,
     ConversationHandler,
@@ -30,6 +31,13 @@ _whatsapp = WhatsAppService()
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
+_RETURN_TO_BOT_MESSAGE = (
+    "Ahora te atenderá nuestro asistente Wali nuevamente. "
+    "Si necesitas hablar con nosotros directamente, escribe 'asistente' en cualquier momento."
+)
+
+
+# ── Pydantic schemas ───────────────────────────────────────────────────────────
 
 class LeadListItem(BaseModel):
     id: uuid.UUID
@@ -81,6 +89,11 @@ class ConversationOut(BaseModel):
     messages: list[MessageOut]
 
 
+class LeadWithConversation(LeadDetail):
+    """Extended response that embeds conversation state — used by handoff endpoints."""
+    conversation: ConversationOut | None = None
+
+
 class LeadStatusUpdate(BaseModel):
     status: LeadStatus
     note: str | None = None
@@ -110,6 +123,8 @@ class UserBrief(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
 def _require_branch(user: User) -> uuid.UUID:
     if user.branch_id is None:
         raise HTTPException(
@@ -127,6 +142,40 @@ async def _get_lead_in_branch(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
     return lead
 
+
+async def _get_active_conversation(
+    db: AsyncSession, lead_id: uuid.UUID
+) -> Conversation | None:
+    result = await db.execute(
+        select(Conversation)
+        .where(
+            Conversation.lead_id == lead_id,
+            Conversation.status != ConversationStatus.CLOSED,
+        )
+        .order_by(Conversation.started_at.desc())
+    )
+    return result.scalars().first()
+
+
+async def _build_conversation_out(
+    db: AsyncSession, conversation: Conversation
+) -> ConversationOut:
+    msg_result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation.id)
+        .order_by(Message.created_at.asc())
+    )
+    messages = [MessageOut.model_validate(m) for m in msg_result.scalars().all()]
+    return ConversationOut(
+        conversation_id=conversation.id,
+        status=conversation.status,
+        current_handler=conversation.current_handler,
+        handler_user_id=conversation.handler_user_id,
+        messages=messages,
+    )
+
+
+# ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.get("", response_model=LeadListResponse)
 async def list_leads(
@@ -151,9 +200,7 @@ async def list_leads(
     if status_filter is not None:
         base = base.where(Lead.status == status_filter)
 
-    total_result = await db.execute(
-        select(func.count()).select_from(base.subquery())
-    )
+    total_result = await db.execute(select(func.count()).select_from(base.subquery()))
     total = total_result.scalar_one()
 
     rows = await db.execute(
@@ -188,34 +235,14 @@ async def get_lead_conversation(
     branch_id = _require_branch(current_user)
     await _get_lead_in_branch(db, lead_id, branch_id)
 
-    conv_result = await db.execute(
-        select(Conversation)
-        .where(
-            Conversation.lead_id == lead_id,
-            Conversation.status != ConversationStatus.CLOSED,
-        )
-        .order_by(Conversation.started_at.desc())
-    )
-    conversation = conv_result.scalars().first()
+    conversation = await _get_active_conversation(db, lead_id)
     if conversation is None:
         return ConversationOut(
             conversation_id=None, status=None, current_handler=None,
             handler_user_id=None, messages=[]
         )
 
-    msg_result = await db.execute(
-        select(Message)
-        .where(Message.conversation_id == conversation.id)
-        .order_by(Message.created_at.asc())
-    )
-    messages = [MessageOut.model_validate(m) for m in msg_result.scalars().all()]
-    return ConversationOut(
-        conversation_id=conversation.id,
-        status=conversation.status,
-        current_handler=conversation.current_handler,
-        handler_user_id=conversation.handler_user_id,
-        messages=messages,
-    )
+    return await _build_conversation_out(db, conversation)
 
 
 @router.put("/{lead_id}/status", response_model=LeadDetail)
@@ -239,45 +266,125 @@ async def update_lead_status(
     # JSONB columns aren't mutation-tracked by default — reassign so SQLAlchemy
     # emits an UPDATE.
     existing = dict(lead.qualification_data or {})
-    existing["status_history"] = [
-        *existing.get("status_history", []),
-        history_entry,
-    ]
+    existing["status_history"] = [*existing.get("status_history", []), history_entry]
     lead.qualification_data = existing
     lead.status = body.status
+
+    db.add(LeadActivity(
+        lead_id=lead.id,
+        tenant_id=lead.tenant_id,
+        actor_id=current_user.id,
+        activity_type=ActivityType.STATUS_CHANGE,
+        payload={"from": previous.value, "to": body.status.value, "note": body.note},
+    ))
 
     await db.commit()
     await db.refresh(lead)
     return LeadDetail.model_validate(lead)
 
 
-@router.post("/{lead_id}/return-to-bot", response_model=LeadDetail)
+@router.post("/{lead_id}/handoff", response_model=LeadWithConversation)
+async def handoff_lead(
+    lead_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LeadWithConversation:
+    """Asistente toma control manual de la conversación."""
+    branch_id = _require_branch(current_user)
+    lead = await _get_lead_in_branch(db, lead_id, branch_id)
+
+    conversation = await _get_active_conversation(db, lead.id)
+    if conversation is not None:
+        conversation.current_handler = ConversationHandler.HUMAN
+        conversation.handler_user_id = current_user.id
+        conversation.status = ConversationStatus.HANDOFF
+
+    now = datetime.now(timezone.utc)
+    lead.status = LeadStatus.ESCALADO
+    lead.handoff_at = now
+    lead.handoff_by = current_user.id
+
+    db.add(LeadActivity(
+        lead_id=lead.id,
+        tenant_id=lead.tenant_id,
+        actor_id=current_user.id,
+        activity_type=ActivityType.HANDOFF,
+        payload={
+            "conversation_id": str(conversation.id) if conversation else None,
+        },
+    ))
+
+    await db.commit()
+    await db.refresh(lead)
+
+    detail = LeadWithConversation.model_validate(lead)
+    if lead.assigned_to:
+        assignee = await db.get(User, lead.assigned_to)
+        detail.assigned_to_name = assignee.name if assignee else None
+    if conversation:
+        await db.refresh(conversation)
+        detail.conversation = await _build_conversation_out(db, conversation)
+
+    return detail
+
+
+@router.post("/{lead_id}/return-to-bot", response_model=LeadWithConversation)
 async def return_to_bot(
     lead_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> LeadDetail:
+) -> LeadWithConversation:
+    """Devuelve el control al bot y notifica al lead via WhatsApp."""
     branch_id = _require_branch(current_user)
     lead = await _get_lead_in_branch(db, lead_id, branch_id)
 
-    conv_result = await db.execute(
-        select(Conversation)
-        .where(
-            Conversation.lead_id == lead.id,
-            Conversation.status != ConversationStatus.CLOSED,
-        )
-        .order_by(Conversation.started_at.desc())
-    )
-    conversation = conv_result.scalars().first()
-    if conversation is not None:
-        conversation.current_handler = ConversationHandler.BOT
-        conversation.status = ConversationStatus.ACTIVE
+    conversation = await _get_active_conversation(db, lead.id)
 
+    if conversation is None or conversation.current_handler != ConversationHandler.HUMAN:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La conversación no está bajo control humano",
+        )
+
+    conversation.current_handler = ConversationHandler.BOT
+    conversation.handler_user_id = None
+    conversation.status = ConversationStatus.ACTIVE
     lead.status = LeadStatus.EN_CALIFICACION
+
+    db.add(LeadActivity(
+        lead_id=lead.id,
+        tenant_id=lead.tenant_id,
+        actor_id=current_user.id,
+        activity_type=ActivityType.RETURN_TO_BOT,
+        payload={"conversation_id": str(conversation.id)},
+    ))
 
     await db.commit()
     await db.refresh(lead)
-    return LeadDetail.model_validate(lead)
+    await db.refresh(conversation)
+
+    # Send transition message through the branch's WhatsApp number.
+    branch = await db.get(Branch, lead.branch_id)
+    if branch and branch.wa_phone_number_id and branch.wa_token:
+        try:
+            await _whatsapp.send_text_message(
+                to_phone=lead.wa_phone,
+                message=_RETURN_TO_BOT_MESSAGE,
+                phone_number_id=branch.wa_phone_number_id,
+                token=branch.wa_token,
+            )
+        except Exception:
+            logger.exception("return_to_bot: WA delivery failed for lead %s", lead_id)
+    else:
+        logger.warning("return_to_bot: branch %s has no WA credentials", lead.branch_id)
+
+    detail = LeadWithConversation.model_validate(lead)
+    if lead.assigned_to:
+        assignee = await db.get(User, lead.assigned_to)
+        detail.assigned_to_name = assignee.name if assignee else None
+    detail.conversation = await _build_conversation_out(db, conversation)
+
+    return detail
 
 
 @router.post("/{lead_id}/messages", response_model=MessageOut)
@@ -291,15 +398,7 @@ async def send_message(
     branch_id = _require_branch(current_user)
     lead = await _get_lead_in_branch(db, lead_id, branch_id)
 
-    conv_result = await db.execute(
-        select(Conversation)
-        .where(
-            Conversation.lead_id == lead_id,
-            Conversation.status != ConversationStatus.CLOSED,
-        )
-        .order_by(Conversation.started_at.desc())
-    )
-    conversation = conv_result.scalars().first()
+    conversation = await _get_active_conversation(db, lead_id)
     if conversation is None or conversation.current_handler != ConversationHandler.HUMAN:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -310,8 +409,18 @@ async def send_message(
         conversation_id=conversation.id,
         role=MessageRole.ASSISTANT,
         content=body.text.strip(),
+        sent_by_user_id=current_user.id,
     )
     db.add(msg)
+
+    db.add(LeadActivity(
+        lead_id=lead.id,
+        tenant_id=lead.tenant_id,
+        actor_id=current_user.id,
+        activity_type=ActivityType.REPLY,
+        payload={"preview": body.text.strip()[:120]},
+    ))
+
     await db.flush()
 
     branch = await db.get(Branch, lead.branch_id)
@@ -355,7 +464,6 @@ async def list_assignees(
     )
     users = rows.scalars().all()
 
-    # Doctors first
     role_order = {UserRole.DOCTOR: 0, UserRole.ASESOR: 1, UserRole.GERENTE: 2}
     sorted_users = sorted(users, key=lambda u: role_order.get(u.role, 9))
     return [UserBrief.model_validate(u) for u in sorted_users]
@@ -380,38 +488,18 @@ async def assign_lead(
         )
 
     lead.assigned_to = body.user_id
+
+    db.add(LeadActivity(
+        lead_id=lead.id,
+        tenant_id=lead.tenant_id,
+        actor_id=current_user.id,
+        activity_type=ActivityType.ASSIGN,
+        payload={"assigned_to_user_id": str(body.user_id), "assigned_to_name": assignee.name},
+    ))
+
     await db.commit()
     await db.refresh(lead)
 
     detail = LeadDetail.model_validate(lead)
     detail.assigned_to_name = assignee.name
     return detail
-
-
-@router.post("/{lead_id}/handoff", response_model=LeadDetail)
-async def handoff_lead(
-    lead_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> LeadDetail:
-    branch_id = _require_branch(current_user)
-    lead = await _get_lead_in_branch(db, lead_id, branch_id)
-
-    conv_result = await db.execute(
-        select(Conversation)
-        .where(
-            Conversation.lead_id == lead.id,
-            Conversation.status != ConversationStatus.CLOSED,
-        )
-        .order_by(Conversation.started_at.desc())
-    )
-    conversation = conv_result.scalars().first()
-    if conversation is not None:
-        conversation.current_handler = ConversationHandler.HUMAN
-        conversation.status = ConversationStatus.HANDOFF
-
-    lead.status = LeadStatus.ESCALADO
-
-    await db.commit()
-    await db.refresh(lead)
-    return LeadDetail.model_validate(lead)
