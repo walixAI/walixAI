@@ -76,7 +76,8 @@ class MessageOut(BaseModel):
 class ConversationOut(BaseModel):
     conversation_id: uuid.UUID | None
     status: ConversationStatus | None
-    handled_by: ConversationHandler | None
+    current_handler: ConversationHandler | None
+    handler_user_id: uuid.UUID | None
     messages: list[MessageOut]
 
 
@@ -198,7 +199,8 @@ async def get_lead_conversation(
     conversation = conv_result.scalars().first()
     if conversation is None:
         return ConversationOut(
-            conversation_id=None, status=None, handled_by=None, messages=[]
+            conversation_id=None, status=None, current_handler=None,
+            handler_user_id=None, messages=[]
         )
 
     msg_result = await db.execute(
@@ -210,7 +212,8 @@ async def get_lead_conversation(
     return ConversationOut(
         conversation_id=conversation.id,
         status=conversation.status,
-        handled_by=conversation.handled_by,
+        current_handler=conversation.current_handler,
+        handler_user_id=conversation.handler_user_id,
         messages=messages,
     )
 
@@ -267,7 +270,7 @@ async def return_to_bot(
     )
     conversation = conv_result.scalars().first()
     if conversation is not None:
-        conversation.handled_by = ConversationHandler.BOT
+        conversation.current_handler = ConversationHandler.BOT
         conversation.status = ConversationStatus.ACTIVE
 
     lead.status = LeadStatus.EN_CALIFICACION
@@ -297,7 +300,7 @@ async def send_message(
         .order_by(Conversation.started_at.desc())
     )
     conversation = conv_result.scalars().first()
-    if conversation is None or conversation.handled_by != ConversationHandler.HUMAN:
+    if conversation is None or conversation.current_handler != ConversationHandler.HUMAN:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="La conversación no está bajo control humano",
@@ -404,7 +407,7 @@ async def handoff_lead(
     )
     conversation = conv_result.scalars().first()
     if conversation is not None:
-        conversation.handled_by = ConversationHandler.HUMAN
+        conversation.current_handler = ConversationHandler.HUMAN
         conversation.status = ConversationStatus.HANDOFF
 
     lead.status = LeadStatus.ESCALADO

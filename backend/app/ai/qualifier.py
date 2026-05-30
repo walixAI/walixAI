@@ -248,7 +248,7 @@ async def escalate_to_human(lead: Lead, db: AsyncSession) -> None:
     )
     conversation = result.scalars().first()
     if conversation is not None:
-        conversation.handled_by = ConversationHandler.HUMAN
+        conversation.current_handler = ConversationHandler.HUMAN
         conversation.status = ConversationStatus.HANDOFF
 
     lead.status = LeadStatus.ESCALADO

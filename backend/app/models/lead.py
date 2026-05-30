@@ -1,8 +1,9 @@
 import enum
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Enum, Float, ForeignKey, String, Text
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -89,3 +90,20 @@ class Lead(Base):
     qualification_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     qualification_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # Sprint 3: handoff tracking
+    handoff_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    handoff_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Sprint 3: Meta Lead Ads origin
+    meta_lead_id: Mapped[str | None] = mapped_column(
+        String(50), nullable=True, index=True
+    )
+    meta_form_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    meta_ad_id: Mapped[str | None] = mapped_column(String(50), nullable=True)

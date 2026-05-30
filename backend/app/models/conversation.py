@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,22 +42,24 @@ class Conversation(Base):
         index=True,
     )
     status: Mapped[ConversationStatus] = mapped_column(
-        Enum(
-            ConversationStatus,
-            name="conversation_status",
-            values_callable=lambda x: [e.value for e in ConversationStatus],
-        ),
+        String(10),
         nullable=False,
         default=ConversationStatus.ACTIVE,
     )
-    handled_by: Mapped[ConversationHandler] = mapped_column(
-        Enum(
-            ConversationHandler,
-            name="conversation_handler",
-            values_callable=lambda x: [e.value for e in ConversationHandler],
-        ),
+    # Sprint 3: replaces handled_by (DB enum) with plain VARCHAR for flexibility.
+    # ConversationHandler Python enum is preserved for application-layer type safety.
+    current_handler: Mapped[ConversationHandler] = mapped_column(
+        String(10),
         nullable=False,
         default=ConversationHandler.BOT,
+        server_default="bot",
+    )
+    # Non-null when current_handler == 'human'; the user who took control.
+    handler_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -80,13 +82,16 @@ class Message(Base):
         String(255), nullable=True, unique=True, index=True
     )
     role: Mapped[MessageRole] = mapped_column(
-        Enum(
-            MessageRole,
-            name="message_role",
-            values_callable=lambda x: [e.value for e in MessageRole],
-        ),
+        String(16),
         nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Sprint 3: NULL = sent by the bot; UUID = sent by a human user from the dashboard.
+    sent_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )

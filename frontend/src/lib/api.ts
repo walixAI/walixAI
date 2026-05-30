@@ -51,7 +51,8 @@ export interface MessageOut {
 export interface ConversationOut {
   conversation_id: string | null;
   status: "active" | "handoff" | "closed" | null;
-  handled_by: "bot" | "human" | null;
+  current_handler: "bot" | "human" | null;
+  handler_user_id: string | null;
   messages: MessageOut[];
 }
 

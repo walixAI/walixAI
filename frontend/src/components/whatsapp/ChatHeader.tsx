@@ -35,7 +35,7 @@ export function ChatHeader({
   loadingAction,
 }: Props) {
   const displayName = lead.name ?? lead.wa_phone;
-  const isHandedOff = conversation?.handled_by === "human";
+  const isHandedOff = conversation?.current_handler === "human";
 
   return (
     <div className="border-b border-border bg-card px-4 py-3 flex items-center gap-3">

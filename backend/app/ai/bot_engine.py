@@ -160,7 +160,7 @@ async def process_message(
         )
 
         # 4. Human in control — save the message but let bot stay silent.
-        if conversation.handled_by == ConversationHandler.HUMAN:
+        if conversation.current_handler == ConversationHandler.HUMAN:
             await db.commit()
             logger.info(
                 "Conversation %s under human control — bot silent", conversation.id
@@ -236,7 +236,7 @@ async def process_message(
         # 10. Escalation check on the assistant's reply.
         if _needs_escalation(assistant_text):
             conversation.status = ConversationStatus.HANDOFF
-            conversation.handled_by = ConversationHandler.HUMAN
+            conversation.current_handler = ConversationHandler.HUMAN
             lead.status = LeadStatus.ESCALADO
             logger.info(
                 "Escalating conversation %s (lead %s) to human",
