@@ -9,6 +9,7 @@ import {
   type ConversationOut,
   type LeadDetail,
   type MessageOut,
+  type UserBrief,
 } from "@/lib/api";
 
 function formatTime(iso: string): string {
@@ -57,6 +58,9 @@ export default function LeadDetailPage() {
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [assignees, setAssignees] = useState<UserBrief[] | null>(null);
+  const [selectedAssignee, setSelectedAssignee] = useState("");
+  const [assigning, setAssigning] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -108,6 +112,32 @@ export default function LeadDetailPage() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
+    }
+  }
+
+  async function openAssign() {
+    if (assignees !== null) { setAssignees(null); return; }
+    try {
+      const list = await api.listAssignees(id);
+      setAssignees(list);
+      setSelectedAssignee(list[0]?.id ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error cargando usuarios");
+    }
+  }
+
+  async function confirmAssign() {
+    if (!selectedAssignee || assigning) return;
+    setAssigning(true);
+    setError(null);
+    try {
+      await api.assignLead(id, selectedAssignee);
+      setAssignees(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al asignar");
+    } finally {
+      setAssigning(false);
     }
   }
 
@@ -319,6 +349,40 @@ export default function LeadDetailPage() {
                 Estás manejando esta conversación manualmente. El bot no
                 responderá hasta que lo reactives.
               </div>
+
+              {/* Assign to doctor */}
+              <button
+                onClick={openAssign}
+                className="w-full bg-indigo-600 text-white py-2 rounded-md font-medium hover:bg-indigo-700 transition"
+              >
+                {assignees !== null ? "Cancelar asignación" : "Asignar al médico"}
+              </button>
+              {assignees !== null && (
+                <div className="space-y-2">
+                  <select
+                    value={selectedAssignee}
+                    onChange={(e) => setSelectedAssignee(e.target.value)}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  >
+                    {assignees.length === 0 && (
+                      <option value="">Sin usuarios disponibles</option>
+                    )}
+                    {assignees.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.role})
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={confirmAssign}
+                    disabled={assigning || !selectedAssignee}
+                    className="w-full bg-indigo-500 text-white py-2 rounded-md font-medium hover:bg-indigo-600 disabled:opacity-50 transition"
+                  >
+                    {assigning ? "Asignando…" : "Confirmar asignación"}
+                  </button>
+                </div>
+              )}
+
               <button
                 onClick={returnToBot}
                 disabled={busy}

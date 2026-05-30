@@ -3,7 +3,14 @@ const BASE_URL =
 
 const TOKEN_KEY = "walix_token";
 
-export type UserRole = "owner" | "gerente" | "asesor" | "soporte" | "it";
+export type UserRole = "owner" | "gerente" | "asesor" | "doctor" | "soporte" | "it";
+
+export interface UserBrief {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+}
 
 export type LeadStatus =
   | "nuevo"
@@ -193,5 +200,14 @@ export const api = {
     request<MessageOut>(`/api/leads/${id}/messages`, {
       method: "POST",
       body: JSON.stringify({ text }),
+    }),
+
+  listAssignees: (id: string) =>
+    request<UserBrief[]>(`/api/leads/${id}/assignees`),
+
+  assignLead: (id: string, userId: string) =>
+    request<LeadDetail>(`/api/leads/${id}/assign`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
     }),
 };

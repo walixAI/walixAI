@@ -96,6 +96,19 @@ class SendMessageBody(BaseModel):
         return v
 
 
+class AssignBody(BaseModel):
+    user_id: uuid.UUID
+
+
+class UserBrief(BaseModel):
+    id: uuid.UUID
+    name: str
+    email: str
+    role: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 def _require_branch(user: User) -> uuid.UUID:
     if user.branch_id is None:
         raise HTTPException(
@@ -315,6 +328,61 @@ async def send_message(
     await db.commit()
     await db.refresh(msg)
     return MessageOut.model_validate(msg)
+
+
+@router.get("/{lead_id}/assignees", response_model=list[UserBrief])
+async def list_assignees(
+    lead_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[UserBrief]:
+    """Returns active users in the branch to whom a lead can be assigned.
+
+    Doctors appear first, then asesores, then the rest.
+    """
+    branch_id = _require_branch(current_user)
+    await _get_lead_in_branch(db, lead_id, branch_id)
+
+    from app.models.user import UserRole
+
+    rows = await db.execute(
+        select(User)
+        .where(User.branch_id == branch_id, User.is_active.is_(True))
+        .order_by(User.role, User.name)
+    )
+    users = rows.scalars().all()
+
+    # Doctors first
+    role_order = {UserRole.DOCTOR: 0, UserRole.ASESOR: 1, UserRole.GERENTE: 2}
+    sorted_users = sorted(users, key=lambda u: role_order.get(u.role, 9))
+    return [UserBrief.model_validate(u) for u in sorted_users]
+
+
+@router.post("/{lead_id}/assign", response_model=LeadDetail)
+async def assign_lead(
+    lead_id: uuid.UUID,
+    body: AssignBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LeadDetail:
+    """Assigns a lead to a user (typically the doctor on duty)."""
+    branch_id = _require_branch(current_user)
+    lead = await _get_lead_in_branch(db, lead_id, branch_id)
+
+    assignee = await db.get(User, body.user_id)
+    if assignee is None or assignee.branch_id != branch_id or not assignee.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado en esta sucursal",
+        )
+
+    lead.assigned_to = body.user_id
+    await db.commit()
+    await db.refresh(lead)
+
+    detail = LeadDetail.model_validate(lead)
+    detail.assigned_to_name = assignee.name
+    return detail
 
 
 @router.post("/{lead_id}/handoff", response_model=LeadDetail)
