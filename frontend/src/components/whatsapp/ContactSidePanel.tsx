@@ -47,12 +47,12 @@ export function ContactSidePanel({ lead }: Props) {
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs text-muted-foreground">Score</span>
-                    <span className="text-xs font-bold">{score}/10</span>
+                    <span className="text-xs font-bold">{(score * 10).toFixed(1)}/10</span>
                   </div>
                   <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
                     <div
                       className="h-full bg-primary rounded-full transition-all"
-                      style={{ width: `${(score / 10) * 100}%` }}
+                      style={{ width: `${score * 100}%` }}
                     />
                   </div>
                 </div>

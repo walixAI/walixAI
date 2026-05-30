@@ -171,7 +171,7 @@ export function ConversationList({ leads, activeId, onSelect, loading }: Props) 
                       <StatusBadge status={lead.status} />
                       {lead.qualification_score != null && (
                         <span className="text-[10px] text-muted-foreground">
-                          Score: {lead.qualification_score}
+                          Score: {(lead.qualification_score * 10).toFixed(1)}
                         </span>
                       )}
                     </div>
