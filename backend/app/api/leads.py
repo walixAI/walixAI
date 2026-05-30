@@ -1,3 +1,4 @@
+import json
 import logging
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
+from app.core.redis import redis_client
 from app.models.activity import ActivityType, LeadActivity
 from app.models.conversation import (
     Conversation,
@@ -30,6 +32,9 @@ logger = logging.getLogger(__name__)
 _whatsapp = WhatsAppService()
 
 router = APIRouter(prefix="/leads", tags=["leads"])
+
+_CONV_HISTORY_TTL = 86_400   # 24 h — must match bot_engine.py
+_CONV_HISTORY_MAX = 8        # must match bot_engine.py
 
 _RETURN_TO_BOT_MESSAGE = (
     "Ahora te atenderá nuestro asistente Wali nuevamente. "
@@ -108,6 +113,23 @@ class SendMessageBody(BaseModel):
         if not v.strip():
             raise ValueError("El mensaje no puede estar vacío")
         return v
+
+
+class ReplyBody(BaseModel):
+    message: str
+
+    @field_validator("message")
+    @classmethod
+    def not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("El mensaje no puede estar vacío")
+        return v
+
+
+class ReplyResponse(BaseModel):
+    message_id: uuid.UUID
+    sent_at: datetime
+    status: str
 
 
 class AssignBody(BaseModel):
@@ -440,6 +462,103 @@ async def send_message(
     await db.commit()
     await db.refresh(msg)
     return MessageOut.model_validate(msg)
+
+
+@router.post("/{lead_id}/reply", response_model=ReplyResponse, status_code=status.HTTP_201_CREATED)
+async def reply_to_lead(
+    lead_id: uuid.UUID,
+    body: ReplyBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReplyResponse:
+    """Asistente responde al lead desde el dashboard.
+
+    Diferencias respecto a /messages: error 502 si WhatsApp falla (no silencioso),
+    actualiza last_message_at y agrega el mensaje al historial de Redis para que
+    el bot tenga contexto completo si retoma el control.
+    """
+    branch_id = _require_branch(current_user)
+    lead = await _get_lead_in_branch(db, lead_id, branch_id)
+
+    # 1. Conversación activa
+    conversation = await _get_active_conversation(db, lead.id)
+    if conversation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay conversación activa para este lead",
+        )
+
+    # 2. Verificar control humano
+    if conversation.current_handler != ConversationHandler.HUMAN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El bot tiene el control. Usa /handoff primero.",
+        )
+
+    # 3. Credenciales del branch
+    branch = await db.get(Branch, lead.branch_id)
+    if not branch or not branch.wa_phone_number_id or not branch.wa_token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="El branch no tiene credenciales de WhatsApp configuradas",
+        )
+
+    text = body.message.strip()
+
+    # 4. Enviar por WhatsApp — error 502 si falla (no silencioso)
+    try:
+        await _whatsapp.send_text_message(
+            to_phone=lead.wa_phone,
+            message=text,
+            phone_number_id=branch.wa_phone_number_id,
+            token=branch.wa_token,
+        )
+    except Exception as exc:
+        logger.exception("reply: WA delivery failed for lead %s", lead_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"WhatsApp no pudo entregar el mensaje: {exc}",
+        ) from exc
+
+    # 5. Persistir mensaje
+    now = datetime.now(timezone.utc)
+    msg = Message(
+        conversation_id=conversation.id,
+        role=MessageRole.ASSISTANT,
+        content=text,
+        sent_by_user_id=current_user.id,
+    )
+    db.add(msg)
+
+    # 6. Auditoría
+    db.add(LeadActivity(
+        lead_id=lead.id,
+        tenant_id=lead.tenant_id,
+        actor_id=current_user.id,
+        activity_type=ActivityType.REPLY,
+        payload={"preview": text[:120]},
+    ))
+
+    # 7. Actualizar timestamp de último mensaje
+    conversation.last_message_at = now
+
+    await db.flush()   # get msg.id before commit
+    msg_id = msg.id
+    await db.commit()
+
+    # 8. Agregar al historial de Redis para continuidad del bot
+    history_key = f"conv:{conversation.id}"
+    try:
+        raw = await redis_client.get(history_key)
+        history: list[dict] = json.loads(raw) if raw else []
+        history.append({"role": "assistant", "content": text})
+        history = history[-_CONV_HISTORY_MAX:]
+        await redis_client.set(history_key, json.dumps(history), ex=_CONV_HISTORY_TTL)
+    except Exception:
+        # Redis failure must not block the response — message was already sent and persisted.
+        logger.exception("reply: failed to update Redis history for conv %s", conversation.id)
+
+    return ReplyResponse(message_id=msg_id, sent_at=now, status="sent")
 
 
 @router.get("/{lead_id}/assignees", response_model=list[UserBrief])
