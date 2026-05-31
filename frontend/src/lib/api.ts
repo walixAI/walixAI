@@ -139,6 +139,15 @@ export interface OnboardingDraftOut {
   updated_at: string;
 }
 
+export interface BranchOnboardingOut {
+  id: string;
+  name: string;
+  ai_config: Record<string, unknown> | null;
+  onboarding_status: string;
+  bot_name: string | null;
+  industry: string | null;
+}
+
 // ── HTTP core ─────────────────────────────────────────────────────────────────
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -276,5 +285,23 @@ export const api = {
 
   async getDraft(draftId: string): Promise<OnboardingDraftOut> {
     return request(`/api/onboarding/drafts/${draftId}`);
+  },
+
+  async refineDraft(data: {
+    draft_id: string;
+    section: string;
+    instruction: string;
+  }): Promise<OnboardingDraftOut> {
+    return request("/api/onboarding/refine", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async approveDraft(draftId: string): Promise<BranchOnboardingOut> {
+    return request("/api/onboarding/approve", {
+      method: "POST",
+      body: JSON.stringify({ draft_id: draftId }),
+    });
   },
 };
