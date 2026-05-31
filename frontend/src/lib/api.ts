@@ -148,6 +148,17 @@ export interface BranchOnboardingOut {
   industry: string | null;
 }
 
+export interface TeamMemberOut {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  wa_phone: string | null;
+  is_active: boolean;
+  branch_id: string | null;
+  created_at: string;
+}
+
 // ── HTTP core ─────────────────────────────────────────────────────────────────
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -303,5 +314,34 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ draft_id: draftId }),
     });
+  },
+
+  // Team
+  async getTeam(branchId: string): Promise<TeamMemberOut[]> {
+    return request(`/api/branches/${branchId}/team`);
+  },
+
+  async createTeamMember(
+    branchId: string,
+    data: { name: string; email: string; password: string; role: string; wa_phone?: string | null },
+  ): Promise<TeamMemberOut> {
+    return request(`/api/branches/${branchId}/team`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateUser(
+    userId: string,
+    data: { name?: string; wa_phone?: string | null; role?: string },
+  ): Promise<TeamMemberOut> {
+    return request(`/api/users/${userId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async toggleUser(userId: string): Promise<TeamMemberOut> {
+    return request(`/api/users/${userId}/toggle`, { method: "PATCH" });
   },
 };

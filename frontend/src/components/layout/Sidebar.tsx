@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 import {
-  LayoutDashboard, Users, MessageCircle, BarChart3,
+  LayoutDashboard, Users, Users2, MessageCircle, BarChart3,
   Settings, Kanban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -8,13 +8,17 @@ import { Logo } from "@/components/walix/Logo";
 import { WBadge } from "@/components/walix/Badge";
 import { useState } from "react";
 
-const items = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle, badge: true },
-  { to: "/pipeline", label: "Pipeline", icon: Kanban },
-  { to: "/contacts", label: "Contactos", icon: Users },
-  { to: "/reports", label: "Reportes", icon: BarChart3 },
-  { to: "/settings", label: "Configuracion", icon: Settings },
+const MAIN_ITEMS = [
+  { to: "/dashboard",  label: "Dashboard",   icon: LayoutDashboard },
+  { to: "/whatsapp",   label: "WhatsApp",     icon: MessageCircle, badge: true },
+  { to: "/pipeline",   label: "Pipeline",     icon: Kanban },
+  { to: "/contacts",   label: "Contactos",    icon: Users },
+  { to: "/reports",    label: "Reportes",     icon: BarChart3 },
+];
+
+const CONFIG_ITEMS = [
+  { to: "/settings",      label: "Configuracion", icon: Settings, end: true },
+  { to: "/settings/team", label: "Equipo",         icon: Users2 },
 ];
 
 export function Sidebar() {
@@ -42,7 +46,27 @@ export function Sidebar() {
         </div>
 
         <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-2 space-y-0.5">
-          {items.map((item) => (
+          {MAIN_ITEMS.map((item) => (
+            <NavItem key={item.to} {...item} collapsed={collapsed} />
+          ))}
+
+          {/* Config section */}
+          <div
+            className={cn(
+              "mt-3 mb-1",
+              collapsed
+                ? "border-t border-sidebar-border mx-1 pt-3"
+                : "pt-3 pb-0.5 px-1",
+            )}
+          >
+            {!collapsed && (
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50 px-2">
+                Configuración
+              </p>
+            )}
+          </div>
+
+          {CONFIG_ITEMS.map((item) => (
             <NavItem key={item.to} {...item} collapsed={collapsed} />
           ))}
         </nav>
@@ -56,17 +80,20 @@ function NavItem({
   label,
   icon: Icon,
   badge,
+  end,
   collapsed,
 }: {
   to: string;
   label: string;
   icon: React.ElementType;
   badge?: boolean;
+  end?: boolean;
   collapsed: boolean;
 }) {
   return (
     <NavLink
       to={to}
+      end={end}
       title={collapsed ? label : undefined}
       aria-label={label}
       className={({ isActive }) =>
