@@ -20,6 +20,7 @@ import NotFound from "@/pages/NotFound";
 const Dashboard = lazy(() => import("@/pages/app/Dashboard"));
 const Whatsapp = lazy(() => import("@/pages/app/Whatsapp"));
 const SettingsPage = lazy(() => import("@/pages/app/Settings"));
+const PipelinePage = lazy(() => import("@/pages/app/Pipeline"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -84,17 +85,7 @@ const AppRoutes = () => {
               }
             />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route
-              path="/pipeline"
-              element={
-                <Stub
-                  icon={BarChart3}
-                  title="Pipeline"
-                  description="Pipeline de ventas proximamente."
-                  badge="Proximo"
-                />
-              }
-            />
+            <Route path="/pipeline" element={<PipelinePage />} />
           </Route>
 
           {/* 404 */}

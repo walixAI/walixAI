@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard, Users, MessageCircle, BarChart3,
-  Settings,
+  Settings, Kanban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/walix/Logo";
@@ -11,6 +11,7 @@ import { useState } from "react";
 const items = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle, badge: true },
+  { to: "/pipeline", label: "Pipeline", icon: Kanban },
   { to: "/contacts", label: "Contactos", icon: Users },
   { to: "/reports", label: "Reportes", icon: BarChart3 },
   { to: "/settings", label: "Configuracion", icon: Settings },

@@ -55,6 +55,7 @@ class LeadListItem(BaseModel):
     assigned_to: uuid.UUID | None
     contact_phone: str | None
     qualification_score: float | None = None
+    pipeline_stage_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 

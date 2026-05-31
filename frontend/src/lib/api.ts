@@ -18,6 +18,16 @@ export function clearToken(): void {
 export type LeadStatus = "nuevo" | "en_calificacion" | "calificado" | "escalado" | "perdido";
 export type Sentiment = "neutral" | "interesado" | "urgente" | "negativo";
 
+export interface PipelineStageOut {
+  id: string;
+  name: string;
+  slug: string;
+  order_index: number;
+  color: string | null;
+  is_won: boolean;
+  is_lost: boolean;
+}
+
 export interface LeadListItem {
   id: string;
   wa_phone: string;
@@ -28,6 +38,7 @@ export interface LeadListItem {
   assigned_to: string | null;
   contact_phone: string | null;
   qualification_score: number | null;
+  pipeline_stage_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -233,5 +244,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ user_id: userId }),
     });
+  },
+
+  async getBranchPipeline(branchId: string): Promise<PipelineStageOut[]> {
+    return request(`/api/branches/${branchId}/pipeline`);
   },
 };

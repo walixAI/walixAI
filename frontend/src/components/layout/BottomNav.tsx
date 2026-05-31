@@ -1,14 +1,14 @@
 import { NavLink } from "react-router-dom";
 import {
-  LayoutDashboard, Users, MessageCircle, BarChart3,
+  LayoutDashboard, Users, MessageCircle, Kanban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
   { to: "/dashboard", label: "Inicio", icon: LayoutDashboard },
-  { to: "/contacts", label: "Contactos", icon: Users },
   { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle, badge: true },
-  { to: "/reports", label: "Reportes", icon: BarChart3 },
+  { to: "/pipeline", label: "Pipeline", icon: Kanban },
+  { to: "/contacts", label: "Contactos", icon: Users },
 ];
 
 export function BottomNav() {
