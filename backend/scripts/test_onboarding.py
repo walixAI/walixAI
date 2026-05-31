@@ -103,12 +103,18 @@ def _sign_webhook(body: bytes) -> str:
     ).hexdigest()
 
 
-# ── BD: crear o reutilizar company + branch ────────────────────────────────────
+# ── BD: setup en un único asyncio.run() ───────────────────────────────────────
 
-async def _setup_branch(tenant_id: uuid.UUID) -> Branch:
-    """Crea o reutiliza la Company+Branch de prueba. Idempotente."""
+async def _setup_and_clean(tenant_id: uuid.UUID) -> Branch:
+    """Crea o reutiliza Company+Branch y borra el lead de prueba anterior.
+
+    Todo en UNA sesión/event-loop para evitar el error 'Future attached to a
+    different loop' que ocurre cuando asyncio.run() se llama más de una vez
+    en el mismo proceso (cada llamada crea y cierra su propio event loop, pero
+    el pool de asyncpg queda ligado al primero).
+    """
     async with AsyncSessionLocal() as db:
-        # Buscar branch existente
+        # 1. Buscar o crear branch
         result = await db.execute(
             select(Branch).where(
                 Branch.tenant_id == tenant_id,
@@ -116,55 +122,48 @@ async def _setup_branch(tenant_id: uuid.UUID) -> Branch:
             )
         )
         branch = result.scalar_one_or_none()
-        if branch:
-            # Asegurarse de que wa_phone_number_id esté asignado
-            if branch.wa_phone_number_id != PHONE_NUMBER_ID:
-                branch.wa_phone_number_id = PHONE_NUMBER_ID
-                await db.commit()
-                await db.refresh(branch)
-            return branch
 
-        # Buscar o crear company
-        comp_result = await db.execute(
-            select(Company).where(
-                Company.tenant_id == tenant_id,
-                Company.name == COMPANY_NAME,
+        if branch is None:
+            comp_result = await db.execute(
+                select(Company).where(
+                    Company.tenant_id == tenant_id,
+                    Company.name == COMPANY_NAME,
+                )
             )
-        )
-        company = comp_result.scalar_one_or_none()
-        if not company:
-            company = Company(
+            company = comp_result.scalar_one_or_none()
+            if not company:
+                company = Company(
+                    tenant_id=tenant_id,
+                    name=COMPANY_NAME,
+                    industry=INDUSTRY,
+                )
+                db.add(company)
+                await db.flush()
+
+            branch = Branch(
+                company_id=company.id,
                 tenant_id=tenant_id,
-                name=COMPANY_NAME,
+                name=BRANCH_NAME,
                 industry=INDUSTRY,
+                wa_phone_number_id=PHONE_NUMBER_ID,
+                onboarding_status="pending",
             )
-            db.add(company)
+            db.add(branch)
             await db.flush()
+        elif branch.wa_phone_number_id != PHONE_NUMBER_ID:
+            branch.wa_phone_number_id = PHONE_NUMBER_ID
 
-        branch = Branch(
-            company_id=company.id,
-            tenant_id=tenant_id,
-            name=BRANCH_NAME,
-            industry=INDUSTRY,
-            wa_phone_number_id=PHONE_NUMBER_ID,
-            onboarding_status="pending",
-        )
-        db.add(branch)
-        await db.commit()
-        await db.refresh(branch)
-        return branch
-
-
-async def _cleanup_old_lead(branch_id: uuid.UUID) -> None:
-    """Deletes any prior test lead for WA_PHONE so polling starts fresh."""
-    async with AsyncSessionLocal() as db:
+        # 2. Limpiar lead de prueba anterior (polling arranca desde cero)
         await db.execute(
             delete(Lead).where(
-                Lead.branch_id == branch_id,
+                Lead.branch_id == branch.id,
                 Lead.wa_phone == WA_PHONE,
             )
         )
+
         await db.commit()
+        await db.refresh(branch)
+        return branch
 
 
 # ── Helpers HTTP ───────────────────────────────────────────────────────────────
@@ -221,9 +220,9 @@ def main() -> None:
         tenant_id = uuid.UUID(tenant_id_str)
         print(f"  ✓ autenticado  tenant_id={tenant_id_str[:8]}…")
 
-        # ── 2. Crear company + branch ──────────────────────────────────────────
+        # ── 2. Crear company + branch + limpiar lead anterior ─────────────────
         print(f"\n[2/7] Crear Company '{COMPANY_NAME}' + Branch '{BRANCH_NAME}'")
-        branch = asyncio.run(_setup_branch(tenant_id))
+        branch = asyncio.run(_setup_and_clean(tenant_id))
         branch_id = str(branch.id)
         print(f"  ✓ branch_id={branch_id[:8]}…  wa_phone_number_id={PHONE_NUMBER_ID}")
 
@@ -279,8 +278,7 @@ def main() -> None:
 
         # ── 6. Simular conversación vía webhook ────────────────────────────────
         print(f"\n[6/7] Enviando {len(MESSAGES)} mensajes (delay {DELAY_BETWEEN_MESSAGES}s)")
-        asyncio.run(_cleanup_old_lead(branch.id))
-        print(f"  Lead previo eliminado (si existía)")
+        print(f"  Lead previo eliminado en el paso 2")
         all_msgs_ok = True
         for i, msg in enumerate(MESSAGES, 1):
             mid = f"wamid.REALTY_{uuid.uuid4().hex[:12]}"
