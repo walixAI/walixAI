@@ -16,7 +16,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.industry_templates import INDUSTRY_TEMPLATES, _QUALIFICATION_PROMPT_TEMPLATE
@@ -359,15 +359,11 @@ async def approve_onboarding(
 
     # 2. Replace pipeline stages for this branch
     if "pipeline_stages" in config and config["pipeline_stages"]:
-        # Deactivate existing stages
-        existing_rows = await db.execute(
-            select(PipelineStage).where(
-                PipelineStage.branch_id == branch.id,
-                PipelineStage.is_active.is_(True),
-            )
+        # Hard-delete all existing stages so the unique (branch_id, slug) constraint
+        # doesn't block re-approval when the same slugs are regenerated.
+        await db.execute(
+            delete(PipelineStage).where(PipelineStage.branch_id == branch.id)
         )
-        for stage in existing_rows.scalars().all():
-            stage.is_active = False
 
         # Create new stages from generated config
         for idx, spec in enumerate(config["pipeline_stages"]):
