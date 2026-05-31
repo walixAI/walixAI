@@ -21,6 +21,8 @@ const Dashboard = lazy(() => import("@/pages/app/Dashboard"));
 const Whatsapp = lazy(() => import("@/pages/app/Whatsapp"));
 const SettingsPage = lazy(() => import("@/pages/app/Settings"));
 const PipelinePage = lazy(() => import("@/pages/app/Pipeline"));
+const OnboardingWizard = lazy(() => import("@/pages/onboarding/OnboardingWizard"));
+const PreviewPage = lazy(() => import("@/pages/onboarding/PreviewPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -87,6 +89,24 @@ const AppRoutes = () => {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/pipeline" element={<PipelinePage />} />
           </Route>
+
+          {/* Onboarding flow — protected, no AppLayout */}
+          <Route
+            path="/onboarding/new"
+            element={
+              <ProtectedRoute>
+                <OnboardingWizard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/onboarding/preview/:draftId"
+            element={
+              <ProtectedRoute>
+                <PreviewPage />
+              </ProtectedRoute>
+            }
+          />
 
           {/* 404 */}
           <Route path="*" element={<NotFound />} />

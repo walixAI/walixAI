@@ -126,6 +126,19 @@ export interface LeadListResponse {
   offset: number;
 }
 
+export interface OnboardingDraftOut {
+  id: string;
+  branch_id: string;
+  tenant_id: string;
+  generated_config: Record<string, unknown>;
+  business_input: string;
+  status: string;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── HTTP core ─────────────────────────────────────────────────────────────────
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -248,5 +261,20 @@ export const api = {
 
   async getBranchPipeline(branchId: string): Promise<PipelineStageOut[]> {
     return request(`/api/branches/${branchId}/pipeline`);
+  },
+
+  async generateOnboarding(data: {
+    branch_id: string;
+    business_description: string;
+    industry: string;
+  }): Promise<OnboardingDraftOut> {
+    return request("/api/onboarding/generate", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async getDraft(draftId: string): Promise<OnboardingDraftOut> {
+    return request(`/api/onboarding/drafts/${draftId}`);
   },
 };
