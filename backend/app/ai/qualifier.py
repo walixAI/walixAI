@@ -84,16 +84,16 @@ async def qualify_lead(
     # 1. Build prompt and ask Claude to extract qualification data
     fields_schema = build_qualification_json_schema(required_fields)
     formatted = _format_history(conversation_history, bot_name=bot_name)
-    prompt = qual["prompt_template"].format(
-        objective=qual["objective"],
-        criteria=qual["criteria"],
-        disqualifiers=qual["disqualifiers"],
-        escalation_triggers=qual["escalation_triggers"],
-        fields_schema=fields_schema,
-        conversation=formatted,
-    )
 
     try:
+        prompt = qual["prompt_template"].format(
+            objective=qual.get("objective", ""),
+            criteria=qual.get("criteria", ""),
+            disqualifiers=qual.get("disqualifiers", ""),
+            escalation_triggers=qual.get("escalation_triggers", ""),
+            fields_schema=fields_schema,
+            conversation=formatted,
+        )
         response = await _anthropic.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=400,
@@ -101,7 +101,7 @@ async def qualify_lead(
         )
         result = _extract_json(response.content[0].text)
     except Exception:
-        logger.exception("qualify_lead: Claude call or JSON parse failed for lead %s", lead_id)
+        logger.exception("qualify_lead: prompt/Claude/parse failed for lead %s", lead_id)
         return {}
 
     # 2. Persist updates in a fresh session

@@ -53,6 +53,9 @@ _FIXED_QUAL_KEYS = {
     },
 }
 
+# Text keys that the qualifier's .format() call requires — Claude may omit them.
+_REQUIRED_QUAL_TEXT_KEYS = ("objective", "criteria", "disqualifiers", "escalation_triggers")
+
 
 # ── Pydantic schemas ───────────────────────────────────────────────────────────
 
@@ -240,10 +243,21 @@ def _extract_json(text: str) -> Any:
     return json.loads(match.group())
 
 
-def _apply_fixed_qualification_keys(config: dict[str, Any]) -> None:
-    """Forces the fixed qualification fields regardless of what Claude generated."""
-    if "qualification" in config:
-        config["qualification"].update(_FIXED_QUAL_KEYS)
+def _apply_fixed_qualification_keys(config: dict[str, Any], industry: str = "salud") -> None:
+    """Forces fixed qualification fields and fills any text keys Claude may have omitted."""
+    if "qualification" not in config:
+        return
+    config["qualification"].update(_FIXED_QUAL_KEYS)
+
+    # Fill any text key that was skipped by Claude, using the industry template as fallback.
+    base_qual = INDUSTRY_TEMPLATES.get(industry, INDUSTRY_TEMPLATES["salud"])["qualification"]
+    for key in _REQUIRED_QUAL_TEXT_KEYS:
+        if not config["qualification"].get(key):
+            config["qualification"][key] = base_qual.get(key, "")
+            logger.warning(
+                "onboarding: generated config missing '%s' — using %s template fallback",
+                key, industry,
+            )
 
 
 async def _call_claude_generate(prompt: str) -> dict[str, Any]:
@@ -295,8 +309,8 @@ async def generate_onboarding(
             detail="No se pudo generar la configuración. Intenta de nuevo.",
         ) from last_exc
 
-    # Always enforce fixed qualification values
-    _apply_fixed_qualification_keys(generated)
+    # Always enforce fixed qualification values + fill any keys Claude omitted
+    _apply_fixed_qualification_keys(generated, industry)
 
     # Persist draft
     draft = OnboardingDraft(
@@ -436,7 +450,9 @@ async def refine_onboarding(
     new_config[body.section] = updated_section
 
     # Re-enforce fixed qualification fields after any refine
-    _apply_fixed_qualification_keys(new_config)
+    branch = await db.get(Branch, draft.branch_id)
+    branch_industry = (branch.industry if branch else None) or "salud"
+    _apply_fixed_qualification_keys(new_config, branch_industry)
 
     draft.generated_config = new_config
 

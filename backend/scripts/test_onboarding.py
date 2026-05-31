@@ -24,10 +24,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.models.lead import Lead
 from app.models.tenant import Branch, Company
 
 # ── Constantes ─────────────────────────────────────────────────────────────────
@@ -154,6 +155,18 @@ async def _setup_branch(tenant_id: uuid.UUID) -> Branch:
         return branch
 
 
+async def _cleanup_old_lead(branch_id: uuid.UUID) -> None:
+    """Deletes any prior test lead for WA_PHONE so polling starts fresh."""
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            delete(Lead).where(
+                Lead.branch_id == branch_id,
+                Lead.wa_phone == WA_PHONE,
+            )
+        )
+        await db.commit()
+
+
 # ── Helpers HTTP ───────────────────────────────────────────────────────────────
 
 def _login(client: httpx.Client) -> tuple[str, str]:
@@ -266,6 +279,8 @@ def main() -> None:
 
         # ── 6. Simular conversación vía webhook ────────────────────────────────
         print(f"\n[6/7] Enviando {len(MESSAGES)} mensajes (delay {DELAY_BETWEEN_MESSAGES}s)")
+        asyncio.run(_cleanup_old_lead(branch.id))
+        print(f"  Lead previo eliminado (si existía)")
         all_msgs_ok = True
         for i, msg in enumerate(MESSAGES, 1):
             mid = f"wamid.REALTY_{uuid.uuid4().hex[:12]}"
