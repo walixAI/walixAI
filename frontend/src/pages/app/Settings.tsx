@@ -423,23 +423,27 @@ export default function Settings() {
           </span>
         </div>
 
-        {/* Branch selector — shown when owner/IT manages multiple branches */}
-        {needsBranchSelect && branches.length > 1 && (
+        {/* Branch selector — shown when owner/IT has no fixed branch */}
+        {needsBranchSelect && branches.length > 0 && (
           <div className="space-y-1.5">
             <Label className="text-xs">Sucursal</Label>
-            <Select
-              value={branchId}
-              onValueChange={(v) => { setSelectedBranchId(v); setEditing(false); }}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Selecciona una sucursal..." />
-              </SelectTrigger>
-              <SelectContent>
-                {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id} className="text-xs">{b.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {branches.length === 1 ? (
+              <p className="text-xs font-medium py-1">{branches[0].name}</p>
+            ) : (
+              <Select
+                value={branchId}
+                onValueChange={(v) => { setSelectedBranchId(v); setEditing(false); }}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Selecciona una sucursal..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={b.id} className="text-xs">{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
         )}
 
@@ -448,13 +452,13 @@ export default function Settings() {
           <p className="text-xs text-muted-foreground">
             Solo el owner o el equipo de IT puede gestionar esta integración.
           </p>
-        ) : !branchId ? (
-          <p className="text-xs text-muted-foreground">Selecciona una sucursal para continuar.</p>
         ) : isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
             <Loader2 className="h-4 w-4 animate-spin" />
             Cargando configuración...
           </div>
+        ) : !branchId ? (
+          <p className="text-xs text-muted-foreground">No se encontraron sucursales en tu cuenta.</p>
         ) : isConnected && !editing ? (
           <ConnectedCard config={config} branchId={branchId} onEdit={() => setEditing(true)} />
         ) : (

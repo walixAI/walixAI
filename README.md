@@ -240,6 +240,97 @@ Envía 4 mensajes al webhook local simulando a una mamá que llega por el anunci
 Llama a `POST /api/kb/reindex` con un token de usuario `owner` o `it`.
 Consulta el estado con `GET /api/kb/status`.
 
+## Sprint 3 — Setup (Handoff + Meta Lead Ads)
+
+### Variables de entorno adicionales
+
+```
+META_VERIFY_TOKEN=<string que eliges; lo pones también en Meta Developers>
+META_APP_SECRET=<App Secret de tu Meta App>
+```
+
+Ya deberían estar si configuraste Sprint 1. No se agregan variables nuevas en Sprint 3.
+
+### Pasos (una sola vez por entorno)
+
+```bash
+# 1. Aplicar migraciones nuevas
+#    - activities, meta_ads, handoff_at/by en leads
+#    - conversations.status → VARCHAR (asyncpg enum fix)
+#    - messages.role → VARCHAR (asyncpg enum fix)
+cd backend
+.venv/bin/alembic upgrade head
+
+# 2. Re-sembrar usuarios si es una BD nueva
+.venv/bin/python scripts/seed.py
+# seed.py ya incluye: owner, asistente, doctor, it, asesor×2
+
+# 3. Verificar que el flujo de handoff funciona end-to-end
+.venv/bin/python scripts/test_handoff.py
+# Requiere: backend corriendo en localhost:8000
+
+# 4. Verificar integración Meta Lead Ads
+.venv/bin/python scripts/test_meta_leads.py
+# Requiere: backend corriendo en localhost:8000
+# Nota: el paso del webhook crea el MetaLeadConfig de prueba en BD y
+#       verifica la firma HMAC. La llamada real a la Graph API de Meta
+#       requiere un token válido (sin él falla silenciosamente).
+```
+
+### Configurar Meta Lead Ads en el dashboard
+
+Una vez en producción (Railway):
+
+1. Inicia sesión como **owner** o **it** en el dashboard.
+2. Ve a **Configuración** → sección **Meta Lead Ads**.
+3. Completa el wizard de 5 pasos:
+   - **Page ID**: Facebook → tu Página → Información → ID de página.
+   - **Access Token**: Meta Developers → WhatsApp → API Setup → System User con permiso `leads_retrieval`.
+   - **Form IDs**: Meta Business Suite → Formularios para clientes potenciales → copia los IDs separados por coma.
+   - **Webhook**: copia la URL y el Verify Token que muestra el paso 4.
+   - **Confirmar**: revisa y guarda.
+4. En Meta Developers → WhatsApp → Configuration → Webhook → **Edit**:
+   - Callback URL: `https://<tu-backend>.up.railway.app/api/webhooks/meta-leads`
+   - Verify Token: el mismo valor de `META_VERIFY_TOKEN` (se muestra en el paso 4 del wizard).
+   - Clic en **Verify and save**, luego suscríbete al campo `leadgen`.
+
+Cuando alguien llene un formulario en Facebook/Instagram, Walix crea el lead automáticamente con `source=meta_ads` y arranca la conversación con Wali.
+
+### Agregar doctores a una sucursal
+
+Los doctores se manejan como usuarios con `role=doctor` asignados a una sucursal.
+
+**Via script (dev/staging):**
+
+```bash
+cd backend
+.venv/bin/python scripts/add_test_users.py --branch "Monterrey"
+# Crea: asistente@clinica.com, doctor@clinica.com, it@clinica.com
+```
+
+**Via API (producción):**
+
+No hay endpoint de creación de usuarios en el dashboard aún (Sprint 4). Por ahora, conéctate directamente a la BD de Railway:
+
+```sql
+-- 1. Obtener el branch_id y tenant_id de la sucursal
+SELECT id, tenant_id FROM branches WHERE name = 'Monterrey';
+
+-- 2. Insertar el usuario (password hash con bcrypt rounds=12)
+-- Genera el hash con: python -c "from app.core.security import hash_password; print(hash_password('password123'))"
+INSERT INTO users (id, tenant_id, branch_id, email, name, hashed_password, role, is_active)
+VALUES (
+    gen_random_uuid(),
+    '<tenant_id>',
+    '<branch_id>',
+    'dra.perez@clinica.com',
+    'Dra. Pérez',
+    '<bcrypt_hash>',
+    'doctor',
+    true
+);
+```
+
 ## Scripts útiles
 
 ```bash
@@ -248,5 +339,7 @@ backend/scripts/add_test_users.py     # agrega asistente/doctor/it a tenant exis
 backend/scripts/test_webhook.py       # un mensaje de prueba firmado contra localhost:8000
 backend/scripts/test_rag.py           # verifica retrieval híbrido con 5 queries
 backend/scripts/test_qualification.py # conversación completa de calificación end-to-end
+backend/scripts/test_handoff.py       # handoff → reply → asignación → return-to-bot
+backend/scripts/test_meta_leads.py    # HMAC validation + lead con source=meta_ads
 backend/scripts/ingest_kb.py          # indexa backend/scripts/walix_kb/*.md en pgvector
 ```

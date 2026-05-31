@@ -26,7 +26,7 @@ from app.models.conversation import (
 from app.core.config import settings
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.tenant import Branch
-from app.models.user import User  # noqa: F401  (also used by get_current_user)
+from app.models.user import User, UserRole  # noqa: F401  (also used by get_current_user)
 from app.services.whatsapp import WhatsAppService
 
 logger = logging.getLogger(__name__)
@@ -154,6 +154,9 @@ class UserBrief(BaseModel):
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+_MULTI_BRANCH_ROLES = (UserRole.OWNER, UserRole.IT)
+
+
 def _require_branch(user: User) -> uuid.UUID:
     if user.branch_id is None:
         raise HTTPException(
@@ -163,12 +166,24 @@ def _require_branch(user: User) -> uuid.UUID:
     return user.branch_id
 
 
-async def _get_lead_in_branch(
-    db: AsyncSession, lead_id: uuid.UUID, branch_id: uuid.UUID
+async def _get_lead_accessible(
+    db: AsyncSession, lead_id: uuid.UUID, user: User
 ) -> Lead:
+    """Fetch a lead the user is allowed to see.
+
+    Owner/IT: any lead in their tenant.
+    Others: only leads in their own branch.
+    """
     lead = await db.get(Lead, lead_id)
-    if lead is None or lead.branch_id != branch_id:
+    if lead is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    if user.role in _MULTI_BRANCH_ROLES:
+        if lead.tenant_id != user.tenant_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    else:
+        branch_id = _require_branch(user)
+        if lead.branch_id != branch_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
     return lead
 
 
@@ -216,9 +231,11 @@ async def list_leads(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LeadListResponse:
-    branch_id = _require_branch(current_user)
-
-    base = select(Lead).where(Lead.branch_id == branch_id)
+    if current_user.role in _MULTI_BRANCH_ROLES:
+        base = select(Lead).where(Lead.tenant_id == current_user.tenant_id)
+    else:
+        branch_id = _require_branch(current_user)
+        base = select(Lead).where(Lead.branch_id == branch_id)
 
     if not all_dates:
         target_date = on_date or datetime.now(MX_TZ).date()
@@ -246,8 +263,7 @@ async def get_lead(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LeadDetail:
-    branch_id = _require_branch(current_user)
-    lead = await _get_lead_in_branch(db, lead_id, branch_id)
+    lead = await _get_lead_accessible(db, lead_id, current_user)
     detail = LeadDetail.model_validate(lead)
     if lead.assigned_to:
         assignee = await db.get(User, lead.assigned_to)
@@ -261,8 +277,7 @@ async def get_lead_conversation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ConversationOut:
-    branch_id = _require_branch(current_user)
-    await _get_lead_in_branch(db, lead_id, branch_id)
+    await _get_lead_accessible(db, lead_id, current_user)
 
     conversation = await _get_active_conversation(db, lead_id)
     if conversation is None:
@@ -281,8 +296,7 @@ async def update_lead_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LeadDetail:
-    branch_id = _require_branch(current_user)
-    lead = await _get_lead_in_branch(db, lead_id, branch_id)
+    lead = await _get_lead_accessible(db, lead_id, current_user)
 
     previous = lead.status
     history_entry = {
@@ -319,8 +333,7 @@ async def handoff_lead(
     db: AsyncSession = Depends(get_db),
 ) -> LeadWithConversation:
     """Asistente toma control manual de la conversación."""
-    branch_id = _require_branch(current_user)
-    lead = await _get_lead_in_branch(db, lead_id, branch_id)
+    lead = await _get_lead_accessible(db, lead_id, current_user)
 
     conversation = await _get_active_conversation(db, lead.id)
     if conversation is not None:
@@ -364,8 +377,7 @@ async def return_to_bot(
     db: AsyncSession = Depends(get_db),
 ) -> LeadWithConversation:
     """Devuelve el control al bot y notifica al lead via WhatsApp."""
-    branch_id = _require_branch(current_user)
-    lead = await _get_lead_in_branch(db, lead_id, branch_id)
+    lead = await _get_lead_accessible(db, lead_id, current_user)
 
     conversation = await _get_active_conversation(db, lead.id)
 
@@ -424,8 +436,7 @@ async def send_message(
     db: AsyncSession = Depends(get_db),
 ) -> MessageOut:
     """Send a message from the asistente through the clinic's WhatsApp number."""
-    branch_id = _require_branch(current_user)
-    lead = await _get_lead_in_branch(db, lead_id, branch_id)
+    lead = await _get_lead_accessible(db, lead_id, current_user)
 
     conversation = await _get_active_conversation(db, lead_id)
     if conversation is None or conversation.current_handler != ConversationHandler.HUMAN:
@@ -484,8 +495,7 @@ async def reply_to_lead(
     actualiza last_message_at y agrega el mensaje al historial de Redis para que
     el bot tenga contexto completo si retoma el control.
     """
-    branch_id = _require_branch(current_user)
-    lead = await _get_lead_in_branch(db, lead_id, branch_id)
+    lead = await _get_lead_accessible(db, lead_id, current_user)
 
     # 1. Conversación activa
     conversation = await _get_active_conversation(db, lead.id)
@@ -578,14 +588,11 @@ async def list_assignees(
 
     Doctors appear first, then asesores, then the rest.
     """
-    branch_id = _require_branch(current_user)
-    await _get_lead_in_branch(db, lead_id, branch_id)
-
-    from app.models.user import UserRole
+    lead = await _get_lead_accessible(db, lead_id, current_user)
 
     rows = await db.execute(
         select(User)
-        .where(User.branch_id == branch_id, User.is_active.is_(True))
+        .where(User.branch_id == lead.branch_id, User.is_active.is_(True))
         .order_by(User.role, User.name)
     )
     users = rows.scalars().all()
@@ -603,11 +610,10 @@ async def assign_lead(
     db: AsyncSession = Depends(get_db),
 ) -> LeadDetail:
     """Assigns a lead to a user (doctor or asesor) and notifies them via WhatsApp."""
-    branch_id = _require_branch(current_user)
-    lead = await _get_lead_in_branch(db, lead_id, branch_id)
+    lead = await _get_lead_accessible(db, lead_id, current_user)
 
     assignee = await db.get(User, body.user_id)
-    if assignee is None or assignee.branch_id != branch_id or not assignee.is_active:
+    if assignee is None or assignee.branch_id != lead.branch_id or not assignee.is_active:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Usuario no encontrado en esta sucursal",

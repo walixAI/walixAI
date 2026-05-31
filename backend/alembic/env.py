@@ -14,6 +14,7 @@ from app.models.base import Base
 # before Alembic introspects it for autogenerate.
 from app.models import conversation, knowledge, lead, tenant, user  # noqa: F401
 from app.models import activity, meta_ads  # noqa: F401  # Sprint 3
+from app.models import pipeline, onboarding  # noqa: F401  # Sprint 4
 
 config = context.config
 

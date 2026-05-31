@@ -6,6 +6,9 @@ from sqlalchemy import Boolean, Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+_INDUSTRY_VALUES = ["salud", "inmobiliaria", "educacion", "fintech", "otro"]
+_ONBOARDING_STATUS_VALUES = ["pending", "draft", "approved", "active"]
+
 from app.models.base import Base
 
 
@@ -101,5 +104,14 @@ class Branch(Base):
         default=AssignmentMode.EQUITATIVA,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    # Sprint 4 — AI config & onboarding
+    ai_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    onboarding_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="pending"
+    )
+    bot_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    business_description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     company: Mapped["Company"] = relationship(back_populates="branches")
