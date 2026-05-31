@@ -107,3 +107,11 @@ class Lead(Base):
     )
     meta_form_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     meta_ad_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    # Sprint 4: dynamic pipeline
+    pipeline_stage_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("pipeline_stages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )

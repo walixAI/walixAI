@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models.lead import Lead, LeadStatus
 from app.models.meta_ads import MetaLeadConfig
+from app.models.pipeline import PipelineStage
 from app.models.tenant import Branch
 from app.models.user import User, UserRole
 
@@ -56,7 +57,7 @@ async def _require_branch_access(
     """Raises 403 if the user has no access to the given branch."""
     if user.branch_id == branch_id:
         return
-    if user.role in (UserRole.OWNER, UserRole.GERENTE):
+    if user.role in (UserRole.OWNER, UserRole.IT, UserRole.GERENTE):
         branch = await db.get(Branch, branch_id)
         if branch and branch.tenant_id == user.tenant_id:
             return
@@ -234,3 +235,46 @@ async def delete_meta_config(
     if cfg:
         cfg.is_active = False
         await db.commit()
+
+
+# ── Pipeline stages ────────────────────────────────────────────────────────────
+
+
+class PipelineStageOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    order_index: int
+    color: str | None
+    is_won: bool
+    is_lost: bool
+
+
+@router.get("/{branch_id}/pipeline", response_model=list[PipelineStageOut])
+async def get_branch_pipeline(
+    branch_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PipelineStageOut]:
+    """Returns active pipeline stages for a branch ordered by order_index."""
+    await _require_branch_access(current_user, branch_id, db)
+    rows = await db.execute(
+        select(PipelineStage)
+        .where(
+            PipelineStage.branch_id == branch_id,
+            PipelineStage.is_active.is_(True),
+        )
+        .order_by(PipelineStage.order_index)
+    )
+    return [
+        PipelineStageOut(
+            id=s.id,
+            name=s.name,
+            slug=s.slug,
+            order_index=s.order_index,
+            color=s.color,
+            is_won=s.is_won,
+            is_lost=s.is_lost,
+        )
+        for s in rows.scalars().all()
+    ]

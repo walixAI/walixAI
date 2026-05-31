@@ -26,6 +26,7 @@ from app.models.conversation import (
     ConversationStatus,
 )
 from app.models.lead import Lead, LeadSentiment, LeadStatus
+from app.models.pipeline import PipelineStage
 from app.models.tenant import Branch
 from app.models.user import User
 from app.services.whatsapp import WhatsAppService
@@ -149,6 +150,8 @@ async def qualify_lead(
         await db.commit()
         await db.refresh(lead)
 
+        await advance_lead_stage(lead, q_status_str, db)
+
         if q_status_str == "calificado":
             await notify_assistant(lead, db)
         elif q_status_str == "escalar":
@@ -161,6 +164,50 @@ async def qualify_lead(
         result.get("qualification_score") or 0.0,
     )
     return result
+
+
+async def advance_lead_stage(lead: Lead, q_status: str, db: AsyncSession) -> None:
+    """Advances lead.pipeline_stage_id based on qualification result.
+
+    For "calificado": finds the stage with slug "calificado" (or closest match).
+    For "no_calificado": finds the stage with is_lost=True.
+    No-ops if the branch has no pipeline stages (backward compat with Sprints 1-3).
+    """
+    rows = await db.execute(
+        select(PipelineStage).where(
+            PipelineStage.branch_id == lead.branch_id,
+            PipelineStage.is_active.is_(True),
+        )
+    )
+    stages = rows.scalars().all()
+    if not stages:
+        return
+
+    target: PipelineStage | None = None
+
+    if q_status == "calificado":
+        # Prefer exact slug "calificado", fall back to any slug containing "calificad"
+        for s in stages:
+            if s.slug == "calificado":
+                target = s
+                break
+        if target is None:
+            for s in stages:
+                if "califica" in s.slug:
+                    target = s
+                    break
+    elif q_status == "no_calificado":
+        for s in stages:
+            if s.is_lost:
+                target = s
+                break
+
+    if target is not None:
+        lead.pipeline_stage_id = target.id
+        await db.commit()
+        logger.info(
+            "advance_lead_stage: lead=%s → stage=%s (%s)", lead.id, target.name, target.slug
+        )
 
 
 async def notify_assistant(lead: Lead, db: AsyncSession) -> None:
