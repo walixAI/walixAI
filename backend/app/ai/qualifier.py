@@ -11,11 +11,13 @@ import json
 import logging
 import re
 import uuid
+from typing import Any
 
 from anthropic import AsyncAnthropic
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.config_loader import build_qualification_json_schema, get_default_config
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.conversation import (
@@ -32,57 +34,22 @@ logger = logging.getLogger(__name__)
 
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
-_QUALIFICATION_PROMPT = """\
-Analiza esta conversación y extrae en JSON los datos de calificación para una \
-clínica de endocrinología pediátrica. Responde ÚNICAMENTE con JSON válido:
-{
-  "child_age": número o null,
-  "child_age_in_range": true si está entre 3 y 15, false si no, null si no se mencionó,
-  "consultation_reason": texto del motivo o null,
-  "reason_qualifies": true si es talla baja/crecimiento lento/déficit hormonal, false si no, null si no se mencionó,
-  "parent_name": nombre del padre/madre o null,
-  "parent_city": ciudad mencionada o null,
-  "contact_phone": número de teléfono de contacto si el padre mencionó uno DIFERENTE al número de WhatsApp, de lo contrario null,
-  "branch_suggested": "Monterrey" o "Santa Fe CDMX" o "Condesa CDMX" o "fuera_cobertura" o null,
-  "qualification_status": "calificado" si tiene los 3 criterios, "no_calificado" si explícitamente no cumple, "incompleto" si falta info, "escalar" si hay urgencia médica,
-  "qualification_score": float 0.0 a 1.0 según qué tan completa está la calificación,
-  "missing_fields": lista de strings con qué falta,
-  "escalation_reason": razón de escalado o null
-}
-CONVERSACIÓN:
-{conversation}"""
-
-_STATUS_MAP: dict[str, LeadStatus] = {
-    "calificado": LeadStatus.CALIFICADO,
-    "no_calificado": LeadStatus.PERDIDO,
-    "incompleto": LeadStatus.EN_CALIFICACION,
-    "escalar": LeadStatus.ESCALADO,
-}
-
-_SENTIMENT_MAP: dict[str, LeadSentiment] = {
-    "calificado": LeadSentiment.INTERESADO,
-    "no_calificado": LeadSentiment.NEGATIVO,
-    "incompleto": LeadSentiment.NEUTRAL,
-    "escalar": LeadSentiment.URGENTE,
-}
-
 _anthropic = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 _whatsapp = WhatsAppService()
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _format_history(history: list[dict]) -> str:
+def _format_history(history: list[dict], bot_name: str = "Bot") -> str:
     lines = []
     for msg in history:
-        role = "Padre/Madre" if msg["role"] == "user" else "Wali (bot)"
+        role = "Usuario" if msg["role"] == "user" else f"{bot_name} (bot)"
         lines.append(f"{role}: {msg['content']}")
     return "\n".join(lines)
 
 
 def _extract_json(text: str) -> dict:
     """Extracts the first JSON object from a Claude response string."""
-    # Strip possible markdown fences
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE)
     match = re.search(r"\{.*\}", cleaned, re.DOTALL)
     if not match:
@@ -96,6 +63,7 @@ async def qualify_lead(
     conversation_history: list[dict],
     lead_id: uuid.UUID,
     branch_id: uuid.UUID,
+    config: dict[str, Any] | None = None,
 ) -> dict:
     """Evaluates qualification criteria and updates the lead record.
 
@@ -105,9 +73,24 @@ async def qualify_lead(
     if not conversation_history:
         return {}
 
-    # 1. Ask Claude to extract qualification data
-    formatted = _format_history(conversation_history)
-    prompt = _QUALIFICATION_PROMPT.replace("{conversation}", formatted)
+    if config is None:
+        config = get_default_config("salud")
+
+    qual = config["qualification"]
+    required_fields: list[dict] = qual["required_fields"]
+    bot_name: str = config["bot_persona"]["name"]
+
+    # 1. Build prompt and ask Claude to extract qualification data
+    fields_schema = build_qualification_json_schema(required_fields)
+    formatted = _format_history(conversation_history, bot_name=bot_name)
+    prompt = qual["prompt_template"].format(
+        objective=qual["objective"],
+        criteria=qual["criteria"],
+        disqualifiers=qual["disqualifiers"],
+        escalation_triggers=qual["escalation_triggers"],
+        fields_schema=fields_schema,
+        conversation=formatted,
+    )
 
     try:
         response = await _anthropic.messages.create(
@@ -127,21 +110,23 @@ async def qualify_lead(
             logger.warning("qualify_lead: lead %s not found", lead_id)
             return result
 
-        # Merge structured data into qualification_data (JSONB)
+        # Merge all industry-specific fields into qualification_data (JSONB)
         qdata = dict(lead.qualification_data or {})
-        for field in ("child_age", "consultation_reason", "parent_name", "parent_city"):
-            value = result.get(field)
+        for field in required_fields:
+            value = result.get(field["name"])
             if value is not None:
-                qdata[field] = value
+                qdata[field["name"]] = value
         lead.qualification_data = qdata
 
-        # Always sync lead.name from the extracted parent_name
-        if result.get("parent_name"):
-            lead.name = result["parent_name"]
+        # Sync lead.name from the configured name field
+        name_field = qual.get("name_field")
+        if name_field and result.get(name_field):
+            lead.name = result[name_field]
 
-        # Capture alternative contact phone if provided
-        if result.get("contact_phone"):
-            lead.contact_phone = result["contact_phone"]
+        # Sync lead.contact_phone from the configured phone field (if any)
+        phone_field = qual.get("phone_field")
+        if phone_field and result.get(phone_field):
+            lead.contact_phone = result[phone_field]
 
         lead.qualification_score = result.get("qualification_score")
 
@@ -150,11 +135,14 @@ async def qualify_lead(
 
         q_status_str = result.get("qualification_status", "")
 
-        new_status = _STATUS_MAP.get(q_status_str)
+        status_map = {k: LeadStatus(v) for k, v in qual["status_map"].items()}
+        sentiment_map = {k: LeadSentiment(v) for k, v in qual["sentiment_map"].items()}
+
+        new_status = status_map.get(q_status_str)
         if new_status:
             lead.status = new_status
 
-        new_sentiment = _SENTIMENT_MAP.get(q_status_str)
+        new_sentiment = sentiment_map.get(q_status_str)
         if new_sentiment:
             lead.sentiment = new_sentiment
 
@@ -177,7 +165,6 @@ async def qualify_lead(
 
 async def notify_assistant(lead: Lead, db: AsyncSession) -> None:
     """Sends a WhatsApp notification to the assigned user (or first branch user)."""
-    # Find the recipient user
     if lead.assigned_to:
         user = await db.get(User, lead.assigned_to)
     else:
@@ -193,7 +180,6 @@ async def notify_assistant(lead: Lead, db: AsyncSession) -> None:
         logger.info("notify_assistant: no active user for branch %s — skipping", lead.branch_id)
         return
 
-    # Assign lead to this user so it's visible in the dashboard
     if lead.assigned_to is None:
         lead.assigned_to = user.id
         await db.commit()
@@ -202,7 +188,6 @@ async def notify_assistant(lead: Lead, db: AsyncSession) -> None:
         logger.info("notify_assistant: user %s has no wa_phone — skipping WA message", user.id)
         return
 
-    # Load branch credentials
     branch = await db.get(Branch, lead.branch_id)
     if branch is None or not branch.wa_phone_number_id or not branch.wa_token:
         logger.warning("notify_assistant: branch %s missing WA credentials", lead.branch_id)

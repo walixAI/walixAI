@@ -2,13 +2,14 @@ import json
 import logging
 import time
 import uuid
+from typing import Any
 
 from anthropic import AsyncAnthropic
 from langfuse import Langfuse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.prompts import build_system_prompt
+from app.ai import config_loader
 from app.ai.qualifier import qualify_lead
 from app.ai.retrieval import format_rag_context, retrieve_context
 from app.core.config import settings
@@ -95,20 +96,24 @@ def _needs_escalation(text: str) -> bool:
     return any(phrase in lowered for phrase in ESCALATION_PHRASES)
 
 
-def get_lead_profile(lead: Lead) -> str:
+def get_lead_profile(lead: Lead, config: dict[str, Any]) -> str:
     """Returns a formatted string of already-collected lead data to inject into the prompt."""
     qdata = lead.qualification_data or {}
-    nombre = qdata.get("parent_name") or lead.name or "pendiente"
-    edad = qdata.get("child_age") or "pendiente"
-    motivo = qdata.get("consultation_reason") or "pendiente"
-    ciudad = qdata.get("parent_city") or "pendiente"
-    return (
-        "DATOS YA RECOPILADOS (no volver a preguntar):\n"
-        f"- Nombre: {nombre}\n"
-        f"- Edad del niño: {edad}\n"
-        f"- Motivo de consulta: {motivo}\n"
-        f"- Ciudad: {ciudad}"
-    )
+    required_fields: list[dict] = config["qualification"]["required_fields"]
+
+    collected = [
+        (f["name"], qdata[f["name"]])
+        for f in required_fields
+        if qdata.get(f["name"]) is not None
+    ]
+
+    if not collected:
+        return "DATOS YA RECOPILADOS (no volver a preguntar):\n- (ninguno aún)"
+
+    lines = ["DATOS YA RECOPILADOS (no volver a preguntar):"]
+    for name, value in collected:
+        lines.append(f"- {name}: {value}")
+    return "\n".join(lines)
 
 
 async def get_conversation_context(
@@ -142,13 +147,16 @@ async def process_message(
     message_id: str,
 ) -> None:
     async with AsyncSessionLocal() as db:
-        # 1. Lead
+        # 1. Load branch AI config (custom or industry default)
+        cfg = await config_loader.get_branch_config(branch_id, db)
+
+        # 2. Lead
         lead = await _get_or_create_lead(db, wa_phone, branch_id, tenant_id)
 
-        # 2. Conversation
+        # 3. Conversation
         conversation = await _get_or_create_active_conversation(db, lead)
 
-        # 3. Persist the user message regardless of handler so the agent can
+        # 4. Persist the user message regardless of handler so the agent can
         #    see it in the dashboard even when in human control mode.
         db.add(
             Message(
@@ -159,7 +167,7 @@ async def process_message(
             )
         )
 
-        # 4. Human in control — save the message but let bot stay silent.
+        # 5. Human in control — save the message but let bot stay silent.
         if conversation.current_handler == ConversationHandler.HUMAN:
             await db.commit()
             logger.info(
@@ -169,14 +177,14 @@ async def process_message(
 
         await db.commit()
 
-        # 5. Pull conversation history (Redis first, DB fallback).
+        # 6. Pull conversation history (Redis first, DB fallback).
         history_key = f"conv:{conversation.id}"
         history = await get_conversation_context(conversation.id, db)
 
-        # 6. Build messages payload: history + current user turn.
+        # 7. Build messages payload: history + current user turn.
         anthropic_messages = history + [{"role": "user", "content": message_body}]
 
-        # 7. RAG: retrieve relevant KB chunks.
+        # 8. RAG: retrieve relevant KB chunks.
         rag_chunks: list[dict] = []
         try:
             rag_chunks = await retrieve_context(message_body, str(tenant_id))
@@ -200,14 +208,18 @@ async def process_message(
         except Exception:
             logger.exception("RAG retrieval failed — continuing without context")
 
-        # 8. Build 4-layer system prompt: persona + channel rules + RAG + lead profile.
-        lead_profile = get_lead_profile(lead)
-        system_prompt = build_system_prompt(
-            rag_context=format_rag_context(rag_chunks),
-            lead_profile=lead_profile,
-        )
+        # 9. Build 4-layer system prompt: persona + channel rules + RAG + lead profile.
+        lead_profile = get_lead_profile(lead, cfg)
+        base_prompt = config_loader.build_system_prompt(cfg)
+        parts = [base_prompt]
+        rag_ctx = format_rag_context(rag_chunks)
+        if rag_ctx:
+            parts.append(rag_ctx)
+        if lead_profile:
+            parts.append(lead_profile)
+        system_prompt = "\n\n".join(parts)
 
-        # 9. Call Claude and measure latency.
+        # 10. Call Claude and measure latency.
         start = time.monotonic()
         response = await anthropic_client.messages.create(
             model=CLAUDE_MODEL,
@@ -222,7 +234,7 @@ async def process_message(
         output_tokens = response.usage.output_tokens
         total_tokens = input_tokens + output_tokens
 
-        # 9b. Persist the assistant message.
+        # 10b. Persist the assistant message.
         db.add(
             Message(
                 conversation_id=conversation.id,
@@ -233,7 +245,7 @@ async def process_message(
             )
         )
 
-        # 10. Escalation check on the assistant's reply.
+        # 11. Escalation check on the assistant's reply.
         if _needs_escalation(assistant_text):
             conversation.status = ConversationStatus.HANDOFF
             conversation.current_handler = ConversationHandler.HUMAN
@@ -246,20 +258,20 @@ async def process_message(
 
         await db.commit()
 
-        # 11. Build full history (user + assistant) for Redis and qualifier.
+        # 12. Build full history (user + assistant) for Redis and qualifier.
         updated_history = anthropic_messages + [
             {"role": "assistant", "content": assistant_text}
         ]
         updated_history = updated_history[-CONV_HISTORY_MAX_MESSAGES:]
 
-        # 12. Persist history in Redis, 24h TTL.
+        # 13. Persist history in Redis, 24h TTL.
         await redis_client.set(
             history_key,
             json.dumps(updated_history),
             ex=CONV_HISTORY_TTL_SECONDS,
         )
 
-        # 13. Send the reply via WhatsApp using the branch's credentials.
+        # 14. Send the reply via WhatsApp using the branch's credentials.
         branch = await db.get(Branch, branch_id)
         if branch is None or not branch.wa_phone_number_id or not branch.wa_token:
             logger.error(
@@ -273,11 +285,11 @@ async def process_message(
                 token=branch.wa_token,
             )
 
-    # 14. Run qualifier after the session is closed and the WA reply is sent.
+    # 15. Run qualifier after the session is closed and the WA reply is sent.
     #     process_message is already a background task, so awaiting here is safe.
-    await qualify_lead(updated_history, lead.id, branch_id)
+    await qualify_lead(updated_history, lead.id, branch_id, config=cfg)
 
-    # 15. Langfuse trace. Observability must not break message processing,
+    # 16. Langfuse trace. Observability must not break message processing,
     #     so failures here are logged and swallowed.
     try:
         with langfuse_client.start_as_current_observation(
