@@ -15,6 +15,7 @@ class ActivityType(str, enum.Enum):
     REPLY = "reply"
     RETURN_TO_BOT = "return_to_bot"
     STATUS_CHANGE = "status_change"
+    STAGE_CHANGE = "stage_change"
 
 
 class LeadActivity(Base):

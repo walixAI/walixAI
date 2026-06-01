@@ -16,6 +16,7 @@ from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.core.redis import redis_client
 from app.models.activity import ActivityType, LeadActivity
+from app.models.pipeline import PipelineStage
 from app.models.conversation import (
     Conversation,
     ConversationHandler,
@@ -138,6 +139,16 @@ class ReplyResponse(BaseModel):
     message_id: uuid.UUID
     sent_at: datetime
     status: str
+
+
+class StageUpdateBody(BaseModel):
+    stage_id: uuid.UUID
+    moved_by: str = "manual"  # "manual" | "ai_command" | "auto"
+
+
+class LeadStageOut(LeadDetail):
+    stage_name: str | None = None
+    stage_slug: str | None = None
 
 
 class AssignBody(BaseModel):
@@ -427,6 +438,58 @@ async def return_to_bot(
     detail.conversation = await _build_conversation_out(db, conversation)
 
     return detail
+
+
+@router.patch("/{lead_id}/stage", response_model=LeadStageOut)
+async def update_lead_stage(
+    lead_id: uuid.UUID,
+    body: StageUpdateBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LeadStageOut:
+    """Moves a lead to a different pipeline stage (drag-and-drop or AI command)."""
+    lead = await _get_lead_accessible(db, lead_id, current_user)
+
+    stage = await db.get(PipelineStage, body.stage_id)
+    if stage is None or stage.branch_id != lead.branch_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Stage not found in this branch",
+        )
+
+    old_stage_id = lead.pipeline_stage_id
+    lead.pipeline_stage_id = stage.id
+
+    # Sync lead status with terminal stage semantics
+    if stage.is_won:
+        lead.status = LeadStatus.CALIFICADO
+    elif stage.is_lost:
+        lead.status = LeadStatus.PERDIDO
+
+    moved_by = body.moved_by if body.moved_by in ("manual", "ai_command", "auto") else "manual"
+    db.add(LeadActivity(
+        lead_id=lead.id,
+        tenant_id=lead.tenant_id,
+        actor_id=current_user.id,
+        activity_type=ActivityType.STAGE_CHANGE,
+        payload={
+            "from_stage_id": str(old_stage_id) if old_stage_id else None,
+            "to_stage_id": str(stage.id),
+            "to_stage_name": stage.name,
+            "moved_by": moved_by,
+        },
+    ))
+
+    await db.commit()
+    await db.refresh(lead)
+
+    out = LeadStageOut.model_validate(lead)
+    out.stage_name = stage.name
+    out.stage_slug = stage.slug
+    if lead.assigned_to:
+        assignee = await db.get(User, lead.assigned_to)
+        out.assigned_to_name = assignee.name if assignee else None
+    return out
 
 
 @router.post("/{lead_id}/messages", response_model=MessageOut)

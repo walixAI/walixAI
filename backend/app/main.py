@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import ai, auth, branches, kb, leads, onboarding, webhooks
+from app.api import ai, auth, branches, kb, leads, onboarding, pipeline, webhooks
 from app.api.users import team_router, users_router
 from app.core.config import settings
 
@@ -47,6 +47,7 @@ app.include_router(team_router, prefix="/api")
 app.include_router(users_router, prefix="/api")
 app.include_router(kb.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")
+app.include_router(pipeline.router, prefix="/api")
 app.include_router(webhooks.router, prefix="/api")
 
 
