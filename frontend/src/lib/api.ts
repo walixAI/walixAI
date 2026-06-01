@@ -190,6 +190,44 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// ── Pipeline board types ──────────────────────────────────────────────────────
+
+export interface BoardLeadCard {
+  id: string;
+  name: string | null;
+  wa_phone: string;
+  status: LeadStatus;
+  sentiment: Sentiment;
+  risk_score: number | null;
+  assigned_to: string | null;
+  assigned_to_name: string | null;
+  days_in_stage: number;
+  qualification_score: number | null;
+}
+
+export interface PipelineStageBoardOut {
+  id: string;
+  name: string;
+  slug: string;
+  color: string | null;
+  order_index: number;
+  is_won: boolean;
+  is_lost: boolean;
+  leads: BoardLeadCard[];
+  total: number;
+}
+
+export interface BoardResponse {
+  stages: PipelineStageBoardOut[];
+}
+
+export interface LeadStageOut {
+  id: string;
+  pipeline_stage_id: string | null;
+  stage_name: string | null;
+  stage_slug: string | null;
+}
+
 // ── AI Bar types ──────────────────────────────────────────────────────────────
 
 export interface AICommandRequest {
@@ -367,6 +405,20 @@ export const api = {
 
   async toggleUser(userId: string): Promise<TeamMemberOut> {
     return request(`/api/users/${userId}/toggle`, { method: "PATCH" });
+  },
+
+  // Pipeline
+  async getPipelineBoard(branchId?: string, limitPerStage = 50): Promise<BoardResponse> {
+    const qs = new URLSearchParams({ limit_per_stage: String(limitPerStage) });
+    if (branchId) qs.set("branch_id", branchId);
+    return request(`/api/pipeline/board?${qs}`);
+  },
+
+  async moveLeadToStage(leadId: string, stageId: string): Promise<LeadStageOut> {
+    return request(`/api/leads/${leadId}/stage`, {
+      method: "PATCH",
+      body: JSON.stringify({ stage_id: stageId, moved_by: "manual" }),
+    });
   },
 
   // AI Bar

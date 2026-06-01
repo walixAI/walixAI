@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
-import { api, type LeadListItem, type PipelineStageOut } from "@/lib/api";
+import { Kanban, List } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { api, type BoardLeadCard } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
-import { StatusBadge } from "@/components/whatsapp/StatusBadge";
+import { useAIBarStore } from "@/stores/aiBarStore";
 import {
   Select,
   SelectContent,
@@ -13,11 +13,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
+import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
+import { ListView } from "@/components/pipeline/ListView";
+import { LeadDetailSheet } from "@/components/pipeline/LeadDetailSheet";
+
+type ViewMode = "kanban" | "list";
+const VIEW_KEY = "walix-pipeline-view";
 
 export default function Pipeline() {
   const { user } = useAuth();
-  const navigate = useNavigate();
+  const { setContext } = useAIBarStore();
+
+  const [view, setView] = useState<ViewMode>(
+    () => (localStorage.getItem(VIEW_KEY) as ViewMode | null) ?? "kanban",
+  );
 
   const isMultiBranch = user?.role === "owner" || user?.role === "it";
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
@@ -28,48 +37,55 @@ export default function Pipeline() {
     enabled: isMultiBranch,
   });
 
-  // branchId: explicit for multi-branch users, fixed for everyone else
-  const resolvedBranchId = selectedBranchId || (branches[0]?.id ?? "");
-  const branchId = user?.branch_id ?? resolvedBranchId;
+  const branchId: string =
+    user?.branch_id ??
+    (selectedBranchId || branches[0]?.id) ??
+    "";
 
-  const { data: stages = [], isLoading: stagesLoading } = useQuery({
-    queryKey: ["pipeline", branchId],
-    queryFn: () => api.getBranchPipeline(branchId),
-    enabled: !!branchId,
+  // Advisor filter
+  const [advisorId, setAdvisorId] = useState<string>("all");
+
+  const { data: team = [] } = useQuery({
+    queryKey: ["team", branchId],
+    queryFn: () => api.getTeam(branchId),
+    enabled: Boolean(branchId),
+    staleTime: 2 * 60_000,
   });
 
-  const { data: leadsData, isLoading: leadsLoading } = useQuery({
-    queryKey: ["leads", "pipeline"],
-    queryFn: () => api.listLeads({ all: true }),
-    refetchInterval: 30_000,
-  });
+  // Lead detail sheet
+  const [selectedCard, setSelectedCard] = useState<{
+    leadId: string;
+    stageName: string;
+    stageColor: string | null;
+  } | null>(null);
 
-  const leads = leadsData?.items ?? [];
+  // Update AI bar context when screen/branch changes
+  useEffect(() => {
+    if (branchId) setContext({ screen: "pipeline", branch_id: branchId });
+  }, [branchId, setContext]);
 
-  // Group leads by pipeline_stage_id; null → first stage
-  const leadsByStage = useMemo(() => {
-    const map: Record<string, LeadListItem[]> = {};
-    for (const s of stages) map[s.id] = [];
+  const handleViewChange = (v: ViewMode) => {
+    setView(v);
+    localStorage.setItem(VIEW_KEY, v);
+  };
 
-    const firstId = stages[0]?.id;
-    for (const lead of leads) {
-      const sid = lead.pipeline_stage_id ?? firstId;
-      if (sid && sid in map) {
-        map[sid].push(lead);
-      }
-    }
-    return map;
-  }, [stages, leads]);
+  const handleLeadClick = (
+    card: BoardLeadCard,
+    stageName: string,
+    stageColor: string | null,
+  ) => {
+    setSelectedCard({ leadId: card.id, stageName, stageColor });
+  };
 
-  const isLoading = stagesLoading || leadsLoading;
+  const resolvedAdvisorId = advisorId === "all" ? null : advisorId;
   const branchName = isMultiBranch
     ? (branches.find((b) => b.id === branchId)?.name ?? "")
     : "";
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="px-6 pt-6 pb-4 flex items-center gap-4 shrink-0">
+    <div className="h-full flex flex-col gap-4">
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 flex-wrap shrink-0">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Pipeline</h1>
           {branchName && (
@@ -77,20 +93,65 @@ export default function Pipeline() {
           )}
         </div>
 
+        {/* View toggle */}
+        <div className="flex items-center rounded-lg border border-border overflow-hidden ml-auto">
+          <button
+            onClick={() => handleViewChange("kanban")}
+            className={cn(
+              "p-2 transition-colors",
+              view === "kanban"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted",
+            )}
+            aria-label="Vista kanban"
+          >
+            <Kanban className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => handleViewChange("list")}
+            className={cn(
+              "p-2 transition-colors",
+              view === "list"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted",
+            )}
+            aria-label="Vista lista"
+          >
+            <List className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Branch selector (multi-branch roles only) */}
         {isMultiBranch && branches.length > 1 && (
-          <div className="flex items-center gap-2 ml-auto">
-            <Label className="text-xs text-muted-foreground shrink-0">Sucursal</Label>
-            <Select
-              value={branchId}
-              onValueChange={setSelectedBranchId}
-            >
-              <SelectTrigger className="h-8 w-44 text-xs">
-                <SelectValue placeholder="Selecciona sucursal" />
+          <Select value={branchId} onValueChange={setSelectedBranchId}>
+            <SelectTrigger className="h-8 w-44 text-xs">
+              <SelectValue placeholder="Selecciona sucursal" />
+            </SelectTrigger>
+            <SelectContent>
+              {branches.map((b) => (
+                <SelectItem key={b.id} value={b.id} className="text-xs">
+                  {b.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {/* Advisor filter */}
+        {team.length > 1 && (
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground shrink-0">Asesor</Label>
+            <Select value={advisorId} onValueChange={setAdvisorId}>
+              <SelectTrigger className="h-8 w-40 text-xs">
+                <SelectValue placeholder="Todos" />
               </SelectTrigger>
               <SelectContent>
-                {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id} className="text-xs">
-                    {b.name}
+                <SelectItem value="all" className="text-xs">
+                  Todos
+                </SelectItem>
+                {team.map((member) => (
+                  <SelectItem key={member.id} value={member.id} className="text-xs">
+                    {member.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -99,113 +160,38 @@ export default function Pipeline() {
         )}
       </div>
 
-      {/* Board */}
-      {isLoading ? (
+      {/* ── Content ────────────────────────────────────────────────────────── */}
+      {!branchId ? (
         <div className="flex-1 flex items-center justify-center">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            Selecciona una sucursal para ver el pipeline.
+          </p>
         </div>
-      ) : !branchId ? (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-sm text-muted-foreground">Selecciona una sucursal para ver el pipeline.</p>
-        </div>
-      ) : stages.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-sm text-muted-foreground">Esta sucursal no tiene etapas de pipeline configuradas.</p>
+      ) : view === "kanban" ? (
+        <div className="flex-1 overflow-x-auto min-h-0">
+          <KanbanBoard
+            branchId={branchId}
+            advisorId={resolvedAdvisorId}
+            onLeadClick={handleLeadClick}
+          />
         </div>
       ) : (
-        <div className="flex-1 overflow-x-auto px-6 pb-6">
-          <div className="flex gap-3 h-full" style={{ minWidth: "max-content" }}>
-            {stages.map((stage) => (
-              <KanbanColumn
-                key={stage.id}
-                stage={stage}
-                leads={leadsByStage[stage.id] ?? []}
-                onLeadClick={(lead) => navigate(`/whatsapp?leadId=${lead.id}`)}
-              />
-            ))}
-          </div>
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <ListView
+            branchId={branchId}
+            advisorId={resolvedAdvisorId}
+            onLeadClick={handleLeadClick}
+          />
         </div>
       )}
+
+      {/* Lead detail sheet */}
+      <LeadDetailSheet
+        leadId={selectedCard?.leadId ?? null}
+        stageName={selectedCard?.stageName}
+        stageColor={selectedCard?.stageColor}
+        onClose={() => setSelectedCard(null)}
+      />
     </div>
-  );
-}
-
-// ── Kanban column ──────────────────────────────────────────────────────────────
-
-function KanbanColumn({
-  stage,
-  leads,
-  onLeadClick,
-}: {
-  stage: PipelineStageOut;
-  leads: LeadListItem[];
-  onLeadClick: (lead: LeadListItem) => void;
-}) {
-  return (
-    <div className="w-56 shrink-0 flex flex-col rounded-xl border border-border bg-card">
-      {/* Column header */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
-        <span
-          className="h-2.5 w-2.5 rounded-full shrink-0"
-          style={{ backgroundColor: stage.color ?? "#888" }}
-        />
-        <span className="text-sm font-semibold truncate flex-1">{stage.name}</span>
-        <span
-          className={cn(
-            "text-xs font-medium tabular-nums px-1.5 py-0.5 rounded-full",
-            leads.length > 0
-              ? "bg-primary/10 text-primary"
-              : "bg-muted text-muted-foreground"
-          )}
-        >
-          {leads.length}
-        </span>
-      </div>
-
-      {/* Cards */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[120px]">
-        {leads.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground text-center py-8 select-none">
-            Sin leads
-          </p>
-        ) : (
-          leads.map((lead) => (
-            <LeadCard key={lead.id} lead={lead} onClick={() => onLeadClick(lead)} />
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Lead card ──────────────────────────────────────────────────────────────────
-
-function LeadCard({
-  lead,
-  onClick,
-}: {
-  lead: LeadListItem;
-  onClick: () => void;
-}) {
-  const displayName = lead.name ?? lead.wa_phone;
-
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "w-full text-left rounded-lg border border-border bg-background px-3 py-2.5",
-        "hover:border-primary/40 hover:shadow-sm transition-all duration-150"
-      )}
-    >
-      <p className="text-sm font-medium truncate">{displayName}</p>
-      <div className="flex items-center justify-between mt-1.5 gap-1">
-        <StatusBadge status={lead.status} />
-        {lead.qualification_score !== null && lead.qualification_score !== undefined && (
-          <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
-            {Math.round(lead.qualification_score * 100)}%
-          </span>
-        )}
-      </div>
-    </button>
   );
 }

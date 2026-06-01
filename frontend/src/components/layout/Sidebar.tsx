@@ -10,8 +10,8 @@ import { useState } from "react";
 
 const MAIN_ITEMS = [
   { to: "/dashboard",  label: "Dashboard",   icon: LayoutDashboard },
-  { to: "/whatsapp",   label: "WhatsApp",     icon: MessageCircle, badge: true },
   { to: "/pipeline",   label: "Pipeline",     icon: Kanban },
+  { to: "/whatsapp",   label: "WhatsApp",     icon: MessageCircle, badge: true },
   { to: "/contacts",   label: "Contactos",    icon: Users },
   { to: "/reports",    label: "Reportes",     icon: BarChart3 },
 ];
