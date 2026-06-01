@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.config_loader import build_qualification_json_schema, get_default_config
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.services.alert_generator import detect_risk
 from app.models.conversation import (
     Conversation,
     ConversationHandler,
@@ -159,6 +160,7 @@ async def qualify_lead(
         await db.refresh(lead)
 
         await advance_lead_stage(lead, q_status_str, db)
+        await detect_risk(lead, result, db)
 
         if q_status_str == "calificado":
             await notify_assistant(lead, db)

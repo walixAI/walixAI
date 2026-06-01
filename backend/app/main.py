@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import ai, auth, branches, kb, leads, onboarding, pipeline, webhooks
 from app.api.users import team_router, users_router
+from app.services.scheduler import lifespan_scheduler
 from app.core.config import settings
 
 logging.basicConfig(
@@ -21,6 +22,7 @@ app = FastAPI(
     title="Walix Backend",
     description="Conversational CRM with WhatsApp for Mexican SMBs",
     version="0.1.0",
+    lifespan=lifespan_scheduler,
 )
 
 # FRONTEND_URL puede ser una lista separada por comas; limpiamos espacios y diagonales finales
