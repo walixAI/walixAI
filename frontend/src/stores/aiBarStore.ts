@@ -1,17 +1,14 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-export interface AIBarAction {
-  type: string;
-  label: string;
-  payload?: Record<string, unknown>;
-}
+// suggested_actions are plain strings matching the backend shape.
+// Display logic (navigate / confirm / send) lives in AIPanel.
 
 export interface AIBarMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: number;
-  suggested_actions?: AIBarAction[];
+  suggested_actions?: string[];
 }
 
 export interface AIBarContext {
@@ -27,16 +24,19 @@ interface AIBarState {
   history: AIBarMessage[];
   currentContext: AIBarContext;
   isLoading: boolean;
+  /** Text pre-filled into the bar input by a suggested-action chip click. */
+  draftInput: string;
 
   setOpen: (v: boolean) => void;
   setMinimized: (v: boolean) => void;
   addMessage: (
     role: AIBarMessage["role"],
     content: string,
-    suggested_actions?: AIBarAction[],
+    suggested_actions?: string[],
   ) => void;
   setContext: (ctx: Partial<AIBarContext>) => void;
   setLoading: (v: boolean) => void;
+  setDraftInput: (v: string) => void;
   clear: () => void;
 }
 
@@ -48,6 +48,7 @@ export const useAIBarStore = create<AIBarState>()(
       history: [],
       currentContext: {},
       isLoading: false,
+      draftInput: "",
 
       setOpen: (isOpen) => set({ isOpen }),
       setMinimized: (isMinimized) => set({ isMinimized }),
@@ -61,6 +62,7 @@ export const useAIBarStore = create<AIBarState>()(
       setContext: (ctx) =>
         set((s) => ({ currentContext: { ...s.currentContext, ...ctx } })),
       setLoading: (isLoading) => set({ isLoading }),
+      setDraftInput: (draftInput) => set({ draftInput }),
       clear: () => set({ history: [], isOpen: false }),
     }),
     {

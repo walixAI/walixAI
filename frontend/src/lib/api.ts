@@ -198,17 +198,20 @@ export interface AICommandRequest {
   history: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
-export interface AICommandAction {
-  type: string;
-  label: string;
-  payload?: Record<string, unknown>;
-}
-
 export interface AICommandResponse {
   intent_type: string;
-  reply: string;
-  actions_taken: AICommandAction[];
-  suggested_actions: AICommandAction[];
+  response_text: string;
+  requires_confirmation: boolean;
+  actions_taken: Array<{ type: string; success: boolean; error?: string }>;
+  suggested_actions: string[];
+  tokens_used: number;
+  latency_ms: number;
+}
+
+export interface ContextInsightResponse {
+  insight: string;
+  urgency: "low" | "medium" | "high";
+  suggested_actions: string[];
 }
 
 // ── API object ────────────────────────────────────────────────────────────────
@@ -372,5 +375,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     });
+  },
+
+  async getContextInsight(
+    screen: string,
+    branch_id?: string,
+  ): Promise<ContextInsightResponse> {
+    const qs = new URLSearchParams({ screen });
+    if (branch_id) qs.set("branch_id", branch_id);
+    return request(`/api/ai/context-insight?${qs}`);
   },
 };
