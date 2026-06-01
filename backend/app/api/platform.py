@@ -109,17 +109,17 @@ async def _ai_tokens_by_tenant(
     """Returns {tenant_id: total_tokens} from both messages and ai_command_logs."""
     # Messages: join messages → conversations → branches for tenant_id
     msg_rows = await db.execute(
-        select(Branch.tenant_id, func.coalesce(func.sum(Message.tokens_used), 0).label("t"))
+        select(Branch.tenant_id, func.coalesce(func.sum(Message.tokens_used), 0).label("tok"))
         .join(Conversation, Message.conversation_id == Conversation.id)
         .join(Branch, Conversation.branch_id == Branch.id)
         .where(Message.created_at >= from_dt, Message.created_at < to_dt, Message.tokens_used.isnot(None))
         .group_by(Branch.tenant_id)
     )
-    totals: dict[uuid.UUID, int] = {row.tenant_id: int(row.t) for row in msg_rows.fetchall()}
+    totals: dict[uuid.UUID, int] = {row[0]: int(row[1]) for row in msg_rows.fetchall()}
 
     # AI command logs: direct tenant_id
     log_rows = await db.execute(
-        select(AICommandLog.tenant_id, func.coalesce(func.sum(AICommandLog.tokens_used), 0).label("t"))
+        select(AICommandLog.tenant_id, func.coalesce(func.sum(AICommandLog.tokens_used), 0).label("tok"))
         .where(
             AICommandLog.created_at >= from_dt,
             AICommandLog.created_at < to_dt,
@@ -128,7 +128,7 @@ async def _ai_tokens_by_tenant(
         .group_by(AICommandLog.tenant_id)
     )
     for row in log_rows.fetchall():
-        totals[row.tenant_id] = totals.get(row.tenant_id, 0) + int(row.t)
+        totals[row[0]] = totals.get(row[0], 0) + int(row[1])
 
     return totals
 
@@ -402,14 +402,15 @@ async def get_tenant_detail(
             .order_by(func.date_trunc("day", Message.created_at))
         )
         for row in daily_r.fetchall():
-            date_str = row.day.date().isoformat() if hasattr(row.day, "date") else str(row.day)[:10]
-            daily_map[date_str] = int(row.tokens)
+            day_val = row[0]
+            date_str = day_val.date().isoformat() if hasattr(day_val, "date") else str(day_val)[:10]
+            daily_map[date_str] = int(row[1])
 
     # Merge ai_command_logs daily (same tenant_id)
     cmd_daily_r = await db.execute(
         select(
-            func.date_trunc("day", AICommandLog.created_at).label("day"),
-            func.coalesce(func.sum(AICommandLog.tokens_used), 0).label("tokens"),
+            func.date_trunc("day", AICommandLog.created_at).label("cday"),
+            func.coalesce(func.sum(AICommandLog.tokens_used), 0).label("tok"),
         )
         .where(
             AICommandLog.tenant_id == tenant_id,
@@ -419,8 +420,9 @@ async def get_tenant_detail(
         .group_by(func.date_trunc("day", AICommandLog.created_at))
     )
     for row in cmd_daily_r.fetchall():
-        date_str = row.day.date().isoformat() if hasattr(row.day, "date") else str(row.day)[:10]
-        daily_map[date_str] = daily_map.get(date_str, 0) + int(row.tokens)
+        day_val = row[0]
+        date_str = day_val.date().isoformat() if hasattr(day_val, "date") else str(day_val)[:10]
+        daily_map[date_str] = daily_map.get(date_str, 0) + int(row[1])
 
     ai_by_day = [
         {"date": d, "tokens": t, "cost_usd": _tokens_to_usd(t)}
@@ -510,17 +512,17 @@ async def ai_costs(
 
     # Tokens from messages per tenant
     msg_rows = await db.execute(
-        select(Branch.tenant_id, func.coalesce(func.sum(Message.tokens_used), 0).label("t"))
+        select(Branch.tenant_id, func.coalesce(func.sum(Message.tokens_used), 0).label("tok"))
         .join(Conversation, Message.conversation_id == Conversation.id)
         .join(Branch, Conversation.branch_id == Branch.id)
         .where(Message.created_at >= from_dt, Message.created_at <= to_dt, Message.tokens_used.isnot(None))
         .group_by(Branch.tenant_id)
     )
-    msg_tokens: dict[uuid.UUID, int] = {row.tenant_id: int(row.t) for row in msg_rows.fetchall()}
+    msg_tokens: dict[uuid.UUID, int] = {row[0]: int(row[1]) for row in msg_rows.fetchall()}
 
     # Tokens from ai_command_logs per tenant
     cmd_rows = await db.execute(
-        select(AICommandLog.tenant_id, func.coalesce(func.sum(AICommandLog.tokens_used), 0).label("t"))
+        select(AICommandLog.tenant_id, func.coalesce(func.sum(AICommandLog.tokens_used), 0).label("tok"))
         .where(
             AICommandLog.created_at >= from_dt,
             AICommandLog.created_at <= to_dt,
@@ -528,7 +530,7 @@ async def ai_costs(
         )
         .group_by(AICommandLog.tenant_id)
     )
-    cmd_tokens: dict[uuid.UUID, int] = {row.tenant_id: int(row.t) for row in cmd_rows.fetchall()}
+    cmd_tokens: dict[uuid.UUID, int] = {row[0]: int(row[1]) for row in cmd_rows.fetchall()}
 
     all_tenant_ids = set(msg_tokens) | set(cmd_tokens)
     if not all_tenant_ids:
@@ -544,7 +546,7 @@ async def ai_costs(
     tenants_result = await db.execute(
         select(Tenant.id, Tenant.name).where(Tenant.id.in_(all_tenant_ids))
     )
-    name_map: dict[uuid.UUID, str] = {row.id: row.name for row in tenants_result.fetchall()}
+    name_map: dict[uuid.UUID, str] = {row[0]: row[1] for row in tenants_result.fetchall()}
 
     rows: list[AICostTenantRow] = []
     grand_tokens = 0
