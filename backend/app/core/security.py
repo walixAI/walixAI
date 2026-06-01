@@ -13,10 +13,12 @@ ACCESS_TOKEN_EXPIRE_HOURS = 8
 _BCRYPT_MAX_BYTES = 72
 
 
-def create_access_token(data: dict[str, Any]) -> str:
+def create_access_token(
+    data: dict[str, Any],
+    expires_at: datetime | None = None,
+) -> str:
     to_encode: dict[str, Any] = {**data}
-    expire = datetime.now(timezone.utc) + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
-    to_encode["exp"] = expire
+    to_encode["exp"] = expires_at or datetime.now(timezone.utc) + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 

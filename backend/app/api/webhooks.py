@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import uuid
 
 import httpx
@@ -18,10 +19,23 @@ from app.models.meta_ads import MetaLeadConfig
 from app.models.tenant import Branch
 from app.services.whatsapp import WhatsAppService
 
+_CODE_RE = re.compile(r"^\d{6}$")
+
 logger = logging.getLogger(__name__)
 _whatsapp = WhatsAppService()
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+
+
+async def _try_support_code(wa_phone: str, code: str) -> bool:
+    """Background task: attempt to activate a support session via WA code."""
+    try:
+        from app.api.support import activate_session_by_code
+        async with AsyncSessionLocal() as db:
+            return await activate_session_by_code(wa_phone, code, db)
+    except Exception:
+        logger.exception("webhook: support code activation failed wa=%s", wa_phone)
+        return False
 
 # Meta retries failed deliveries for up to ~24h, so dedup keys live that long.
 DEDUP_TTL_SECONDS = 86_400
@@ -119,6 +133,16 @@ async def receive_whatsapp_webhook(
                     claimed = True
 
                 if not claimed:
+                    continue
+
+                # Support code: 6-digit reply from an owner activates a pending session.
+                # These messages are not forwarded to the bot.
+                if _CODE_RE.match(message_body.strip()):
+                    background_tasks.add_task(
+                        _try_support_code,
+                        wa_phone=wa_phone,
+                        code=message_body.strip(),
+                    )
                     continue
 
                 background_tasks.add_task(

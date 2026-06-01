@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,6 +31,9 @@ class SupportSession(Base):
     )
     session_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    requested_duration_hours: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=4, server_default="4"
     )
     scope: Mapped[str] = mapped_column(
         String(20), nullable=False, default="readonly", server_default="readonly"
