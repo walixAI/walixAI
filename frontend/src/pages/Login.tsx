@@ -65,7 +65,7 @@ export default function Login() {
       setToken(access_token);
       setUser(user);
       toast.success("Bienvenido, " + user.name);
-      navigate("/dashboard");
+      navigate(user.role === "platform_owner" ? "/platform" : "/dashboard");
     } catch (err: any) {
       const msg = err?.message ?? "Error desconocido";
       if (msg.toLowerCase().includes("401") || msg.toLowerCase().includes("incorrect") || msg.toLowerCase().includes("invalid")) {

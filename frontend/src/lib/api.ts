@@ -2,6 +2,8 @@
 
 const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8000";
 const TOKEN_KEY = "walix_token";
+const PLATFORM_TOKEN_BACKUP_KEY = "walix_platform_token_backup";
+const IMPERSONATE_META_KEY = "walix_impersonate_meta";
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -11,6 +13,41 @@ export function setToken(t: string): void {
 }
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+}
+
+// ── JWT utilities ─────────────────────────────────────────────────────────────
+
+export function decodeJwtPayload(token: string): Record<string, unknown> {
+  try {
+    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(b64)) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+export function isImpersonating(): boolean {
+  const token = getToken();
+  if (!token) return false;
+  return Boolean(decodeJwtPayload(token).read_only_impersonation);
+}
+
+export function startImpersonation(impersonationToken: string, tenantName: string): void {
+  const current = getToken();
+  if (current) localStorage.setItem(PLATFORM_TOKEN_BACKUP_KEY, current);
+  setToken(impersonationToken);
+  localStorage.setItem(IMPERSONATE_META_KEY, tenantName);
+}
+
+export function endImpersonation(): void {
+  const backup = localStorage.getItem(PLATFORM_TOKEN_BACKUP_KEY);
+  if (backup) setToken(backup);
+  localStorage.removeItem(PLATFORM_TOKEN_BACKUP_KEY);
+  localStorage.removeItem(IMPERSONATE_META_KEY);
+}
+
+export function getImpersonatedTenantName(): string | null {
+  return localStorage.getItem(IMPERSONATE_META_KEY);
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -188,6 +225,42 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+// ── Platform Owner types ──────────────────────────────────────────────────────
+
+export interface RenewalItem {
+  tenant_name: string;
+  plan: string;
+  renewal_date: string;
+}
+
+export interface PlatformStats {
+  total_tenants: number;
+  active_tenants: number;
+  trials: number;
+  churned_this_month: number;
+  mrr_by_plan: Record<string, number>;
+  total_mrr: number;
+  renewals_next_30_days: RenewalItem[];
+  ai_costs_this_month: number;
+}
+
+export interface PlatformTenantItem {
+  id: string;
+  name: string;
+  plan: string;
+  is_active: boolean;
+  created_at: string;
+  leads_count: number;
+  ai_cost_this_month: number;
+}
+
+export interface ImpersonateResponse {
+  access_token: string;
+  token_type: string;
+  expires_at: string;
+  tenant_id: string;
 }
 
 // ── Pipeline board types ──────────────────────────────────────────────────────
@@ -405,6 +478,19 @@ export const api = {
 
   async toggleUser(userId: string): Promise<TeamMemberOut> {
     return request(`/api/users/${userId}/toggle`, { method: "PATCH" });
+  },
+
+  // Platform Owner
+  async getPlatformStats(): Promise<PlatformStats> {
+    return request("/api/platform/stats");
+  },
+
+  async getPlatformTenants(): Promise<PlatformTenantItem[]> {
+    return request("/api/platform/tenants");
+  },
+
+  async impersonateTenant(tenantId: string): Promise<ImpersonateResponse> {
+    return request(`/api/platform/impersonate/${tenantId}`, { method: "POST" });
   },
 
   // Pipeline

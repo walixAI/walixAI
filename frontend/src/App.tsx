@@ -4,7 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useInitAuth } from "@/hooks/useAuth";
+import { useInitAuth, useAuth } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { ErrorBoundary } from "@/components/walix/ErrorBoundary";
@@ -17,6 +17,7 @@ import Login from "@/pages/Login";
 import NotFound from "@/pages/NotFound";
 
 // Lazy: heavy pages
+const PlatformDashboard = lazy(() => import("@/pages/platform/PlatformDashboard"));
 const Dashboard = lazy(() => import("@/pages/app/Dashboard"));
 const Whatsapp = lazy(() => import("@/pages/app/Whatsapp"));
 const SettingsPage = lazy(() => import("@/pages/app/Settings"));
@@ -43,6 +44,23 @@ function RouteFallback() {
   );
 }
 
+// Redirects / based on user role after auth resolves
+function RootRedirect() {
+  const { user, loading } = useAuth();
+  if (loading) return <RouteFallback />;
+  if (user?.role === "platform_owner") return <Navigate to="/platform" replace />;
+  return <Navigate to="/dashboard" replace />;
+}
+
+// Guards /platform — only platform_owner may enter
+function PlatformRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return <RouteFallback />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== "platform_owner") return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
 const AppRoutes = () => {
   useInitAuth();
   return (
@@ -52,8 +70,8 @@ const AppRoutes = () => {
           {/* Public */}
           <Route path="/login" element={<Login />} />
 
-          {/* Root redirect */}
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          {/* Root redirect — role-aware */}
+          <Route path="/" element={<RootRedirect />} />
 
           {/* Protected app layout */}
           <Route
@@ -107,6 +125,16 @@ const AppRoutes = () => {
               <ProtectedRoute>
                 <PreviewPage />
               </ProtectedRoute>
+            }
+          />
+
+          {/* Platform Owner — standalone, no AppLayout */}
+          <Route
+            path="/platform"
+            element={
+              <PlatformRoute>
+                <PlatformDashboard />
+              </PlatformRoute>
             }
           />
 
