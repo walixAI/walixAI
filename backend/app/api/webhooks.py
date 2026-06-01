@@ -10,6 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, R
 from sqlalchemy import select
 
 from app.ai.bot_engine import process_message
+from app.api.internal_wa import handle_internal_command
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_client
@@ -89,6 +90,36 @@ async def receive_whatsapp_webhook(
                 # Delivery/read receipts (value.statuses) and other event types
                 # land here. Nothing to process — ack and move on.
                 continue
+
+            # ── Internal Walix WA number ──────────────────────────────────────
+            # Messages on the internal number are staff commands, not customer
+            # messages — process via AI Bar interpreter, skip branch lookup.
+            if (
+                settings.WALIX_INTERNAL_WA_NUMBER_ID
+                and wa_phone_number_id == settings.WALIX_INTERNAL_WA_NUMBER_ID
+            ):
+                for message in messages:
+                    message_id = message.get("id")
+                    wa_phone = message.get("from")
+                    message_body = (message.get("text") or {}).get("body")
+                    if not message_id or not wa_phone or message_body is None:
+                        continue
+                    try:
+                        claimed = await redis_client.set(
+                            f"msg:{message_id}", "1", nx=True, ex=DEDUP_TTL_SECONDS
+                        )
+                    except Exception:
+                        logger.exception("Redis dedup check failed for %s", message_id)
+                        claimed = True
+                    if not claimed:
+                        continue
+                    background_tasks.add_task(
+                        handle_internal_command,
+                        wa_phone=wa_phone,
+                        message_body=message_body,
+                    )
+                continue  # Skip customer-facing branch processing for this change
+            # ── End internal number block ─────────────────────────────────────
 
             # Resolve the branch this WhatsApp number belongs to. One lookup per
             # `change` since all its messages share the same metadata.

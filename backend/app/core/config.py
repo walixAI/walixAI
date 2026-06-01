@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # OpenAI — solo requerido para scripts/ingest_kb.py
     OPENAI_API_KEY: str | None = None
 
+    # Internal Walix WA number — commands from Walix staff phones go here
+    WALIX_INTERNAL_WA_NUMBER_ID: str | None = None
+    WALIX_INTERNAL_WA_TOKEN: str | None = None
+
     @property
     def effective_database_url(self) -> str:
         # Railway's internal hostname (.railway.internal) only resolves inside
