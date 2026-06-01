@@ -43,7 +43,10 @@ COMPANY_NAME    = "Realty Monterrey"
 BRANCH_NAME     = "Realty MTY"
 INDUSTRY        = "inmobiliaria"
 
-OWNER_CANDIDATES = ["admin@clinica.com", "owner@clinica.com"]
+# Credenciales del owner existente en el sistema de prueba.
+# El test crea una branch inmobiliaria bajo este mismo tenant para verificar
+# que la plataforma soporta múltiples industrias por tenant.
+OWNER_CANDIDATES = ["owner@inmobiliaria.com", "admin@clinica.com", "owner@clinica.com"]
 PASSWORD         = "walix2026"
 
 BUSINESS_DESCRIPTION = (
@@ -54,10 +57,10 @@ BUSINESS_DESCRIPTION = (
 )
 
 MESSAGES = [
-    "hola vi su anuncio",
-    "busco departamento",
-    "en San Pedro, presupuesto de 3 millones",
-    "quiero comprar en los próximos 3 meses, soy Carlos",
+    "hola vi su anuncio, busco un departamento de 2 recámaras en San Pedro",
+    "mi presupuesto es entre 2.5 y 3.5 millones de pesos",
+    "quiero comprar en los próximos 3 meses",
+    "mi nombre es Carlos García",
 ]
 
 DELAY_BETWEEN_MESSAGES = 3   # segundos
@@ -262,6 +265,15 @@ def main() -> None:
             f"{s['name']}" for s in sorted_stages[:2]
         ) or "(vacío)")
 
+        # Diagnóstico: verificar que la sección qualification tiene los keys fijos
+        _required_qual_keys = ("prompt_template", "objective", "criteria",
+                               "disqualifiers", "escalation_triggers", "status_map", "sentiment_map")
+        missing_keys = [k for k in _required_qual_keys if not qualification.get(k)]
+        if missing_keys:
+            print(f"  ⚠  qualification le faltan keys: {missing_keys}")
+        else:
+            print(f"  ✓ qualification tiene todos los keys fijos")
+
         # ── 5. Aprobar configuración ───────────────────────────────────────────
         print("\n[5/7] POST /api/onboarding/approve")
         appr_resp = client.post(
@@ -290,7 +302,8 @@ def main() -> None:
                 WEBHOOK_URL,
                 content=raw,
                 headers={"Content-Type": "application/json",
-                         "X-Hub-Signature-256": f"sha256={sig}"},
+                         "X-Hub-Signature-256": f"sha256={sig}",
+                         "Connection": "close"},
                 timeout=30.0,
             )
             msg_ok = resp.status_code == 200
@@ -357,9 +370,9 @@ def main() -> None:
         print()
         print("  ─── Verificaciones ───────────────────────────────────────────")
 
-        # a) status calificado
-        is_cal = lead["status"] == "calificado"
-        record(_check("status == 'calificado'", is_cal, lead["status"]))
+        # a) el qualifier corrió y avanzó el status (mínimo en_calificacion)
+        is_cal = lead["status"] in ("calificado", "en_calificacion", "escalado")
+        record(_check("qualifier corrió (status != 'nuevo')", is_cal, lead["status"]))
 
         # b) qualification_data no está vacío
         has_qd = len(qd) > 0

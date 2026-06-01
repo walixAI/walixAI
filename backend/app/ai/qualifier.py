@@ -77,15 +77,17 @@ async def qualify_lead(
     if config is None:
         config = get_default_config("salud")
 
-    qual = config["qualification"]
-    required_fields: list[dict] = qual["required_fields"]
-    bot_name: str = config["bot_persona"]["name"]
+    logger.info("qualify_lead: starting for lead %s", lead_id)
 
     # 1. Build prompt and ask Claude to extract qualification data
-    fields_schema = build_qualification_json_schema(required_fields)
-    formatted = _format_history(conversation_history, bot_name=bot_name)
-
     try:
+        qual = config["qualification"]
+        required_fields: list[dict] = qual["required_fields"]
+        bot_name: str = config["bot_persona"]["name"]
+
+        fields_schema = build_qualification_json_schema(required_fields)
+        formatted = _format_history(conversation_history, bot_name=bot_name)
+
         prompt = qual["prompt_template"].format(
             objective=qual.get("objective", ""),
             criteria=qual.get("criteria", ""),
@@ -96,10 +98,16 @@ async def qualify_lead(
         )
         response = await _anthropic.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=400,
+            max_tokens=800,
             messages=[{"role": "user", "content": prompt}],
         )
         result = _extract_json(response.content[0].text)
+        logger.info(
+            "qualify_lead: Claude returned status=%r score=%s for lead %s",
+            result.get("qualification_status"),
+            result.get("qualification_score"),
+            lead_id,
+        )
     except Exception:
         logger.exception("qualify_lead: prompt/Claude/parse failed for lead %s", lead_id)
         return {}
@@ -241,18 +249,13 @@ async def notify_assistant(lead: Lead, db: AsyncSession) -> None:
         return
 
     qdata = lead.qualification_data or {}
-    parent_name = qdata.get("parent_name") or lead.name or "—"
-    child_age = qdata.get("child_age")
-    age_str = f"{child_age} años" if child_age is not None else "—"
-    motivo = qdata.get("consultation_reason") or "—"
-    ciudad = qdata.get("parent_city") or "—"
+    name = lead.name or "—"
+    fields_summary = "\n".join(f"  {k}: {v}" for k, v in qdata.items()) or "  —"
 
     message = (
         f"🔔 Nuevo lead calificado\n"
-        f"Nombre: {parent_name}\n"
-        f"Edad del niño: {age_str}\n"
-        f"Motivo: {motivo}\n"
-        f"Ciudad: {ciudad}\n"
+        f"Nombre: {name}\n"
+        f"Datos:\n{fields_summary}\n"
         f"Ver en dashboard: {settings.FRONTEND_URL}/dashboard/leads/{lead.id}"
     )
 

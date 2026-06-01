@@ -11,6 +11,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+# Temporary file handler for diagnosis
+_fh = logging.FileHandler("/tmp/walix_debug.log")
+_fh.setLevel(logging.INFO)
+_fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+logging.getLogger("app").addHandler(_fh)
 
 app = FastAPI(
     title="Walix Backend",

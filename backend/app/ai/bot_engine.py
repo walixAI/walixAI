@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import time
@@ -136,7 +137,7 @@ async def get_conversation_context(
         .limit(CONV_HISTORY_MAX_MESSAGES)
     )
     messages = result.scalars().all()
-    return [{"role": m.role.value, "content": m.content} for m in reversed(messages)]
+    return [{"role": getattr(m.role, "value", m.role), "content": m.content} for m in reversed(messages)]
 
 
 async def process_message(
@@ -146,15 +147,35 @@ async def process_message(
     tenant_id: uuid.UUID,
     message_id: str,
 ) -> None:
+    logger.info("process_message: start wa=%s branch=%s msg=%s", wa_phone, branch_id, message_id)
+    try:
+        await _process_message_inner(wa_phone, message_body, branch_id, tenant_id, message_id)
+    except Exception:
+        logger.exception(
+            "process_message: unhandled exception wa=%s branch=%s msg=%s",
+            wa_phone, branch_id, message_id,
+        )
+
+
+async def _process_message_inner(
+    wa_phone: str,
+    message_body: str,
+    branch_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    message_id: str,
+) -> None:
     async with AsyncSessionLocal() as db:
         # 1. Load branch AI config (custom or industry default)
         cfg = await config_loader.get_branch_config(branch_id, db)
+        logger.info("process_message: config loaded for branch=%s", branch_id)
 
         # 2. Lead
         lead = await _get_or_create_lead(db, wa_phone, branch_id, tenant_id)
+        logger.info("process_message: lead=%s", lead.id)
 
         # 3. Conversation
         conversation = await _get_or_create_active_conversation(db, lead)
+        logger.info("process_message: conversation=%s", conversation.id)
 
         # 4. Persist the user message regardless of handler so the agent can
         #    see it in the dashboard even when in human control mode.
@@ -220,6 +241,7 @@ async def process_message(
         system_prompt = "\n\n".join(parts)
 
         # 10. Call Claude and measure latency.
+        logger.info("process_message: calling Claude for lead=%s", lead.id)
         start = time.monotonic()
         response = await anthropic_client.messages.create(
             model=CLAUDE_MODEL,
@@ -287,7 +309,12 @@ async def process_message(
 
     # 15. Run qualifier after the session is closed and the WA reply is sent.
     #     process_message is already a background task, so awaiting here is safe.
-    await qualify_lead(updated_history, lead.id, branch_id, config=cfg)
+    logger.info("process_message: calling qualify_lead for lead=%s", lead.id)
+    try:
+        await qualify_lead(updated_history, lead.id, branch_id, config=cfg)
+        logger.info("process_message: qualify_lead done for lead=%s", lead.id)
+    except Exception:
+        logger.exception("process_message: qualify_lead raised for lead %s", lead.id)
 
     # 16. Langfuse trace. Observability must not break message processing,
     #     so failures here are logged and swallowed.
@@ -312,6 +339,7 @@ async def process_message(
             },
         ):
             pass
-        langfuse_client.flush()
+        # flush() is sync/blocking — run in executor to avoid blocking the event loop
+        await asyncio.get_event_loop().run_in_executor(None, langfuse_client.flush)
     except Exception:
         logger.exception("Failed to send trace to Langfuse")

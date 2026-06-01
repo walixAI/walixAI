@@ -115,3 +115,10 @@ class Lead(Base):
         nullable=True,
         index=True,
     )
+
+    # Sprint 5: proactive alerts
+    risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    risk_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_alert_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
