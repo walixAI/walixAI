@@ -190,6 +190,27 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// ── AI Bar types ──────────────────────────────────────────────────────────────
+
+export interface AICommandRequest {
+  message: string;
+  context: Record<string, unknown>;
+  history: Array<{ role: "user" | "assistant"; content: string }>;
+}
+
+export interface AICommandAction {
+  type: string;
+  label: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface AICommandResponse {
+  intent_type: string;
+  reply: string;
+  actions_taken: AICommandAction[];
+  suggested_actions: AICommandAction[];
+}
+
 // ── API object ────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -343,5 +364,13 @@ export const api = {
 
   async toggleUser(userId: string): Promise<TeamMemberOut> {
     return request(`/api/users/${userId}/toggle`, { method: "PATCH" });
+  },
+
+  // AI Bar
+  async sendAICommand(data: AICommandRequest): Promise<AICommandResponse> {
+    return request("/api/ai/command", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   },
 };
