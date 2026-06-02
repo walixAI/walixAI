@@ -176,6 +176,7 @@ async def _process_lead(
 
     suggestion = AgentSuggestion(
         tenant_id=lead.tenant_id,
+        branch_id=lead.branch_id,
         agent_type="follow_up",
         trigger_description=trigger_description,
         suggestion_text=suggestion_text,

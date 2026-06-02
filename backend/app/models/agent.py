@@ -18,6 +18,12 @@ class AgentSuggestion(Base):
         nullable=False,
         index=True,
     )
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("branches.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     # follow_up | pipeline | closing | config
     agent_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     trigger_description: Mapped[str] = mapped_column(Text, nullable=False)

@@ -128,6 +128,7 @@ async def _run_closing(
 
     suggestion = AgentSuggestion(
         tenant_id=tenant_id,
+        branch_id=lead.branch_id,
         agent_type="closing",
         trigger_description=trigger_description,
         suggestion_text=suggestion_text,

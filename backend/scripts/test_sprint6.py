@@ -36,7 +36,7 @@ from app.models.conversation import (
     MessageRole,
 )
 from app.models.lead import Lead, LeadSource, LeadStatus
-from app.models.tenant import Branch
+from app.models.tenant import Branch  # noqa: F401 — kept for FK resolution in SQLAlchemy mapper
 from app.models.user import User, UserRole
 
 BASE_URL = "http://localhost:8000"
@@ -186,9 +186,8 @@ async def _count_pending_suggestions(branch_id: uuid.UUID) -> int:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(AgentSuggestion)
-            .join(Branch, AgentSuggestion.branch_id == Branch.id)
             .where(
-                Branch.id == branch_id,
+                AgentSuggestion.branch_id == branch_id,
                 AgentSuggestion.status.in_(["suggested", "accepted"]),
             )
         )

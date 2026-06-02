@@ -7,6 +7,7 @@ GET /api/dashboard returns a tailored response based on the caller's role:
   it             → integrations, AI usage, config alerts
   platform_owner → redirect to /api/platform/stats
 """
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -19,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
+from app.core.redis import redis_client
 from app.models.activity import ActivityType, LeadActivity
 from app.models.agent import AgentSuggestion
 from app.models.ai_log import AICommandLog
@@ -35,6 +37,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 _TERMINAL = [LeadStatus.PERDIDO, LeadStatus.CALIFICADO]
+CACHE_TTL = 300  # 5 min — aligns with daily_metrics update cadence
 
 # MRR per plan (USD) — mirrors platform.py
 _PLAN_MRR: dict[str, int] = {
@@ -57,19 +60,36 @@ async def get_dashboard(
     if role == UserRole.PLATFORM_OWNER:
         return RedirectResponse(url="/api/platform/stats", status_code=307)
 
+    # Cache key is per-user so each asesor sees their own leads.
+    # Date suffix ensures the cache flushes at midnight (natural data boundary).
+    today = datetime.now(timezone.utc).date().isoformat()
+    cache_key = f"dashboard:{role}:{current_user.id}:{today}"
+
+    try:
+        cached = await redis_client.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception:
+        logger.warning("dashboard: Redis cache read failed key=%s", cache_key)
+
     if role == UserRole.IT:
-        return await _it_dashboard(current_user, db)
-
-    if role == UserRole.OWNER:
-        return await _owner_dashboard(current_user, db)
-
-    if role == UserRole.GERENTE:
+        result: dict[str, Any] = await _it_dashboard(current_user, db)
+    elif role == UserRole.OWNER:
+        result = await _owner_dashboard(current_user, db)
+    elif role == UserRole.GERENTE:
         resolved = _resolve_branch(branch_id, current_user)
-        return await _gerente_dashboard(resolved, current_user, db)
+        result = await _gerente_dashboard(resolved, current_user, db)
+    else:
+        # asesor / doctor / default
+        resolved = _resolve_branch(branch_id, current_user)
+        result = await _asesor_dashboard(resolved, current_user, db)
 
-    # asesor / doctor / default
-    resolved = _resolve_branch(branch_id, current_user)
-    return await _asesor_dashboard(resolved, current_user, db)
+    try:
+        await redis_client.set(cache_key, json.dumps(result, default=str), ex=CACHE_TTL)
+    except Exception:
+        logger.warning("dashboard: Redis cache write failed key=%s", cache_key)
+
+    return result
 
 
 # ── Asesor dashboard ──────────────────────────────────────────────────────────

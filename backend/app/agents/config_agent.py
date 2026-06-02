@@ -134,6 +134,7 @@ async def _run_config(branch_id: uuid.UUID, db: AsyncSession) -> bool:
 
     suggestion = AgentSuggestion(
         tenant_id=branch.tenant_id,
+        branch_id=branch.id,
         agent_type="config",
         trigger_description=str(parsed.get("trigger_description", ""))[:80],
         suggestion_text=str(parsed.get("suggestion_text", ""))[:150],
