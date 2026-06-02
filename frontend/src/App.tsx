@@ -18,7 +18,7 @@ import NotFound from "@/pages/NotFound";
 
 // Lazy: heavy pages
 const PlatformDashboard = lazy(() => import("@/pages/platform/PlatformDashboard"));
-const Dashboard = lazy(() => import("@/pages/app/Dashboard"));
+const Dashboard = lazy(() => import("@/pages/dashboard/DashboardPage"));
 const Whatsapp = lazy(() => import("@/pages/app/Whatsapp"));
 const SettingsPage = lazy(() => import("@/pages/app/Settings"));
 const PipelinePage = lazy(() => import("@/pages/app/Pipeline"));

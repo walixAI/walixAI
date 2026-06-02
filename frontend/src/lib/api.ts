@@ -301,6 +301,187 @@ export interface LeadStageOut {
   stage_slug: string | null;
 }
 
+// ── Dashboard types (role-specific) ──────────────────────────────────────────
+
+export interface DashboardLeadItem {
+  id: string;
+  name: string | null;
+  wa_phone: string;
+  status: string;
+  sentiment: string;
+  current_score: number | null;
+  current_score_trend: number | null;
+  stage_name: string | null;
+  updated_at: string;
+}
+
+export interface DashboardActivity {
+  activity_type: string;
+  lead_id: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface DashboardSuggestion {
+  id: string;
+  agent_type: string;
+  suggestion_text: string;
+  created_at: string;
+}
+
+export interface MiniPipelineItem {
+  stage_id: string | null;
+  stage_name: string | null;
+  count: number;
+}
+
+export interface DashboardAsesor {
+  role: "asesor";
+  my_leads: DashboardLeadItem[];
+  recent_activity: DashboardActivity[];
+  pending_suggestions: DashboardSuggestion[];
+  mini_pipeline: MiniPipelineItem[];
+}
+
+export interface TeamPerformanceItem {
+  asesor_id: string;
+  name: string;
+  leads_assigned: number;
+  leads_won: number;
+  conversion_rate: number;
+}
+
+export interface SentimentSummary {
+  overall_score: number | null;
+  distribution: Record<string, { count: number; pct: number }>;
+  snapshot_date: string | null;
+}
+
+export interface AtRiskLead {
+  lead_id: string;
+  name: string | null;
+  score: number;
+  stage_name: string | null;
+}
+
+export interface DashboardGerente {
+  role: "gerente";
+  pipeline: {
+    total_active: number;
+    by_stage: Array<{ stage_id: string | null; stage_name: string | null; count: number; avg_score: number | null }>;
+  };
+  team_performance: TeamPerformanceItem[];
+  sentiment_summary: SentimentSummary;
+  at_risk_leads: AtRiskLead[];
+  active_automations: number;
+}
+
+export interface BranchMetrics {
+  branch_id: string;
+  branch_name: string;
+  leads_active: number;
+  leads_created_month: number;
+  leads_won_month: number;
+  conversion_rate: number;
+  sentiment_score: number | null;
+}
+
+export interface ConversionPeriod {
+  created: number;
+  won: number;
+  rate: number;
+}
+
+export interface DashboardOwner {
+  role: "owner";
+  branches: BranchMetrics[];
+  mrr_estimate: number;
+  conversion_comparison: { this_month: ConversionPeriod; last_month: ConversionPeriod };
+  cross_branch_suggestions: DashboardSuggestion[];
+}
+
+export interface DashboardIT {
+  role: "it";
+  integrations: { total_branches: number; branches_with_wa: number; branches_without_wa: number };
+  ai_command_logs_24h: number;
+  webhook_errors_24h: number;
+  ai_token_usage_month: number;
+  config_alerts: Array<{ type: string; branch_id: string; branch_name: string }>;
+}
+
+export type DashboardData = DashboardAsesor | DashboardGerente | DashboardOwner | DashboardIT;
+
+// ── Metrics types ─────────────────────────────────────────────────────────────
+
+export interface PeriodSummary {
+  leads_created: number;
+  leads_qualified: number;
+  leads_won: number;
+  leads_lost: number;
+  messages_sent: number;
+  messages_received: number;
+  calls_logged: number;
+  tasks_completed: number;
+  quotes_sent: number;
+  avg_first_response_sec: number;
+  conversion_rate: number;
+}
+
+export interface DailyMetricOut {
+  metric_date: string;
+  leads_created: number;
+  leads_qualified: number;
+  leads_won: number;
+  leads_lost: number;
+  messages_sent: number;
+  messages_received: number;
+  avg_first_response_sec: number;
+}
+
+export interface DeltaEntry {
+  current: number;
+  previous: number;
+  diff: number;
+  pct_change: number | null;
+}
+
+export interface MetricsDashboard {
+  period: string;
+  branch_id: string;
+  current: PeriodSummary;
+  previous: PeriodSummary | null;
+  delta: Record<string, DeltaEntry> | null;
+  daily: DailyMetricOut[];
+}
+
+export interface SentimentSnapshotOut {
+  snapshot_date: string;
+  overall_score: number;
+  distribution: Record<string, { count: number; pct: number }>;
+  by_stage: Record<string, number>;
+  by_agent: Record<string, number>;
+}
+
+export interface SentimentOut {
+  current: SentimentSnapshotOut | null;
+  trend: number | null;
+  insight: string;
+}
+
+export interface ForecastLeadOut {
+  lead_id: string;
+  name: string | null;
+  wa_phone: string;
+  score: number;
+  stage_name: string | null;
+}
+
+export interface ForecastOut {
+  pipeline_forecast: { high: number; medium: number; low: number };
+  high_probability_leads: ForecastLeadOut[];
+  at_risk_leads: ForecastLeadOut[];
+}
+
 // ── AI Bar types ──────────────────────────────────────────────────────────────
 
 export interface AICommandRequest {
@@ -522,5 +703,38 @@ export const api = {
     const qs = new URLSearchParams({ screen });
     if (branch_id) qs.set("branch_id", branch_id);
     return request(`/api/ai/context-insight?${qs}`);
+  },
+
+  // Dashboard (role-aware)
+  async getDashboard(branch_id?: string): Promise<DashboardData> {
+    const qs = branch_id ? `?branch_id=${branch_id}` : "";
+    return request(`/api/dashboard${qs}`);
+  },
+
+  // Metrics
+  async getMetricsDashboard(params: {
+    period?: "week" | "month" | "quarter";
+    compare?: boolean;
+    branch_id?: string;
+  } = {}): Promise<MetricsDashboard> {
+    const qs = new URLSearchParams();
+    if (params.period) qs.set("period", params.period);
+    if (params.compare != null) qs.set("compare", String(params.compare));
+    if (params.branch_id) qs.set("branch_id", params.branch_id);
+    const q = qs.toString() ? `?${qs}` : "";
+    return request(`/api/metrics/dashboard${q}`);
+  },
+
+  async getSentiment(params: { branch_id?: string; days?: number } = {}): Promise<SentimentOut> {
+    const qs = new URLSearchParams();
+    if (params.branch_id) qs.set("branch_id", params.branch_id);
+    if (params.days != null) qs.set("days", String(params.days));
+    const q = qs.toString() ? `?${qs}` : "";
+    return request(`/api/metrics/sentiment${q}`);
+  },
+
+  async getForecast(branch_id?: string): Promise<ForecastOut> {
+    const qs = branch_id ? `?branch_id=${branch_id}` : "";
+    return request(`/api/metrics/forecast${qs}`);
   },
 };
