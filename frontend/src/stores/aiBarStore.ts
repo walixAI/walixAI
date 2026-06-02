@@ -26,6 +26,8 @@ interface AIBarState {
   isLoading: boolean;
   /** Text pre-filled into the bar input by a suggested-action chip click. */
   draftInput: string;
+  /** Count of pending agent suggestions for the current user. */
+  pendingSuggestionsCount: number;
 
   setOpen: (v: boolean) => void;
   setMinimized: (v: boolean) => void;
@@ -37,6 +39,7 @@ interface AIBarState {
   setContext: (ctx: Partial<AIBarContext>) => void;
   setLoading: (v: boolean) => void;
   setDraftInput: (v: string) => void;
+  setPendingSuggestionsCount: (n: number) => void;
   clear: () => void;
 }
 
@@ -49,6 +52,7 @@ export const useAIBarStore = create<AIBarState>()(
       currentContext: {},
       isLoading: false,
       draftInput: "",
+      pendingSuggestionsCount: 0,
 
       setOpen: (isOpen) => set({ isOpen }),
       setMinimized: (isMinimized) => set({ isMinimized }),
@@ -63,6 +67,7 @@ export const useAIBarStore = create<AIBarState>()(
         set((s) => ({ currentContext: { ...s.currentContext, ...ctx } })),
       setLoading: (isLoading) => set({ isLoading }),
       setDraftInput: (draftInput) => set({ draftInput }),
+      setPendingSuggestionsCount: (pendingSuggestionsCount) => set({ pendingSuggestionsCount }),
       clear: () => set({ history: [], isOpen: false }),
     }),
     {

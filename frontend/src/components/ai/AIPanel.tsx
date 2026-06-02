@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AgentSuggestionsPanel } from "@/components/agents/AgentSuggestionsPanel";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -297,6 +298,9 @@ export function AIPanel() {
               onConfirm={handleConfirmRequest}
             />
           )}
+
+          {/* Agent suggestions — above message history */}
+          <AgentSuggestionsPanel />
 
           {/* Messages */}
           <ScrollArea className="flex-1 px-4 py-4">

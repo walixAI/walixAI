@@ -8,7 +8,7 @@ import { AIPanel } from "./AIPanel";
 export function WalixAIBar() {
   const {
     isOpen, isMinimized,
-    history, currentContext, isLoading, draftInput,
+    history, currentContext, isLoading, draftInput, pendingSuggestionsCount,
     setOpen, setMinimized, addMessage, setLoading, setDraftInput,
   } = useAIBarStore();
 
@@ -106,11 +106,18 @@ export function WalixAIBar() {
           {/* ✦ toggle panel */}
           <button
             onClick={() => setOpen(!isOpen)}
-            className="shrink-0 text-primary text-lg leading-none hover:text-primary/80
+            className="relative shrink-0 text-primary text-lg leading-none hover:text-primary/80
                        transition-colors focus:outline-none"
             aria-label="Abrir panel Walix AI"
           >
             ✦
+            {pendingSuggestionsCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-0.5 rounded-full
+                               bg-accent text-[9px] font-bold text-accent-foreground
+                               flex items-center justify-center leading-none">
+                {pendingSuggestionsCount > 9 ? "9+" : pendingSuggestionsCount}
+              </span>
+            )}
           </button>
 
           <input

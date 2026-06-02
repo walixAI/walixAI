@@ -499,6 +499,36 @@ export interface ForecastOut {
   at_risk_leads: ForecastLeadOut[];
 }
 
+// ── Agent suggestion types ────────────────────────────────────────────────────
+
+export interface AgentSuggestion {
+  id: string;
+  agent_type: string;
+  trigger_description: string;
+  suggestion_text: string;
+  action_payload: Record<string, unknown> | null;
+  target_role: string;
+  target_user_id: string | null;
+  status: "suggested" | "accepted" | "confirmed" | "dismissed" | "executed" | "failed" | "expired";
+  execution_result: Record<string, unknown> | null;
+  error_detail: string | null;
+  responded_at: string | null;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Automation types ──────────────────────────────────────────────────────────
+
+export type AutomationOut = AgentSuggestion;
+
+export interface AutomationListResponse {
+  items: AutomationOut[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 // ── AI Bar types ──────────────────────────────────────────────────────────────
 
 export interface AICommandRequest {
@@ -762,5 +792,48 @@ export const api = {
   async getForecast(branch_id?: string): Promise<ForecastOut> {
     const qs = branch_id ? `?branch_id=${branch_id}` : "";
     return request(`/api/metrics/forecast${qs}`);
+  },
+
+  // Agent suggestions
+  async getAgentSuggestions(): Promise<AgentSuggestion[]> {
+    return request("/api/agents/suggestions");
+  },
+
+  async confirmSuggestion(id: string): Promise<AgentSuggestion> {
+    return request(`/api/agents/suggestions/${id}/confirm`, { method: "POST" });
+  },
+
+  async dismissSuggestion(id: string, reason?: string): Promise<AgentSuggestion> {
+    return request(`/api/agents/suggestions/${id}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason ?? null }),
+    });
+  },
+
+  // Automations
+  async getAutomations(params: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    agent_type?: string;
+  } = {}): Promise<AutomationListResponse> {
+    const qs = new URLSearchParams();
+    if (params.page != null) qs.set("page", String(params.page));
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.status) qs.set("status", params.status);
+    if (params.agent_type) qs.set("agent_type", params.agent_type);
+    const q = qs.toString() ? `?${qs}` : "";
+    return request(`/api/automations${q}`);
+  },
+
+  async updateAutomation(id: string, data: { is_active?: boolean; custom_message?: string }): Promise<AutomationOut> {
+    return request(`/api/automations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async reExecuteAutomation(id: string): Promise<AutomationOut> {
+    return request(`/api/automations/${id}/re-execute`, { method: "POST" });
   },
 };
