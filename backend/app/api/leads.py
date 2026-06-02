@@ -761,6 +761,8 @@ class ScoreHistoryItem(BaseModel):
     score: int
     main_reason: str
     calculated_at: datetime
+    positive_factors: dict = {}
+    negative_factors: dict = {}
     model_config = ConfigDict(from_attributes=True)
 
 

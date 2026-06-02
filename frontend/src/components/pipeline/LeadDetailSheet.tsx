@@ -1,9 +1,12 @@
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useAIBarStore } from "@/stores/aiBarStore";
+import { LeadScoreGauge } from "@/components/leads/LeadScoreGauge";
 import {
   Sheet,
   SheetContent,
@@ -40,6 +43,8 @@ interface Props {
 export function LeadDetailSheet({ leadId, stageName, stageColor, onClose }: Props) {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const aiBar = useAIBarStore();
+  const notifiedLeads = useRef<Set<string>>(new Set());
 
   const { data: lead, isLoading } = useQuery({
     queryKey: ["lead", leadId],
@@ -47,6 +52,27 @@ export function LeadDetailSheet({ leadId, stageName, stageColor, onClose }: Prop
     enabled: Boolean(leadId),
     staleTime: 30_000,
   });
+
+  const { data: scoreData } = useQuery({
+    queryKey: ["lead-score", leadId],
+    queryFn: () => api.getLeadScore(leadId!),
+    enabled: Boolean(leadId),
+    staleTime: 60_000,
+  });
+
+  // Trigger AI message once per lead when score >= 70
+  useEffect(() => {
+    if (!leadId || !scoreData?.current_score) return;
+    if (scoreData.current_score >= 70 && !notifiedLeads.current.has(leadId)) {
+      notifiedLeads.current.add(leadId);
+      aiBar.addMessage(
+        "assistant",
+        `Este lead tiene ${scoreData.current_score}% de probabilidad de cierre. ¿Quieres que prepare una propuesta personalizada?`,
+        ["Preparar propuesta"],
+      );
+      aiBar.setOpen(true);
+    }
+  }, [scoreData?.current_score, leadId]);
 
   const handoffMutation = useMutation({
     mutationFn: () => api.handoff(leadId!),
@@ -145,6 +171,16 @@ export function LeadDetailSheet({ leadId, stageName, stageColor, onClose }: Prop
                   <ExternalLink className="h-3.5 w-3.5" />
                   Ver conversación completa
                 </Button>
+              </section>
+
+              {/* Predicción de cierre */}
+              <section>
+                <h3 className={cn(
+                  "text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3"
+                )}>
+                  Predicción de cierre
+                </h3>
+                <LeadScoreGauge leadId={lead.id} />
               </section>
             </>
           ) : null}

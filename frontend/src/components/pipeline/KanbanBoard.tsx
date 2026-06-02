@@ -22,6 +22,7 @@ import {
   type PipelineStageBoardOut,
 } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LeadScoreBadge } from "@/components/leads/LeadScoreBadge";
 
 const SENTIMENT_DOT: Record<string, string> = {
   interesado: "🟢",
@@ -44,6 +45,12 @@ function LeadCardContent({ card }: { card: BoardLeadCard }) {
           {initial}
         </span>
         <p className="text-sm font-medium truncate flex-1">{displayName}</p>
+        {card.current_score != null && (
+          <LeadScoreBadge
+            score={card.current_score}
+            trend={card.current_score_trend as "up" | "down" | "flat" | null}
+          />
+        )}
       </div>
 
       <div className="flex items-center gap-1.5 flex-wrap">

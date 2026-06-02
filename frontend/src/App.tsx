@@ -25,6 +25,7 @@ const PipelinePage = lazy(() => import("@/pages/app/Pipeline"));
 const OnboardingWizard = lazy(() => import("@/pages/onboarding/OnboardingWizard"));
 const PreviewPage = lazy(() => import("@/pages/onboarding/PreviewPage"));
 const TeamPage = lazy(() => import("@/pages/team/TeamPage"));
+const ForecastPage = lazy(() => import("@/pages/forecast/ForecastPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -108,6 +109,7 @@ const AppRoutes = () => {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/team" element={<TeamPage />} />
             <Route path="/pipeline" element={<PipelinePage />} />
+            <Route path="/forecast" element={<ForecastPage />} />
           </Route>
 
           {/* Onboarding flow — protected, no AppLayout */}

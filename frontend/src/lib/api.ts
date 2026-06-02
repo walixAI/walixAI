@@ -276,6 +276,23 @@ export interface BoardLeadCard {
   assigned_to_name: string | null;
   days_in_stage: number;
   qualification_score: number | null;
+  current_score: number | null;
+  current_score_trend: string | null;
+}
+
+export interface ScoreHistoryItem {
+  id: string;
+  score: number;
+  main_reason: string;
+  calculated_at: string;
+  positive_factors: { items?: string[] };
+  negative_factors: { items?: string[] };
+}
+
+export interface LeadScoreOut {
+  current_score: number | null;
+  current_score_trend: string | null;
+  history: ScoreHistoryItem[];
 }
 
 export interface PipelineStageBoardOut {
@@ -703,6 +720,15 @@ export const api = {
     const qs = new URLSearchParams({ screen });
     if (branch_id) qs.set("branch_id", branch_id);
     return request(`/api/ai/context-insight?${qs}`);
+  },
+
+  // Lead scoring
+  async getLeadScore(leadId: string): Promise<LeadScoreOut> {
+    return request(`/api/leads/${leadId}/score`);
+  },
+
+  async recalculateLeadScore(leadId: string): Promise<ScoreHistoryItem & { current_score_trend: string }> {
+    return request(`/api/leads/${leadId}/score/recalculate`, { method: "POST" });
   },
 
   // Dashboard (role-aware)

@@ -36,6 +36,8 @@ class LeadBoardCard(BaseModel):
     assigned_to_name: str | None
     days_in_stage: int
     qualification_score: float | None
+    current_score: int | None = None
+    current_score_trend: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -166,6 +168,8 @@ async def get_pipeline_board(
                 assigned_to_name=assignee_names.get(lead.assigned_to) if lead.assigned_to else None,
                 days_in_stage=_days_since(lead.updated_at),
                 qualification_score=lead.qualification_score,
+                current_score=lead.current_score,
+                current_score_trend=lead.current_score_trend,
             )
             for lead in stage_leads[:limit_per_stage]
         ]
