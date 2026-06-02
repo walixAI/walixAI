@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
@@ -14,13 +15,16 @@ from app.api.internal_wa import handle_internal_command
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_client
+from app.models.agent import AgentSuggestion
 from app.models.conversation import Conversation, ConversationHandler, ConversationStatus
 from app.models.lead import Lead, LeadSource, LeadStatus
+from app.models.user import User
 from app.models.meta_ads import MetaLeadConfig
 from app.models.tenant import Branch
 from app.services.whatsapp import WhatsAppService
 
 _CODE_RE = re.compile(r"^\d{6}$")
+_CONFIRM_WORDS = frozenset({"sí", "si", "confirmar"})
 
 logger = logging.getLogger(__name__)
 _whatsapp = WhatsAppService()
@@ -50,6 +54,66 @@ def _verify_signature(body: bytes, header: str | None, secret: str) -> bool:
     expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
     received = header[len("sha256=") :]
     return hmac.compare_digest(expected, received)
+
+
+async def _bg_execute_suggestion(suggestion_id: uuid.UUID) -> None:
+    """Background wrapper — opens its own DB session."""
+    try:
+        from app.agents.executor import execute_suggestion
+        async with AsyncSessionLocal() as db:
+            await execute_suggestion(suggestion_id, db)
+    except Exception:
+        logger.exception("webhook: bg execute failed for suggestion=%s", suggestion_id)
+
+
+async def _try_confirm_suggestion(
+    wa_phone: str,
+    branch: "Branch",
+    message_body: str,
+    background_tasks: BackgroundTasks,
+) -> bool:
+    """If message is a confirmation word from an internal user, confirm their latest suggestion.
+
+    Returns True if the message was handled (caller should skip normal bot processing).
+    """
+    if message_body.strip().lower() not in _CONFIRM_WORDS:
+        return False
+
+    # Normalize phone: Meta sends 521XXXXXXXXXX, users may store 52XXXXXXXXXX
+    normalized = _normalize_mx_phone(wa_phone)
+
+    async with AsyncSessionLocal() as db:
+        user_result = await db.execute(
+            select(User).where(
+                User.tenant_id == branch.tenant_id,
+                User.is_active.is_(True),
+                User.wa_phone.in_([wa_phone, normalized]),
+            ).limit(1)
+        )
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            return False
+
+        sugg_result = await db.execute(
+            select(AgentSuggestion).where(
+                AgentSuggestion.target_user_id == user.id,
+                AgentSuggestion.status == "suggested",
+            ).order_by(AgentSuggestion.created_at.desc()).limit(1)
+        )
+        suggestion = sugg_result.scalar_one_or_none()
+        if suggestion is None:
+            return False
+
+        suggestion.status = "confirmed"
+        suggestion.responded_at = datetime.now(timezone.utc)
+        await db.commit()
+        suggestion_id = suggestion.id
+
+    background_tasks.add_task(_bg_execute_suggestion, suggestion_id)
+    logger.info(
+        "webhook: suggestion %s confirmed via WA from %s", suggestion_id, wa_phone
+    )
+    return True
 
 
 @router.get("/whatsapp")
@@ -174,6 +238,13 @@ async def receive_whatsapp_webhook(
                         wa_phone=wa_phone,
                         code=message_body.strip(),
                     )
+                    continue
+
+                # Sprint 6: 'sí'/'si'/'confirmar' from an internal user confirms
+                # their latest pending suggestion without going through the bot.
+                if await _try_confirm_suggestion(
+                    wa_phone, branch, message_body, background_tasks
+                ):
                     continue
 
                 background_tasks.add_task(

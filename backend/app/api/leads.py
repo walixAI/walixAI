@@ -5,6 +5,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.models.scoring import LeadScore
+
 MX_TZ = ZoneInfo("America/Mexico_City")
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -34,6 +36,7 @@ logger = logging.getLogger(__name__)
 _whatsapp = WhatsAppService()
 
 router = APIRouter(prefix="/leads", tags=["leads"])
+tasks_router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 _CONV_HISTORY_TTL = 86_400   # 24 h — must match bot_engine.py
 _CONV_HISTORY_MAX = 8        # must match bot_engine.py
@@ -749,3 +752,171 @@ async def assign_lead(
     detail = LeadDetail.model_validate(lead)
     detail.assigned_to_name = assignee.name
     return detail
+
+
+# ── Score endpoints ────────────────────────────────────────────────────────────
+
+class ScoreHistoryItem(BaseModel):
+    id: uuid.UUID
+    score: int
+    main_reason: str
+    calculated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LeadScoreOut(BaseModel):
+    current_score: int | None
+    current_score_trend: str | None
+    history: list[ScoreHistoryItem]
+
+
+@router.get("/{lead_id}/score", response_model=LeadScoreOut)
+async def get_lead_score(
+    lead_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LeadScoreOut:
+    lead = await _get_lead_accessible(db, lead_id, current_user)
+
+    rows = await db.execute(
+        select(LeadScore)
+        .where(LeadScore.lead_id == lead_id)
+        .order_by(LeadScore.calculated_at.desc())
+        .limit(5)
+    )
+    history = [ScoreHistoryItem.model_validate(r) for r in rows.scalars().all()]
+
+    return LeadScoreOut(
+        current_score=lead.current_score,
+        current_score_trend=lead.current_score_trend,
+        history=history,
+    )
+
+
+_MANUAL_ACTIVITY_TYPES = {
+    ActivityType.CALL,
+    ActivityType.TASK,
+    ActivityType.QUOTE,
+    ActivityType.NOTE,
+}
+
+
+class ActivityCreateBody(BaseModel):
+    activity_type: str
+    payload: dict[str, Any] = {}
+
+    @field_validator("activity_type")
+    @classmethod
+    def valid_type(cls, v: str) -> str:
+        allowed = {"call", "task", "quote", "note"}
+        if v not in allowed:
+            raise ValueError(f"activity_type must be one of {allowed}")
+        return v
+
+
+class ActivityOut(BaseModel):
+    id: uuid.UUID
+    lead_id: uuid.UUID
+    actor_id: uuid.UUID | None
+    activity_type: str
+    payload: dict[str, Any] | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TaskCompleteBody(BaseModel):
+    completed: bool = True
+
+
+@router.post("/{lead_id}/activity", response_model=ActivityOut, status_code=status.HTTP_201_CREATED)
+async def create_activity(
+    lead_id: uuid.UUID,
+    body: ActivityCreateBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ActivityOut:
+    lead = await _get_lead_accessible(db, lead_id, current_user)
+
+    activity = LeadActivity(
+        lead_id=lead.id,
+        tenant_id=lead.tenant_id,
+        actor_id=current_user.id,
+        activity_type=body.activity_type,
+        payload=body.payload or {},
+    )
+    db.add(activity)
+    await db.commit()
+    await db.refresh(activity)
+    return ActivityOut.model_validate(activity)
+
+
+@router.get("/{lead_id}/tasks", response_model=list[ActivityOut])
+async def list_tasks(
+    lead_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ActivityOut]:
+    await _get_lead_accessible(db, lead_id, current_user)
+
+    rows = await db.execute(
+        select(LeadActivity)
+        .where(
+            LeadActivity.lead_id == lead_id,
+            LeadActivity.activity_type == ActivityType.TASK.value,
+        )
+        .order_by(LeadActivity.created_at.desc())
+    )
+    return [ActivityOut.model_validate(a) for a in rows.scalars().all()]
+
+
+@router.post("/{lead_id}/score/recalculate", response_model=dict)
+async def recalculate_lead_score(
+    lead_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    lead = await _get_lead_accessible(db, lead_id, current_user)
+
+    from app.services.prediction_service import calculate_lead_score
+    result = await calculate_lead_score(lead.id, lead.tenant_id)
+
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error calculando el score — revisa los logs del servidor",
+        )
+    return result
+
+
+# ── Tasks router (PATCH /tasks/{task_id}) ─────────────────────────────────────
+
+@tasks_router.patch("/{task_id}", response_model=ActivityOut)
+async def complete_task(
+    task_id: uuid.UUID,
+    body: TaskCompleteBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ActivityOut:
+    """Mark a task activity as completed (or uncompleted)."""
+    activity = await db.get(LeadActivity, task_id)
+    if activity is None or activity.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    if getattr(activity.activity_type, "value", activity.activity_type) != "task":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Activity is not a task",
+        )
+
+    new_payload = dict(activity.payload or {})
+    new_payload["completed"] = body.completed
+    if body.completed:
+        new_payload["completed_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        new_payload.pop("completed_at", None)
+    activity.payload = new_payload
+
+    await db.commit()
+    await db.refresh(activity)
+    return ActivityOut.model_validate(activity)

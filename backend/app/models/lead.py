@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, String, Text
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -122,3 +122,8 @@ class Lead(Base):
     last_alert_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+    # Sprint 6: prediction score
+    current_score: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    # up | down | flat
+    current_score_trend: Mapped[str | None] = mapped_column(String(4), nullable=True)

@@ -15,6 +15,8 @@ from app.models.base import Base
 from app.models import conversation, knowledge, lead, tenant, user  # noqa: F401
 from app.models import activity, meta_ads  # noqa: F401  # Sprint 3
 from app.models import pipeline, onboarding  # noqa: F401  # Sprint 4
+from app.models import alert, ai_log, support  # noqa: F401  # Sprint 5
+from app.models import agent, scoring, metrics  # noqa: F401  # Sprint 6
 
 config = context.config
 

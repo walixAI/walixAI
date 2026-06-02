@@ -280,6 +280,14 @@ async def _process_message_inner(
 
         await db.commit()
 
+        # 11b. Trigger prediction scoring as a non-blocking background task.
+        # Uses its own DB session; never delays the WhatsApp reply.
+        from app.services.prediction_service import calculate_lead_score
+        asyncio.create_task(
+            calculate_lead_score(lead.id, lead.tenant_id),
+            name=f"score:{lead.id}",
+        )
+
         # 12. Build full history (user + assistant) for Redis and qualifier.
         updated_history = anthropic_messages + [
             {"role": "assistant", "content": assistant_text}

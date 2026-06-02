@@ -22,6 +22,11 @@ from app.core.database import AsyncSessionLocal
 from app.models.alert import AlertRule
 from app.models.lead import Lead, LeadStatus
 from app.models.tenant import Branch
+from app.agents.config_agent import run_config_agent
+from app.agents.follow_up_agent import run_follow_up_agent
+from app.agents.pipeline_agent import run_pipeline_agent
+from app.services.metrics_engine import aggregate_daily_metrics
+from app.services.sentiment_aggregator import calculate_sentiment_snapshot
 from app.services.alert_generator import (
     _in_silence_window,
     send_daily_summary,
@@ -118,6 +123,92 @@ async def _job_detect_unresponded() -> None:
         logger.exception("scheduler: detect_unresponded job error")
 
 
+async def _job_follow_up_agent() -> None:
+    """Every 2h (8–20): suggest follow-ups for leads inactive >24h across all active branches."""
+    logger.info("scheduler: follow_up_agent tick")
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Branch).where(Branch.is_active.is_(True)))
+            branch_ids = [b.id for b in result.scalars().all()]
+        for branch_id in branch_ids:
+            try:
+                await run_follow_up_agent(branch_id)
+            except Exception:
+                logger.exception("scheduler: follow_up_agent failed branch=%s", branch_id)
+    except Exception:
+        logger.exception("scheduler: follow_up_agent job error")
+
+
+async def _job_pipeline_agent() -> None:
+    """Daily at 7 AM MX: analyze pipeline health and suggest corrective actions."""
+    logger.info("scheduler: pipeline_agent tick")
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Branch).where(Branch.is_active.is_(True)))
+            branch_ids = [b.id for b in result.scalars().all()]
+        for branch_id in branch_ids:
+            try:
+                await run_pipeline_agent(branch_id)
+            except Exception:
+                logger.exception("scheduler: pipeline_agent failed branch=%s", branch_id)
+    except Exception:
+        logger.exception("scheduler: pipeline_agent job error")
+
+
+async def _job_config_agent() -> None:
+    """Every Monday at 8 AM MX: detect inactive stages and suggest pipeline cleanup."""
+    logger.info("scheduler: config_agent tick")
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Branch).where(Branch.is_active.is_(True)))
+            branch_ids = [b.id for b in result.scalars().all()]
+        for branch_id in branch_ids:
+            try:
+                await run_config_agent(branch_id)
+            except Exception:
+                logger.exception("scheduler: config_agent failed branch=%s", branch_id)
+    except Exception:
+        logger.exception("scheduler: config_agent job error")
+
+
+async def _job_aggregate_metrics() -> None:
+    """Hourly: aggregate daily metrics for yesterday across all active branches."""
+    from datetime import date, timedelta
+    target_date = date.today() - timedelta(days=1)
+    logger.info("scheduler: aggregate_metrics tick — target_date=%s", target_date)
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Branch).where(Branch.is_active.is_(True)))
+            branch_ids = [b.id for b in result.scalars().all()]
+        for branch_id in branch_ids:
+            try:
+                async with AsyncSessionLocal() as db:
+                    await aggregate_daily_metrics(branch_id, target_date, db)
+                    await db.commit()
+            except Exception:
+                logger.exception("scheduler: aggregate_metrics failed branch=%s", branch_id)
+    except Exception:
+        logger.exception("scheduler: aggregate_metrics job error")
+
+
+async def _job_calculate_sentiment() -> None:
+    """Daily at 23:00 MX: compute sentiment snapshots for all active branches."""
+    logger.info("scheduler: calculate_sentiment tick")
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Branch).where(Branch.is_active.is_(True)))
+            branch_ids = [b.id for b in result.scalars().all()]
+        for branch_id in branch_ids:
+            try:
+                async with AsyncSessionLocal() as db:
+                    await calculate_sentiment_snapshot(branch_id, db)
+                    await db.commit()
+            except Exception:
+                logger.exception("scheduler: calculate_sentiment failed branch=%s", branch_id)
+    except Exception:
+        logger.exception("scheduler: calculate_sentiment job error")
+
+
 async def _job_monthly_summaries() -> None:
     """1st of each month at 9 AM MX: send monthly summary to all active branches."""
     logger.info("scheduler: monthly_summaries tick")
@@ -166,7 +257,44 @@ def _register_jobs() -> None:
         replace_existing=True,
         misfire_grace_time=3600,
     )
-    logger.info("scheduler: 3 jobs registered")
+    # Sprint 6: metrics aggregation
+    scheduler.add_job(
+        _job_aggregate_metrics,
+        CronTrigger(minute=0),
+        id="aggregate_metrics",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+    scheduler.add_job(
+        _job_calculate_sentiment,
+        CronTrigger(hour=23, minute=0, timezone=MX_TZ),
+        id="calculate_sentiment",
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
+    # Sprint 6: proactive agents
+    scheduler.add_job(
+        _job_follow_up_agent,
+        CronTrigger(hour="8-20", minute=0, timezone=MX_TZ),
+        id="follow_up_agent",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+    scheduler.add_job(
+        _job_pipeline_agent,
+        CronTrigger(hour=7, minute=0, timezone=MX_TZ),
+        id="pipeline_agent",
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
+    scheduler.add_job(
+        _job_config_agent,
+        CronTrigger(day_of_week="mon", hour=8, minute=0, timezone=MX_TZ),
+        id="config_agent",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    logger.info("scheduler: 8 jobs registered")
 
 
 @asynccontextmanager

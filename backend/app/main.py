@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import ai, auth, branches, kb, leads, onboarding, pipeline, platform, support, webhooks
+from app.api import agents, ai, auth, automations, branches, dashboard, kb, leads, metrics, onboarding, pipeline, platform, support, webhooks
 from app.api.users import team_router, users_router
 from app.services.scheduler import lifespan_scheduler
 from app.core.config import settings
@@ -41,8 +41,10 @@ app.add_middleware(
 )
 
 
+app.include_router(agents.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(automations.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")
 app.include_router(branches.router, prefix="/api")
 app.include_router(team_router, prefix="/api")
@@ -52,6 +54,10 @@ app.include_router(onboarding.router, prefix="/api")
 app.include_router(pipeline.router, prefix="/api")
 app.include_router(platform.router, prefix="/api")
 app.include_router(support.router, prefix="/api")
+app.include_router(leads.tasks_router, prefix="/api")
+app.include_router(metrics.router, prefix="/api")
+app.include_router(metrics.pipeline_router, prefix="/api")
+app.include_router(dashboard.router, prefix="/api")
 app.include_router(webhooks.router, prefix="/api")
 
 
