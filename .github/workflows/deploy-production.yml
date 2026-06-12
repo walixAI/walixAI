@@ -20,25 +20,15 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy backend (web)
+      - name: Deploy service
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
-        run: railway up --service web --detach
-
-      - name: Deploy worker
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
-        run: railway up --service worker --detach
-
-      - name: Deploy beat
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
-        run: railway up --service beat --detach
+        run: railway up --service walixServiceRailway --detach
 
       - name: Run migrations
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
-        run: railway run --service web -- alembic upgrade head
+        run: railway run --service walixServiceRailway -- alembic upgrade head
 
       - name: Smoke test health endpoint
         run: |
