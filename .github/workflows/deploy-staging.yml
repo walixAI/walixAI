@@ -28,5 +28,5 @@ jobs:
       - name: Smoke test health endpoint
         run: |
           sleep 15
-          curl --fail --retry 5 --retry-delay 5 \
+          curl --fail --retry 5 --retry-delay 5 --retry-all-errors \
             "${{ secrets.STAGING_URL }}/health"

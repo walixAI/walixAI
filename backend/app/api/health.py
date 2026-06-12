@@ -2,12 +2,10 @@
 import time
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.redis import redis_client
 
 logger = logging.getLogger(__name__)
@@ -22,20 +20,23 @@ class ComponentStatus(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    status: str  # "ok" | "degraded" | "error"
+    status: str  # "ok" | "degraded"
     response_ms: float
     components: dict[str, ComponentStatus]
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check(db: AsyncSession = Depends(get_db)) -> HealthResponse:
+async def health_check() -> HealthResponse:
+    """Independent health check — does NOT use get_db so it never returns 500."""
     start = time.monotonic()
     components: dict[str, ComponentStatus] = {}
 
-    # PostgreSQL check
+    # PostgreSQL check — direct engine connection, bypasses get_db/RLS
     pg_start = time.monotonic()
     try:
-        await db.execute(text("SELECT 1"))
+        from app.core.database import engine
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
         components["postgres"] = ComponentStatus(
             ok=True,
             response_ms=round((time.monotonic() - pg_start) * 1000, 2),
@@ -65,10 +66,8 @@ async def health_check(db: AsyncSession = Depends(get_db)) -> HealthResponse:
         )
 
     all_ok = all(c.ok for c in components.values())
-    status = "ok" if all_ok else "degraded"
-
     return HealthResponse(
-        status=status,
+        status="ok" if all_ok else "degraded",
         response_ms=round((time.monotonic() - start) * 1000, 2),
         components=components,
     )
