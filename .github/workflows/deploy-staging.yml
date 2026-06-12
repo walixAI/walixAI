@@ -12,9 +12,7 @@ jobs:
   deploy:
     name: Deploy to Railway Staging
     runs-on: ubuntu-latest
-    environment:
-      name: staging
-      url: ${{ secrets.STAGING_URL }}
+    environment: staging
 
     steps:
       - uses: actions/checkout@v4

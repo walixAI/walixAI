@@ -6,15 +6,13 @@ on:
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: false  # Never cancel an in-flight production deploy
+  cancel-in-progress: false
 
 jobs:
   deploy:
     name: Deploy to Railway Production
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: ${{ secrets.PRODUCTION_URL }}
+    environment: production
 
     steps:
       - uses: actions/checkout@v4
