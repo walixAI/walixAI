@@ -1,13 +1,29 @@
+from __future__ import annotations
+
 import enum
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import DateTime, Enum, Float, ForeignKey, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+from app.models.tag import lead_tags_table
+
+if TYPE_CHECKING:
+    from app.models.activity import Activity
+    from app.models.tag import Tag
+
+# ── Soft-delete convention ────────────────────────────────────────────────────
+# Lead uses soft delete via `deleted_at` (TIMESTAMPTZ, nullable).
+# NULL  → active record.
+# Non-NULL → deleted; the row is retained for audit/history.
+#
+# EVERY query that returns leads to users MUST include:
+#     .where(Lead.deleted_at.is_(None))
+# Failure to add this filter will expose deleted contacts in the UI.
 
 
 class LeadStatus(str, enum.Enum):
@@ -48,6 +64,16 @@ class Lead(Base):
     )
     wa_phone: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Sprint 7 — Contacts module
+    last_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    company: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
+    prospection_source: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="manual", server_default="manual"
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    last_activity_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[LeadStatus] = mapped_column(
         Enum(
             LeadStatus,
@@ -127,3 +153,17 @@ class Lead(Base):
     current_score: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     # up | down | flat
     current_score_trend: Mapped[str | None] = mapped_column(String(4), nullable=True)
+
+    # Sprint 7: Contacts module relationships
+    activities: Mapped[list[Activity]] = relationship(
+        "Activity",
+        back_populates="lead",
+        cascade="all, delete-orphan",
+        order_by="Activity.created_at.desc()",
+        lazy="select",
+    )
+    tags: Mapped[list[Tag]] = relationship(
+        "Tag",
+        secondary=lead_tags_table,
+        lazy="select",
+    )

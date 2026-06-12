@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from app.core.security import (
     verify_password,
     verify_token,
 )
+from app.models.tenant import Branch, Company, Tenant, TenantPlan
 from app.models.user import User, UserRole
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -74,6 +75,83 @@ async def get_current_user(
     return user
 
 
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def password_min_length(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("La contraseña debe tener al menos 8 caracteres")
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Este campo no puede estar vacío")
+        return v.strip()
+
+
+@router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    body: RegisterRequest,
+    db: AsyncSession = Depends(get_db),
+) -> LoginResponse:
+    existing = await db.execute(select(User).where(User.email == body.email))
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Este correo ya está registrado",
+        )
+
+    # Workspace placeholder — se configura en el wizard de onboarding
+    workspace_name = body.email.split("@")[0].replace(".", " ").title()
+
+    tenant = Tenant(
+        name=workspace_name,
+        email=body.email,
+        plan=TenantPlan.STARTER,
+        is_active=True,
+    )
+    db.add(tenant)
+    await db.flush()
+
+    company = Company(
+        tenant_id=tenant.id,
+        name=workspace_name,
+    )
+    db.add(company)
+    await db.flush()
+
+    branch = Branch(
+        company_id=company.id,
+        tenant_id=tenant.id,
+        name="Sede Principal",
+        is_active=True,
+    )
+    db.add(branch)
+    await db.flush()
+
+    user = User(
+        tenant_id=tenant.id,
+        branch_id=branch.id,
+        email=body.email,
+        name=body.name,
+        hashed_password=hash_password(body.password),
+        role=UserRole.OWNER,
+        is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    token = create_access_token({"sub": str(user.id), "tenant_id": str(user.tenant_id)})
+    return LoginResponse(access_token=token, user=LoginUserOut.model_validate(user))
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login(
     body: LoginRequest,
@@ -92,7 +170,7 @@ async def login(
             detail="Invalid email or password",
         )
 
-    token = create_access_token({"sub": str(user.id)})
+    token = create_access_token({"sub": str(user.id), "tenant_id": str(user.tenant_id)})
     return LoginResponse(access_token=token, user=LoginUserOut.model_validate(user))
 
 

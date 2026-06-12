@@ -29,13 +29,25 @@ async def execute_suggestion(
     suggestion = await db.get(AgentSuggestion, suggestion_id)
     if suggestion is None:
         raise ValueError(f"AgentSuggestion {suggestion_id} not found")
-    if suggestion.status not in ("suggested", "accepted"):
+    if suggestion.status not in ("suggested", "accepted", "confirmed"):
         raise ValueError(
             f"Suggestion {suggestion_id} not executable (status={suggestion.status})"
         )
 
     try:
         result = await _dispatch(suggestion, db)
+
+        # Optionally record a system activity on the lead if the action targets one
+        lead_id_raw = (suggestion.action_payload or {}).get("lead_id")
+        if lead_id_raw:
+            from app.services.activity_service import create_system_activity
+            await create_system_activity(
+                lead_id=uuid.UUID(lead_id_raw),
+                tenant_id=suggestion.tenant_id,
+                description=f"Acción de agente ejecutada: {suggestion.suggestion_text[:150]}",
+                db=db,
+            )
+
         suggestion.status = "executed"
         suggestion.execution_result = result
         suggestion.responded_at = datetime.now(timezone.utc)

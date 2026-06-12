@@ -1,3 +1,4 @@
+from app.models.activity import ACTIVITY_TYPES, Activity, ActivityType, LeadActivity
 from app.models.base import Base
 from app.models.conversation import (
     Conversation,
@@ -7,6 +8,7 @@ from app.models.conversation import (
     MessageRole,
 )
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
+from app.models.tag import Tag, lead_tags_table
 from app.models.tenant import AssignmentMode, Branch, Company, Tenant, TenantPlan
 from app.models.user import User, UserRole
 
@@ -28,4 +30,10 @@ __all__ = [
     "ConversationStatus",
     "ConversationHandler",
     "MessageRole",
+    "Activity",
+    "ACTIVITY_TYPES",
+    "ActivityType",
+    "LeadActivity",
+    "Tag",
+    "lead_tags_table",
 ]

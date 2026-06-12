@@ -483,6 +483,14 @@ async def update_lead_stage(
         },
     ))
 
+    from app.services.activity_service import create_system_activity
+    await create_system_activity(
+        lead_id=lead.id,
+        tenant_id=lead.tenant_id,
+        description=f"Etapa cambiada a: {stage.name}",
+        db=db,
+    )
+
     await db.commit()
     await db.refresh(lead)
 

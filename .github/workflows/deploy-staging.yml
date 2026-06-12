@@ -1,0 +1,49 @@
+name: Deploy — Staging
+
+on:
+  push:
+    branches: [develop]
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to Railway Staging
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: ${{ secrets.STAGING_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy backend (web)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
+        run: railway up --service web --detach
+
+      - name: Deploy worker
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
+        run: railway up --service worker --detach
+
+      - name: Deploy beat
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
+        run: railway up --service beat --detach
+
+      - name: Run migrations
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
+        run: railway run --service web -- alembic upgrade head
+
+      - name: Smoke test health endpoint
+        run: |
+          sleep 15
+          curl --fail --retry 5 --retry-delay 5 \
+            "${{ secrets.STAGING_URL }}/health"

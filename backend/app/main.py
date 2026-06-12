@@ -3,8 +3,9 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import agents, ai, auth, automations, branches, dashboard, kb, leads, metrics, onboarding, pipeline, platform, support, webhooks
+from app.api import activities, agents, ai, auth, automations, branches, contacts, dashboard, health, kb, leads, metrics, onboarding, pipeline, platform, support, tags, webhooks
 from app.api.users import team_router, users_router
+from app.middleware.tenant_context import TenantContextMiddleware
 from app.services.scheduler import lifespan_scheduler
 from app.core.config import settings
 
@@ -39,6 +40,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# TenantContextMiddleware runs as the outermost layer (last added = first to
+# run). It sets request.state.tenant_id from the JWT so that get_db can call
+# set_config before any query. Requests without a JWT get NULL_UUID (safe).
+app.add_middleware(TenantContextMiddleware)
 
 
 app.include_router(agents.router, prefix="/api")
@@ -59,13 +64,12 @@ app.include_router(metrics.router, prefix="/api")
 app.include_router(metrics.pipeline_router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(webhooks.router, prefix="/api")
+app.include_router(contacts.router, prefix="/api")
+app.include_router(activities.router, prefix="/api")
+app.include_router(tags.router, prefix="/api")
+app.include_router(health.router)  # /health — no prefix, used by deploy smoke tests
 
 
 @app.get("/")
 async def root() -> dict[str, str]:
     return {"service": "walix-backend", "env": settings.APP_ENV}
-
-
-@app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { useAuthStore } from "@/store/auth";
 import { api, setToken } from "@/lib/api";
@@ -220,6 +220,16 @@ export default function Login() {
               Entrar
             </Button>
           </form>
+
+          <p className="mt-5 text-center text-sm text-muted-foreground">
+            No tienes cuenta?{" "}
+            <Link
+              to="/register"
+              className="font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+            >
+              Crea tu workspace
+            </Link>
+          </p>
         </section>
       </div>
     </div>

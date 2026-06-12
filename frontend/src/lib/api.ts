@@ -123,6 +123,15 @@ export interface BranchOut {
   name: string;
 }
 
+export interface BotConfigOut {
+  onboarding_status: string;
+  bot_name: string | null;
+  industry: string | null;
+  branch_name: string;
+  business_description: string | null;
+  latest_draft_id: string | null;
+}
+
 export interface AgentOut {
   id: string;
   name: string;
@@ -564,6 +573,17 @@ export const api = {
     });
   },
 
+  async register(data: {
+    name: string;
+    email: string;
+    password: string;
+  }): Promise<{ access_token: string; user: WalixUser }> {
+    return request("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
   async me(): Promise<WalixUser> {
     return request("/api/auth/me");
   },
@@ -614,6 +634,10 @@ export const api = {
 
   async listBranches(): Promise<BranchOut[]> {
     return request("/api/branches");
+  },
+
+  async getBotConfig(branchId: string): Promise<BotConfigOut> {
+    return request(`/api/branches/${branchId}/bot-config`);
   },
 
   async getBranchAgents(branchId: string): Promise<AgentOut[]> {

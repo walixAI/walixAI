@@ -15,4 +15,5 @@ python-multipart
 pgvector
 openai
 tiktoken
-apscheduler>=3.10,<4.0
+celery[redis]==5.3.6
+flower==2.0.1

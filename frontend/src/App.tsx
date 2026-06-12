@@ -10,10 +10,11 @@ import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { ErrorBoundary } from "@/components/walix/ErrorBoundary";
 import { LoadingSpinner } from "@/components/walix/LoadingSpinner";
 import { Stub } from "@/pages/app/Stub";
-import { Users, BarChart3, Settings } from "lucide-react";
+import { BarChart3 } from "lucide-react";
 
 // Eager: critical
 import Login from "@/pages/Login";
+import Register from "@/pages/Register";
 import NotFound from "@/pages/NotFound";
 
 // Lazy: heavy pages
@@ -27,6 +28,8 @@ const PreviewPage = lazy(() => import("@/pages/onboarding/PreviewPage"));
 const TeamPage = lazy(() => import("@/pages/team/TeamPage"));
 const ForecastPage = lazy(() => import("@/pages/forecast/ForecastPage"));
 const AutomationsPage = lazy(() => import("@/pages/automations/AutomationsPage"));
+const ContactsPage = lazy(() => import("@/pages/contacts"));
+const ContactDetailPage = lazy(() => import("@/pages/contacts/[id]"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -71,6 +74,7 @@ const AppRoutes = () => {
         <Routes>
           {/* Public */}
           <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
 
           {/* Root redirect — role-aware */}
           <Route path="/" element={<RootRedirect />} />
@@ -85,17 +89,8 @@ const AppRoutes = () => {
           >
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/whatsapp" element={<Whatsapp />} />
-            <Route
-              path="/contacts"
-              element={
-                <Stub
-                  icon={Users}
-                  title="Contactos"
-                  description="Gestion de contactos proximamente."
-                  badge="Proximo"
-                />
-              }
-            />
+            <Route path="/contacts" element={<ContactsPage />} />
+            <Route path="/contacts/:id" element={<ContactDetailPage />} />
             <Route
               path="/reports"
               element={

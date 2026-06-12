@@ -1,0 +1,49 @@
+name: Deploy — Production
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false  # Never cancel an in-flight production deploy
+
+jobs:
+  deploy:
+    name: Deploy to Railway Production
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ secrets.PRODUCTION_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy backend (web)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
+        run: railway up --service web --detach
+
+      - name: Deploy worker
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
+        run: railway up --service worker --detach
+
+      - name: Deploy beat
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
+        run: railway up --service beat --detach
+
+      - name: Run migrations
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
+        run: railway run --service web -- alembic upgrade head
+
+      - name: Smoke test health endpoint
+        run: |
+          sleep 20
+          curl --fail --retry 5 --retry-delay 10 \
+            "${{ secrets.PRODUCTION_URL }}/health"

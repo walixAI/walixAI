@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Logo } from "@/components/walix/Logo";
@@ -19,6 +19,20 @@ const INDUSTRIES = [
   { id: "fintech",      label: "Fintech / Seguros",  emoji: "💰", hint: "Créditos, inversión, seguros" },
 ] as const;
 
+const SECONDARY_INDUSTRIES = [
+  { id: "restaurantes",  label: "Restaurantes",   emoji: "🍽️" },
+  { id: "automotriz",    label: "Automotriz",      emoji: "🚗" },
+  { id: "construccion",  label: "Construcción",    emoji: "🔨" },
+  { id: "legal",         label: "Legal",           emoji: "⚖️" },
+  { id: "belleza",       label: "Belleza / Spa",   emoji: "💄" },
+  { id: "logistica",     label: "Logística",       emoji: "🚚" },
+] as const;
+
+const ALL_PRESET_IDS = [
+  ...INDUSTRIES.map((i) => i.id),
+  ...SECONDARY_INDUSTRIES.map((i) => i.id),
+] as string[];
+
 const LOADING_TEXTS = [
   "Analizando tu negocio...",
   "Generando criterios de calificación...",
@@ -26,7 +40,54 @@ const LOADING_TEXTS = [
   "Configurando mensajes...",
 ];
 
-const MIN_DESC_CHARS = 80;
+const INDUSTRY_EXAMPLES: Record<string, { title: string; text: string }[]> = {
+  salud: [
+    {
+      title: "Clínica de especialidad",
+      text: "Somos una clínica de endocrinología pediátrica en Monterrey. Atendemos niños de 0 a 18 años con problemas de diabetes, obesidad y talla baja. Nuestros leads llegan por Meta Ads. Queremos calificar si el paciente es menor de edad, si tiene diagnóstico previo, si el padre o tutor puede agendar cita esta semana y si cuenta con seguro médico o paga de contado.",
+    },
+    {
+      title: "Consultorio dental",
+      text: "Somos un consultorio dental en CDMX. Ofrecemos ortodoncia, implantes y limpieza. Nuestros pacientes son adultos de 20 a 55 años. Queremos saber si el lead tiene dolor activo, qué tratamiento le interesa, si tiene seguro dental y cuándo puede agendar su primera consulta.",
+    },
+  ],
+  inmobiliaria: [
+    {
+      title: "Venta residencial",
+      text: "Somos una inmobiliaria en Monterrey. Vendemos casas residenciales de 1.5 a 8 millones de pesos a familias que buscan primera vivienda o inversión. Queremos calificar si el lead ya tiene preaprobación de crédito hipotecario, su rango de presupuesto, la zona de interés y si puede visitar una propiedad esta semana.",
+    },
+    {
+      title: "Renta de oficinas",
+      text: "Rentamos espacios de oficina y coworking en Santa Fe, CDMX. Nuestros clientes son startups y empresas medianas. Queremos saber el número de personas, el plazo de renta requerido, si necesitan sala de juntas privada y cuándo quieren iniciar.",
+    },
+  ],
+  educacion: [
+    {
+      title: "Escuela de idiomas",
+      text: "Somos una escuela de inglés en línea para adultos trabajadores. Ofrecemos cursos de nivel básico a avanzado con clases en vivo dos veces por semana. Queremos calificar si el prospecto trabaja actualmente, su nivel actual de inglés, si busca inglés de negocios o conversacional y si puede iniciar este mes.",
+    },
+    {
+      title: "Cursos de capacitación",
+      text: "Ofrecemos diplomados en marketing digital y ventas para profesionales en México. Nuestros cursos duran 3 meses y son en línea. Queremos saber si el prospecto trabaja en el área, qué habilidad quiere desarrollar, si su empresa subsidia la capacitación y si puede inscribirse en la siguiente cohorte.",
+    },
+  ],
+  fintech: [
+    {
+      title: "Créditos personales",
+      text: "Somos una financiera que otorga créditos personales de 5,000 a 100,000 pesos en 24 horas. Atendemos empleados formales y microempresarios en todo México. Queremos calificar si tiene empleo formal o negocio propio, el monto que necesita, para qué lo usará y si tiene historial crediticio.",
+    },
+    {
+      title: "Seguros",
+      text: "Vendemos seguros de gastos médicos mayores y de vida para familias y empresas en México. Queremos calificar si el lead ya tiene seguro actual, cuántas personas cubriría la póliza, el rango de edad de los asegurados y si tiene presupuesto mensual definido.",
+    },
+  ],
+  otro: [
+    {
+      title: "Ejemplo genérico",
+      text: "Describe qué vendes o servicios que ofreces, a quién va dirigido (perfil del cliente ideal), de dónde vienen tus leads y qué información necesitas recopilar para saber si un prospecto vale la pena atender. Entre más detalle incluyas, mejor configurará el sistema el bot, el pipeline y los criterios de calificación.",
+    },
+  ],
+};
 
 // ── Root component ─────────────────────────────────────────────────────────────
 
@@ -40,6 +101,22 @@ export default function OnboardingWizard() {
   const [businessName, setBusinessName] = useState("");
   const [description, setDescription] = useState("");
   const [loadingIdx, setLoadingIdx] = useState(0);
+  const [prefilled, setPrefilled] = useState(false);
+
+  const { data: existing } = useQuery({
+    queryKey: ["bot-config", branchId],
+    queryFn: () => api.getBotConfig(branchId),
+    enabled: !!branchId,
+  });
+
+  // Pre-populate fields once the existing config loads
+  useEffect(() => {
+    if (!existing || prefilled) return;
+    if (existing.industry) setIndustry(existing.industry);
+    if (existing.branch_name) setBusinessName(existing.branch_name);
+    if (existing.business_description) setDescription(existing.business_description);
+    setPrefilled(true);
+  }, [existing, prefilled]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -119,6 +196,7 @@ export default function OnboardingWizard() {
             {step === 2 && (
               <Step2
                 description={description}
+                industry={industry}
                 onChange={setDescription}
                 onBack={() => setStep(1)}
                 onGenerate={goToStep3}
@@ -154,6 +232,21 @@ function Step1({
   onBusinessNameChange: (v: string) => void;
   onNext: () => void;
 }) {
+  // Local state for the free-text input; initialized from prop if it was a custom value
+  const [customInput, setCustomInput] = useState(() =>
+    ALL_PRESET_IDS.includes(industry) ? "" : industry,
+  );
+
+  const handlePresetSelect = (id: string) => {
+    setCustomInput("");
+    onIndustryChange(id);
+  };
+
+  const handleCustomChange = (v: string) => {
+    setCustomInput(v);
+    onIndustryChange(v.trim());
+  };
+
   const canContinue = !!industry && businessName.trim().length > 0;
 
   return (
@@ -167,30 +260,62 @@ function Step1({
         </h2>
       </div>
 
-      {/* Industry grid */}
+      {/* Primary industry grid */}
       <div className="grid grid-cols-2 gap-3">
         {INDUSTRIES.map((ind) => (
           <button
             key={ind.id}
             type="button"
-            onClick={() => onIndustryChange(ind.id)}
+            onClick={() => handlePresetSelect(ind.id)}
             className={cn(
               "flex flex-col items-center gap-2 rounded-xl border-2 p-4 text-center",
               "transition-all duration-150 hover:border-primary/50 hover:bg-primary/5",
-              industry === ind.id
+              industry === ind.id && !customInput
                 ? "border-primary bg-primary/5 shadow-sm"
                 : "border-border bg-background",
             )}
           >
-            <span className="text-3xl leading-none" aria-hidden="true">
-              {ind.emoji}
-            </span>
+            <span className="text-3xl leading-none" aria-hidden="true">{ind.emoji}</span>
             <span className="text-sm font-semibold leading-tight">{ind.label}</span>
-            <span className="text-[11px] text-muted-foreground leading-snug">
-              {ind.hint}
-            </span>
+            <span className="text-[11px] text-muted-foreground leading-snug">{ind.hint}</span>
           </button>
         ))}
+      </div>
+
+      {/* Secondary industries */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground">Más industrias</p>
+        <div className="flex flex-wrap gap-2">
+          {SECONDARY_INDUSTRIES.map((ind) => (
+            <button
+              key={ind.id}
+              type="button"
+              onClick={() => handlePresetSelect(ind.id)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium",
+                "transition-all duration-150 hover:border-primary/50 hover:bg-primary/5",
+                industry === ind.id && !customInput
+                  ? "border-primary bg-primary/5 text-primary"
+                  : "border-border bg-background text-foreground",
+              )}
+            >
+              <span aria-hidden="true">{ind.emoji}</span>
+              {ind.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Custom industry */}
+      <div className="space-y-1.5">
+        <Label htmlFor="custom-industry">O escribe tu industria</Label>
+        <Input
+          id="custom-industry"
+          placeholder="Ej. Agencia de viajes, Veterinaria..."
+          value={customInput}
+          onChange={(e) => handleCustomChange(e.target.value)}
+          className={cn(customInput && "border-primary ring-1 ring-primary/30")}
+        />
       </div>
 
       {/* Business name */}
@@ -215,17 +340,19 @@ function Step1({
 
 function Step2({
   description,
+  industry,
   onChange,
   onBack,
   onGenerate,
 }: {
   description: string;
+  industry: string;
   onChange: (v: string) => void;
   onBack: () => void;
   onGenerate: () => void;
 }) {
-  const charCount = description.trim().length;
-  const canGenerate = charCount >= MIN_DESC_CHARS;
+  const canGenerate = description.trim().length > 0;
+  const examples = INDUSTRY_EXAMPLES[industry] ?? INDUSTRY_EXAMPLES.otro;
 
   return (
     <div className="space-y-6">
@@ -236,30 +363,41 @@ function Step2({
         <h2 className="mt-1 text-xl font-semibold leading-snug">
           Cuéntanos sobre tu negocio
         </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Describe qué ofreces, a quién y qué información necesitas de cada lead para calificarlo.
+        </p>
       </div>
 
-      <div className="space-y-2">
-        <Textarea
-          rows={6}
-          placeholder="Describe qué vendes o ofreces, a quién le vendes y qué tipo de cliente o lead quieres que Walix califique automáticamente. Entre más detalle, mejor configurará el sistema."
-          value={description}
-          onChange={(e) => onChange(e.target.value)}
-          className="resize-none"
-        />
+      <Textarea
+        rows={7}
+        placeholder="Escribe aquí la descripción de tu negocio..."
+        value={description}
+        onChange={(e) => onChange(e.target.value)}
+        className="resize-y"
+      />
 
-        <div className="flex items-start justify-between gap-3">
-          <p className="text-[11px] text-muted-foreground leading-relaxed italic">
-            Ejemplo: Somos una inmobiliaria en Monterrey. Vendemos casas de 1.5 a
-            8 millones de pesos a familias que buscan primera vivienda...
-          </p>
-          <span
-            className={cn(
-              "text-xs tabular-nums shrink-0 font-medium",
-              canGenerate ? "text-success" : "text-muted-foreground",
-            )}
-          >
-            {charCount}/{MIN_DESC_CHARS}
-          </span>
+      {/* Industry examples */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          Ejemplos para tu industria
+        </p>
+        <div className="space-y-2">
+          {examples.map((ex) => (
+            <div
+              key={ex.title}
+              className="rounded-lg border border-border bg-muted/40 p-3 space-y-2"
+            >
+              <p className="text-xs font-semibold text-foreground">{ex.title}</p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">{ex.text}</p>
+              <button
+                type="button"
+                onClick={() => onChange(ex.text)}
+                className="text-[11px] font-medium text-primary hover:underline focus-visible:outline-none"
+              >
+                Usar como base
+              </button>
+            </div>
+          ))}
         </div>
       </div>
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Copy, ChevronRight, ChevronLeft, Loader2, Pencil, Unplug, Zap } from "lucide-react";
+import { CheckCircle2, Copy, ChevronRight, ChevronLeft, Loader2, Pencil, Unplug, Zap, Bot, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type MetaConfigIn } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -360,6 +361,107 @@ function ConnectedCard({
   );
 }
 
+// ── Bot config card ────────────────────────────────────────────────────────────
+
+const INDUSTRY_LABELS: Record<string, string> = {
+  salud: "Salud",
+  inmobiliaria: "Inmobiliaria",
+  educacion: "Educacion",
+  fintech: "Fintech / Seguros",
+  otro: "Otro",
+};
+
+const STATUS_META: Record<string, { label: string; className: string }> = {
+  pending:  { label: "Sin configurar", className: "bg-muted text-muted-foreground" },
+  draft:    { label: "Borrador",       className: "bg-yellow-100 text-yellow-700" },
+  approved: { label: "Activo",         className: "bg-emerald-100 text-emerald-700" },
+  active:   { label: "Activo",         className: "bg-emerald-100 text-emerald-700" },
+};
+
+function BotConfigCard({ branchId, canManage }: { branchId: string; canManage: boolean }) {
+  const navigate = useNavigate();
+
+  const { data: botConfig, isLoading } = useQuery({
+    queryKey: ["bot-config", branchId],
+    queryFn: () => api.getBotConfig(branchId),
+    enabled: !!branchId && canManage,
+  });
+
+  const statusMeta =
+    STATUS_META[botConfig?.onboarding_status ?? "pending"] ?? STATUS_META.pending;
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 shadow-card space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-primary flex items-center justify-center shrink-0">
+            <Bot className="h-5 w-5 text-primary-foreground" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold">Bot IA</h2>
+            <p className="text-xs text-muted-foreground">
+              Configura el agente de WhatsApp, pipeline y criterios de calificacion.
+            </p>
+          </div>
+        </div>
+        {botConfig && (
+          <span className={cn("text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0", statusMeta.className)}>
+            {statusMeta.label}
+          </span>
+        )}
+      </div>
+
+      {!canManage ? (
+        <p className="text-xs text-muted-foreground">
+          Solo el owner o el equipo de IT puede gestionar esta configuracion.
+        </p>
+      ) : isLoading ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Cargando...
+        </div>
+      ) : botConfig && botConfig.onboarding_status !== "pending" ? (
+        <div className="space-y-3">
+          <div className="border border-border rounded-lg divide-y divide-border">
+            {botConfig.bot_name && (
+              <Row label="Nombre del bot" value={botConfig.bot_name} />
+            )}
+            {botConfig.industry && (
+              <Row label="Industria" value={INDUSTRY_LABELS[botConfig.industry] ?? botConfig.industry} />
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              botConfig.latest_draft_id
+                ? navigate(`/onboarding/preview/${botConfig.latest_draft_id}`)
+                : navigate(`/onboarding/new?branch_id=${branchId}`)
+            }
+          >
+            <Settings2 className="h-3.5 w-3.5 mr-1.5" />
+            Reconfigurar bot
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Aun no has configurado el bot para esta sucursal.
+          </p>
+          <Button
+            size="sm"
+            onClick={() => navigate(`/onboarding/new?branch_id=${branchId}`)}
+          >
+            <Bot className="h-3.5 w-3.5 mr-1.5" />
+            Configurar bot
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Settings() {
@@ -395,6 +497,11 @@ export default function Settings() {
         <h1 className="text-2xl font-bold tracking-tight">Configuracion</h1>
         <p className="text-sm text-muted-foreground mt-1">Integraciones y configuracion de la cuenta.</p>
       </div>
+
+      {/* Bot IA card */}
+      {canManage && branchId && (
+        <BotConfigCard branchId={branchId} canManage={canManage} />
+      )}
 
       {/* Meta Lead Ads card */}
       <div className="rounded-xl border border-border bg-card p-5 shadow-card space-y-4">

@@ -3,7 +3,6 @@ import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { BottomNav } from "./BottomNav";
 import { ImpersonationBanner } from "./ImpersonationBanner";
-import { WalixAIBar } from "@/components/ai/WalixAIBar";
 
 export function AppLayout() {
   return (
@@ -13,14 +12,13 @@ export function AppLayout() {
         <Sidebar />
         <div className="flex-1 flex flex-col min-w-0">
           <TopBar />
-          {/* pb-36 mobile: BottomNav (h-16) + AIBar (h-14) + gap; md:pb-20 desktop: AIBar only */}
-          <main className="flex-1 px-4 md:px-6 py-6 pb-36 md:pb-20">
+          {/* pb-20 mobile: BottomNav (h-16) + gap; md:pb-6 desktop: normal */}
+          <main className="flex-1 px-4 md:px-6 py-6 pb-20 md:pb-6">
             <Outlet />
           </main>
         </div>
       </div>
       <BottomNav />
-      <WalixAIBar />
     </div>
   );
 }

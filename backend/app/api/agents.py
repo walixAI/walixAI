@@ -4,15 +4,16 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
-from app.core.database import AsyncSessionLocal, get_db
+from app.core.database import get_db
 from app.models.agent import AgentSuggestion
 from app.models.user import User
+from app.tasks.agent_tasks import execute_suggestion_task
 
 logger = logging.getLogger(__name__)
 
@@ -45,16 +46,6 @@ class DismissBody(BaseModel):
 
 
 # ── Background task wrapper ────────────────────────────────────────────────────
-
-async def _bg_execute_suggestion(suggestion_id: uuid.UUID) -> None:
-    """Opens its own DB session — safe for use with BackgroundTasks."""
-    try:
-        from app.agents.executor import execute_suggestion
-        async with AsyncSessionLocal() as db:
-            await execute_suggestion(suggestion_id, db)
-    except Exception:
-        logger.exception("agents: bg execute failed for suggestion=%s", suggestion_id)
-
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
@@ -107,7 +98,6 @@ async def list_suggestions(
 )
 async def confirm_suggestion(
     suggestion_id: uuid.UUID,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SuggestionOut:
@@ -125,7 +115,7 @@ async def confirm_suggestion(
     await db.commit()
     await db.refresh(suggestion)
 
-    background_tasks.add_task(_bg_execute_suggestion, suggestion.id)
+    execute_suggestion_task.delay(str(suggestion.id))
     logger.info(
         "agents: confirmed suggestion=%s agent_type=%s by user=%s",
         suggestion_id, suggestion.agent_type, current_user.id,

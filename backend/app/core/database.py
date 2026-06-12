@@ -1,5 +1,7 @@
 from collections.abc import AsyncGenerator
 
+from fastapi import Request
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -7,6 +9,8 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.config import settings
+
+_NULL_UUID = "00000000-0000-0000-0000-000000000000"
 
 
 # DATABASE_URL in .env uses the sync scheme (postgresql://). SQLAlchemy's async
@@ -36,6 +40,15 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
+        tenant_id = getattr(request.state, "tenant_id", _NULL_UUID)
+        # is_local=FALSE so the setting survives commit() calls within the
+        # same request (e.g. register: commit() then refresh()). The middleware
+        # sets a fresh value on the next request, and connections returned to
+        # the pool will be overwritten before use.
+        await session.execute(
+            text("SELECT set_config('app.current_tenant_id', :tid, FALSE)"),
+            {"tid": str(tenant_id)},
+        )
         yield session

@@ -117,6 +117,49 @@ async def list_branch_agents(
     return agents
 
 
+# ── Bot / onboarding config ───────────────────────────────────────────────────
+
+class BotConfigOut(BaseModel):
+    onboarding_status: str
+    bot_name: str | None
+    industry: str | None
+    branch_name: str
+    business_description: str | None
+    latest_draft_id: uuid.UUID | None
+
+
+@router.get("/{branch_id}/bot-config", response_model=BotConfigOut)
+async def get_bot_config(
+    branch_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BotConfigOut:
+    from app.models.onboarding import OnboardingDraft
+    from sqlalchemy import desc
+
+    await _require_branch_access(current_user, branch_id, db)
+    branch = await db.get(Branch, branch_id)
+    if not branch or branch.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sucursal no encontrada")
+
+    draft_result = await db.execute(
+        select(OnboardingDraft)
+        .where(OnboardingDraft.branch_id == branch_id)
+        .order_by(desc(OnboardingDraft.created_at))
+        .limit(1)
+    )
+    latest_draft = draft_result.scalar_one_or_none()
+
+    return BotConfigOut(
+        onboarding_status=branch.onboarding_status,
+        bot_name=branch.bot_name,
+        industry=branch.industry,
+        branch_name=branch.name,
+        business_description=branch.business_description,
+        latest_draft_id=latest_draft.id if latest_draft else None,
+    )
+
+
 # ── Meta Lead Ads config ───────────────────────────────────────────────────────
 
 _META_ROLES = (UserRole.OWNER, UserRole.IT)
