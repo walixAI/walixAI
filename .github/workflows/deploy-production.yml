@@ -25,11 +25,6 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
         run: railway up --service walixServiceRailway --detach
 
-      - name: Run migrations
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
-        run: railway run --service walixServiceRailway -- alembic upgrade head
-
       - name: Smoke test health endpoint
         run: |
           sleep 20
