@@ -546,12 +546,38 @@ export interface AICommandRequest {
   history: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
+export interface ContactInfo {
+  id: string;
+  name?: string | null;
+  lastName?: string | null;
+  company?: string | null;
+  phone?: string | null;
+  status?: string;
+}
+
+export interface AIActionData {
+  action: string;
+  contact?: ContactInfo;
+  contacts?: ContactInfo[];
+  total?: number;
+  contactId?: string;
+  contactName?: string;
+  activityType?: string;
+  emoji?: string;
+  confirmationId?: string;
+  confirmAction?: string;
+  filtersApplied?: Record<string, unknown>;
+  navigateTo?: string;
+  message?: string;
+}
+
 export interface AICommandResponse {
   intent_type: string;
   response_text: string;
   requires_confirmation: boolean;
-  actions_taken: Array<{ type: string; success: boolean; error?: string }>;
+  actions_taken: Array<{ type: string; success: boolean; error?: string; result?: Record<string, unknown> | null }>;
   suggested_actions: string[];
+  action_data: AIActionData | null;
   tokens_used: number;
   latency_ms: number;
 }

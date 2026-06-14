@@ -71,16 +71,32 @@ export function TopBar() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  // Derive contact_id from current URL for context-aware commands
+  const pathname = window.location.pathname;
+  const contactIdFromUrl = (() => {
+    const m = pathname.match(/^\/contacts\/([0-9a-f-]{36})/i);
+    return m ? m[1] : undefined;
+  })();
+
   const mutation = useMutation({
     mutationFn: api.sendAICommand,
     onSuccess: (data) => {
-      addMessage("assistant", data.response_text, data.suggested_actions);
+      addMessage("assistant", data.response_text, data.suggested_actions, data.action_data);
       setLoading(false);
     },
     onError: () => {
-      addMessage("assistant", "Ocurrió un error al procesar tu instrucción. Intenta de nuevo.");
+      addMessage("assistant", "Ocurrió un error al procesar tu instrucción. Intenta de nuevo.", [], null);
       setLoading(false);
     },
+  });
+
+  const { pendingCommand, setPendingCommand } = useAIBarStore();
+
+  const buildCtx = (extra?: Record<string, unknown>): Record<string, unknown> => ({
+    ...currentContext,
+    screen: pathname.replace(/^\//, ""),
+    ...(contactIdFromUrl ? { contact_id: contactIdFromUrl } : {}),
+    ...extra,
   });
 
   const handleSend = () => {
@@ -92,10 +108,24 @@ export function TopBar() {
     setLoading(true);
     mutation.mutate({
       message: msg,
-      context: currentContext,
+      context: buildCtx(),
       history: history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
     });
   };
+
+  // Watch for programmatic commands from AIPanel (e.g. delete confirmation)
+  useEffect(() => {
+    if (!pendingCommand) return;
+    setPendingCommand(null);
+    addMessage("user", pendingCommand.displayText ?? "Confirmar");
+    setOpen(true);
+    setLoading(true);
+    mutation.mutate({
+      message: pendingCommand.message,
+      context: buildCtx(pendingCommand.context),
+      history: [],
+    });
+  }, [pendingCommand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (

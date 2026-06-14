@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 from app.api.auth import get_current_user
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.redis import redis_client
+from app.services.activity_service import create_field_change_activity, create_system_activity
 from app.models.activity import Activity
 from app.models.agent import AgentSuggestion
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
@@ -48,6 +49,11 @@ _IMPORT_ROLES = frozenset({UserRole.OWNER, UserRole.GERENTE, UserRole.IT})
 _EXPORT_ROLES = frozenset({
     UserRole.OWNER, UserRole.GERENTE, UserRole.ASESOR,
     UserRole.DOCTOR, UserRole.IT,
+})
+# Fields tracked for field-history activities on PATCH
+_MONITORED_FIELDS = frozenset({
+    "name", "last_name", "company", "prospection_source",
+    "status", "assigned_to",
 })
 
 # ── Sort map ──────────────────────────────────────────────────────────────────
@@ -240,6 +246,7 @@ async def _build_contact_row(
         current_score_trend=lead.current_score_trend,
         created_at=lead.created_at,
         updated_at=lead.updated_at,
+        status=lead.status.value if hasattr(lead.status, "value") else str(lead.status) if lead.status else None,
         tags=tag_rows,
         assigned_user=assigned_user,
     )
@@ -949,7 +956,29 @@ async def update_contact(
 ) -> ContactRow:
     lead = await _get_active_contact(db, contact_id, current_user.tenant_id)
 
-    for field, value in body.model_dump(exclude_unset=True, exclude={"tag_ids"}).items():
+    updates = body.model_dump(exclude_unset=True, exclude={"tag_ids"})
+
+    # ── Capture before-state for monitored fields ─────────────────────────────
+    before: dict[str, Any] = {
+        field: getattr(lead, field, None)
+        for field in updates
+        if field in _MONITORED_FIELDS
+    }
+
+    # Capture current tag set before wipe (only if tag_ids is being updated)
+    tags_before: frozenset[uuid.UUID] | None = None
+    if body.tag_ids is not None:
+        tag_id_rows = (
+            await db.execute(
+                select(lead_tags_table.c.tag_id).where(
+                    lead_tags_table.c.lead_id == contact_id
+                )
+            )
+        ).scalars().all()
+        tags_before = frozenset(tag_id_rows)
+
+    # ── Apply field updates ───────────────────────────────────────────────────
+    for field, value in updates.items():
         setattr(lead, field, value)
 
     if body.tag_ids is not None:
@@ -974,4 +1003,58 @@ async def update_contact(
 
     await db.commit()
     lead = await _reload_with_tags(db, contact_id)
-    return await _build_contact_row(lead, db)
+
+    # ── Build changes dict ────────────────────────────────────────────────────
+    changes: dict[str, tuple[Any, Any]] = {
+        field: (old_val, updates[field])
+        for field, old_val in before.items()
+        if old_val != updates[field]
+    }
+
+    # Resolve assigned_to UUIDs → user names for human-readable display
+    if "assigned_to" in changes:
+        old_uid, new_uid = changes["assigned_to"]
+        old_name = "(sin asignar)"
+        new_name = "(sin asignar)"
+        if old_uid:
+            u = await db.get(User, old_uid)
+            old_name = u.name if u else str(old_uid)
+        if new_uid:
+            u = await db.get(User, new_uid)
+            new_name = u.name if u else str(new_uid)
+        changes["assigned_to"] = (old_name, new_name)
+
+    tags_changed = tags_before is not None and frozenset(body.tag_ids or []) != tags_before
+
+    # Build response before field-history commit so `lead` is in a clean state
+    response = await _build_contact_row(lead, db)
+
+    # ── Fire-and-forget field history (non-critical) ──────────────────────────
+    if changes or tags_changed:
+        try:
+            if changes:
+                await create_field_change_activity(
+                    lead_id=lead.id,
+                    tenant_id=current_user.tenant_id,
+                    changed_by_id=current_user.id,
+                    changed_by_name=current_user.name,
+                    changes=changes,
+                    db=db,
+                )
+            if tags_changed:
+                await create_system_activity(
+                    lead_id=lead.id,
+                    tenant_id=current_user.tenant_id,
+                    description="Etiquetas actualizadas",
+                    metadata={
+                        "changed_by_id": str(current_user.id),
+                        "changed_by_name": current_user.name,
+                    },
+                    db=db,
+                )
+            await db.commit()
+        except Exception:
+            logger.exception("field history failed for contact %s", contact_id)
+            await db.rollback()
+
+    return response

@@ -57,6 +57,7 @@ class CommandResult(BaseModel):
     actions_taken: list[ActionResult]
     suggested_actions: list[str]
     data_query: Any | None
+    action_data: dict[str, Any] | None = None
     tokens_used: int
     latency_ms: int
 
@@ -102,6 +103,25 @@ async def interpret_command(
 ) -> CommandResult:
     """Interprets a natural-language command from the AI Bar and executes actions."""
     start = time.monotonic()
+
+    # 0. Shortcut: direct confirmation actions bypass Claude entirely
+    if body.message == "__confirm__" and body.context.get("confirmation_action"):
+        from app.ai.contact_executor import execute_contact_delete
+        conf = body.context["confirmation_action"]
+        if conf.get("type") == "contact_delete":
+            params = {"confirmation_id": conf.get("confirmation_id"), "contact_id": conf.get("contact_id")}
+            result = await execute_contact_delete(params, current_user, db)
+            return CommandResult(
+                intent_type="accion",
+                response_text=result.get("message", "Contacto archivado"),
+                requires_confirmation=False,
+                actions_taken=[ActionResult(type="contact_delete", success=True, result=result)],
+                suggested_actions=[],
+                data_query=None,
+                action_data=result,
+                tokens_used=0,
+                latency_ms=0,
+            )
 
     # 1. Enrich context with screen-specific data
     enriched = await enrich_context(body.context, current_user, db)
@@ -154,8 +174,15 @@ async def interpret_command(
     actions_taken: list[ActionResult] = []
     proposed_actions: list[dict] = parsed.get("actions") or []
     if proposed_actions and not parsed.get("requires_confirmation", False):
-        raw_results = await execute_actions(proposed_actions, current_user, db)
+        raw_results = await execute_actions(proposed_actions, current_user, db, context=body.context)
         actions_taken = [ActionResult(**r) for r in raw_results]
+
+    # Extract rich action_data from first successful contact action
+    action_data: dict | None = None
+    for ar in actions_taken:
+        if ar.success and ar.result and ar.result.get("action"):
+            action_data = ar.result
+            break
 
     # 6. Persist to ai_command_logs
     db.add(AICommandLog(
@@ -180,6 +207,7 @@ async def interpret_command(
         actions_taken=actions_taken,
         suggested_actions=parsed.get("suggested_actions") or [],
         data_query=parsed.get("data_query"),
+        action_data=action_data,
         tokens_used=total_tokens,
         latency_ms=latency_ms,
     )

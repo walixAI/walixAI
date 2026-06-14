@@ -1,15 +1,20 @@
+from __future__ import annotations
+
 import enum
 import uuid
-from typing import Any
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-_INDUSTRY_VALUES = ["salud", "inmobiliaria", "educacion", "fintech", "otro"]
-_ONBOARDING_STATUS_VALUES = ["pending", "draft", "approved", "active"]
-
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    pass
+
+_ONBOARDING_STATUS_VALUES = ["pending", "draft", "approved", "active"]
 
 
 class TenantPlan(str, enum.Enum):
@@ -47,9 +52,39 @@ class Tenant(Base):
     industry: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    # ── Sprint 8B: Industry Templates ─────────────────────────────────────────
+    industry_key: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="generico"
+    )
+    industry_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    entity_name: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="Contacto"
+    )
+    entity_plural: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="Contactos"
+    )
+    contact_statuses_config: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
+    onboarding_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    onboarding_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     companies: Mapped[list["Company"]] = relationship(
         back_populates="tenant", cascade="all, delete-orphan"
     )
+
+    # ── Helpers ────────────────────────────────────────────────────────────────
+
+    def get_industry_template(self) -> dict:
+        """Retorna el template de la industria activa del tenant."""
+        from app.industry_templates.catalog import get_template
+        return get_template(self.industry_key)
+
+    def get_entity_display(self, plural: bool = False) -> str:
+        """Retorna el nombre de la entidad (singular o plural) para este tenant."""
+        return self.entity_plural if plural else self.entity_name
 
 
 class Company(Base):
@@ -92,7 +127,6 @@ class Branch(Base):
     wa_phone_number_id: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
-    # Encrypted at the application layer before storage.
     wa_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     assignment_mode: Mapped[AssignmentMode] = mapped_column(
         Enum(

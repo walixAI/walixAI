@@ -28,13 +28,19 @@ logger = logging.getLogger(__name__)
 
 # ── Permission matrix ──────────────────────────────────────────────────────────
 
+# All roles can perform contact CRUD via the AIBar
+_CONTACT_CRUD = {
+    "contact_create", "contact_read", "contact_update",
+    "contact_activity", "contact_delete",
+}
+
 _ROLE_ACTIONS: dict[UserRole, set[str]] = {
-    UserRole.OWNER:   {"move_lead_stage", "assign_lead", "update_ai_config", "create_alert_rule", "navigate"},
-    UserRole.GERENTE: {"move_lead_stage", "assign_lead", "update_ai_config", "create_alert_rule", "navigate"},
-    UserRole.ASESOR:  {"move_lead_stage", "assign_lead", "navigate"},
-    UserRole.DOCTOR:  {"move_lead_stage", "assign_lead", "navigate"},
-    UserRole.SOPORTE: {"navigate"},
-    UserRole.IT:      {"navigate", "update_ai_config"},
+    UserRole.OWNER:   {"move_lead_stage", "assign_lead", "update_ai_config", "create_alert_rule", "navigate"} | _CONTACT_CRUD,
+    UserRole.GERENTE: {"move_lead_stage", "assign_lead", "update_ai_config", "create_alert_rule", "navigate"} | _CONTACT_CRUD,
+    UserRole.ASESOR:  {"move_lead_stage", "assign_lead", "navigate"} | _CONTACT_CRUD,
+    UserRole.DOCTOR:  {"move_lead_stage", "assign_lead", "navigate"} | _CONTACT_CRUD,
+    UserRole.SOPORTE: {"navigate"} | _CONTACT_CRUD,
+    UserRole.IT:      {"navigate", "update_ai_config"} | _CONTACT_CRUD,
 }
 
 
@@ -225,11 +231,43 @@ _INTENT_SCHEMA = """{
     {"type": "assign_lead", "lead_id": "uuid", "user_id": "uuid"},
     {"type": "update_ai_config", "branch_id": "uuid", "patch": {}},
     {"type": "create_alert_rule", "branch_id": "uuid", "alert_type": "str", "threshold_hours": 48},
-    {"type": "navigate", "destination": "pipeline|lead|dashboard|settings"}
+    {"type": "navigate", "destination": "pipeline|lead|dashboard|settings"},
+    {"type": "contact_create", "params": {"name": "str", "last_name": "str|null", "phone": "str|null", "email": "str|null", "company": "str|null", "prospection_source": "manual|whatsapp|form|referral"}},
+    {"type": "contact_read", "params": {"q": "str|null", "status": ["nuevo","calificado","..."], "company": "str|null", "date_range": "today|this_week|this_month|null", "sort_by": "score|name|lastActivity|null"}},
+    {"type": "contact_update", "params": {"contact_ref": "nombre o teléfono del contacto", "field": "status|company|assigned_to|tag|...", "new_value": "valor nuevo"}},
+    {"type": "contact_activity", "params": {"contact_ref": "nombre o teléfono (vacío si hay contacto en pantalla)", "activity_type": "note|call|meeting|task|email", "title": "str|null", "body": "descripción", "due_date": "ISO fecha|null"}},
+    {"type": "contact_delete", "params": {"contact_ref": "nombre o teléfono", "bulk": false}}
   ],
   "data_query": null,
   "suggested_actions": ["Acción sugerida 1", "Acción sugerida 2"]
 }"""
+
+_CONTACT_INTENT_GUIDE = """
+INTENTS DE CONTACTOS (disponibles para todos los roles):
+
+contact_create — cuando el usuario quiere agregar/crear/añadir un contacto.
+  Extraer: name (obligatorio), last_name, phone (normalizar 10 dígitos → +52...), company, prospection_source.
+  Ejemplos: "agrega a María López, tel 81 1234 5678", "nuevo contacto: Juan García de ACME"
+
+contact_read — cuando busca, filtra o quiere ver contactos.
+  Extraer: q (búsqueda libre), status, company, date_range (today/this_week/this_month), sort_by.
+  Ejemplos: "busca a Carlos", "muéstrame los calificados de este mes", "cuántos leads hay"
+
+contact_update — cuando quiere cambiar un campo de un contacto.
+  Extraer: contact_ref (nombre/tel para identificar), field (status/company/assigned_to...), new_value.
+  Si el usuario está en la ficha de un contacto (screen empieza con "contacts/"), contact_ref puede estar vacío.
+  Ejemplos: "cambia el estatus de Ana García a calificado", "asigna a Juan al vendedor Carlos"
+
+contact_activity — cuando registra nota, llamada, tarea, reunión o email sobre un contacto.
+  Extraer: contact_ref, activity_type (note/call/meeting/task/email), title, body, due_date.
+  Si screen empieza con "contacts/", el contact_ref puede omitirse (aplica al contacto en pantalla).
+  Ejemplos: "anota llamada con Pedro: interesado en plan premium", "agenda reunión con Sofía el 15 jun"
+
+contact_delete — cuando quiere archivar o eliminar un contacto. SIEMPRE pedir confirmación.
+  Extraer: contact_ref (nombre/teléfono).
+  IMPORTANTE: requiere confirmation_required: true. Nunca decir "eliminar" — decir "archivar".
+  Ejemplos: "archiva a Juan García", "elimina el contacto de ACME"
+"""
 
 _ROLE_DESCRIPTIONS: dict[UserRole, str] = {
     UserRole.OWNER:   "Owner — acceso total al sistema",
@@ -252,12 +290,14 @@ def build_interpreter_prompt(role: UserRole, context: dict) -> str:
         f"ROL: {role_desc}\n"
         f"ACCIONES PERMITIDAS: {', '.join(allowed)}\n\n"
         f"CONTEXTO DE PANTALLA:\n{context_json}\n\n"
-        "REGLAS:\n"
+        + _CONTACT_INTENT_GUIDE + "\n"
+        "REGLAS GENERALES:\n"
         "- Solo propón acciones que estén en ACCIONES PERMITIDAS.\n"
-        "- requires_confirmation: true si la acción modifica datos de forma irreversible.\n"
+        "- requires_confirmation: true si la acción modifica datos de forma irreversible (incluyendo contact_delete siempre).\n"
         "- response_text: máximo 2 oraciones, en español, directo al punto.\n"
         "- Si el usuario solo pregunta, deja actions vacío.\n"
-        "- suggested_actions: 2-3 acciones contextuales relevantes para el estado actual.\n\n"
+        "- suggested_actions: 2-3 acciones contextuales relevantes para el estado actual.\n"
+        "- Para contact_activity y contact_update: si context.screen empieza con 'contacts/' y contact_ref está vacío, usa el contacto en pantalla.\n\n"
         "Responde ÚNICAMENTE con este JSON (sin markdown, sin texto adicional):\n"
         + _INTENT_SCHEMA
     )
@@ -269,6 +309,7 @@ async def execute_actions(
     actions: list[dict],
     user: User,
     db: AsyncSession,
+    context: dict | None = None,
 ) -> list[dict]:
     """Executes each action after permission check. Returns a result list."""
     allowed = _allowed_actions(user.role)
@@ -285,7 +326,7 @@ async def execute_actions(
             continue
 
         try:
-            result = await _dispatch_action(action_type, action, user, db)
+            result = await _dispatch_action(action_type, action, user, db, context)
             results.append({"type": action_type, "success": True, "result": result})
         except Exception as exc:
             logger.exception("execute_actions: failed action=%s", action_type)
@@ -295,7 +336,8 @@ async def execute_actions(
 
 
 async def _dispatch_action(
-    action_type: str, action: dict, user: User, db: AsyncSession
+    action_type: str, action: dict, user: User, db: AsyncSession,
+    context: dict | None = None,
 ) -> dict:
     if action_type == "move_lead_stage":
         return await _action_move_lead_stage(action, user, db)
@@ -307,7 +349,40 @@ async def _dispatch_action(
         return await _action_create_alert_rule(action, user, db)
     if action_type == "navigate":
         return {"destination": action.get("destination")}
+
+    # Contact CRUD
+    if action_type.startswith("contact_"):
+        return await _dispatch_contact_action(action_type, action, user, db, context or {})
+
     raise ValueError(f"Unsupported action type: {action_type}")
+
+
+async def _dispatch_contact_action(
+    action_type: str, action: dict, user: User, db: AsyncSession, context: dict
+) -> dict:
+    from app.ai.contact_executor import (
+        execute_contact_activity,
+        execute_contact_create,
+        execute_contact_delete,
+        execute_contact_read,
+        execute_contact_update,
+    )
+
+    params: dict = action.get("params", {})
+    ctx_contact_id = str(context.get("contact_id", "")) or None
+
+    if action_type == "contact_create":
+        return await execute_contact_create(params, user, db)
+    if action_type == "contact_read":
+        return await execute_contact_read(params, user, db)
+    if action_type == "contact_update":
+        return await execute_contact_update(params, user, db, context_contact_id=ctx_contact_id)
+    if action_type == "contact_activity":
+        return await execute_contact_activity(params, user, db, ctx_contact_id)
+    if action_type == "contact_delete":
+        return await execute_contact_delete(params, user, db)
+
+    raise ValueError(f"Unsupported contact action: {action_type}")
 
 
 async def _action_move_lead_stage(action: dict, user: User, db: AsyncSession) -> dict:

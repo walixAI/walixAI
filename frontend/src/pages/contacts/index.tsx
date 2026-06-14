@@ -21,6 +21,9 @@ import { ContactsKanbanView } from "@/components/contacts/ContactsKanbanView";
 import { ContactsCardsView } from "@/components/contacts/ContactsCardsView";
 import { BulkActionsInline } from "@/components/contacts/BulkActionsInline";
 import { ContactImportModal } from "@/components/contacts/ContactImportModal";
+import { SavedViewsSidebar } from "@/components/contacts/SavedViewsSidebar";
+import { SavedViewDialog } from "@/components/contacts/SavedViewDialog";
+import type { SavedViewRow } from "@/lib/queries/saved_views";
 import {
   Sheet,
   SheetContent,
@@ -133,6 +136,7 @@ export default function ContactsPage() {
   }, [filters]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateFilters = useCallback((partial: Partial<ContactFilters>) => {
+    setActiveViewId(null);
     setFilters((f) => ({ ...f, ...partial }));
   }, []);
 
@@ -200,6 +204,18 @@ export default function ContactsPage() {
   // Import modal
   const [importModalOpen, setImportModalOpen] = useState(false);
 
+  // Saved views
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<SavedViewRow | null>(null);
+
+  const handleApplyView = useCallback((view: SavedViewRow) => {
+    setActiveViewId(view.id);
+    handleViewChange(view.viewMode as ViewMode);
+    setFilters({ ...view.filters });
+    setSearchInput(view.filters.q ?? "");
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
   // Bulk delete
   const handleBulkDelete = useCallback(async (ids: string[]) => {
     await bulkContacts("delete", ids);
@@ -246,6 +262,7 @@ export default function ContactsPage() {
         onExport={handleExport}
         onImportFile={() => setImportModalOpen(true)}
         isExporting={isExporting}
+        onSaveView={() => setSaveDialogOpen(true)}
       />
 
       <ContactsFilters
@@ -260,7 +277,17 @@ export default function ContactsPage() {
         activeCount={activeFilterCount}
       />
 
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex flex-1 overflow-hidden">
+        <div className="hidden md:flex shrink-0">
+          <SavedViewsSidebar
+            activeViewId={activeViewId}
+            onApplyView={handleApplyView}
+            onOpenCreate={() => setSaveDialogOpen(true)}
+            onOpenRename={(view) => setRenameTarget(view)}
+          />
+        </div>
+
+        <div className="flex-1 overflow-auto p-4">
         {viewMode === "list" && (
           <ContactsListView
             data={data}
@@ -290,6 +317,7 @@ export default function ContactsPage() {
             onEdit={(c: ContactRow) => navigate(`/contacts/${c.id}`)}
           />
         )}
+        </div>
       </div>
 
       {selectedIds.size > 0 && (
@@ -370,6 +398,24 @@ export default function ContactsPage() {
           </form>
         </SheetContent>
       </Sheet>
+
+      {/* Saved view dialogs */}
+      <SavedViewDialog
+        mode="create"
+        currentFilters={filters}
+        currentViewMode={viewMode}
+        open={saveDialogOpen}
+        onOpenChange={setSaveDialogOpen}
+      />
+      <SavedViewDialog
+        mode="rename"
+        currentFilters={filters}
+        currentViewMode={viewMode}
+        viewId={renameTarget?.id}
+        viewName={renameTarget?.name}
+        open={renameTarget !== null}
+        onOpenChange={(open) => { if (!open) setRenameTarget(null); }}
+      />
 
       {/* Import modal */}
       <ContactImportModal

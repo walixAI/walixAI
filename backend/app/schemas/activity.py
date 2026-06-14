@@ -3,15 +3,15 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.activity import ACTIVITY_TYPES
 
 
 class ActivityCreate(BaseModel):
     activity_type: str
-    title: str | None = None
-    body: str | None = None
+    title: str | None = Field(default=None, max_length=255)
+    body: str | None = Field(default=None, min_length=2, max_length=500)
     extra_data: dict | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None

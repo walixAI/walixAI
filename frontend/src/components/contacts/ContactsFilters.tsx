@@ -235,14 +235,14 @@ export function ContactsFilters({
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ordenar por</Label>
               <Select
-                value={filters.sort ?? ""}
-                onValueChange={(v) => onChange({ sort: v as ContactFilters["sort"] || undefined })}
+                value={filters.sort ?? "__none__"}
+                onValueChange={(v) => onChange({ sort: v === "__none__" ? undefined : v as ContactFilters["sort"] })}
               >
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue placeholder="Sin orden" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Sin orden</SelectItem>
+                  <SelectItem value="__none__">Sin orden</SelectItem>
                   {SORT_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value!}>{o.label}</SelectItem>
                   ))}

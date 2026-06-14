@@ -1,11 +1,17 @@
+from __future__ import annotations
+
 import enum
 import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Enum, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.saved_view import SavedView
 
 
 class UserRole(str, enum.Enum):
@@ -49,3 +55,10 @@ class User(Base):
     )
     wa_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    saved_views: Mapped[list[SavedView]] = relationship(
+        "SavedView",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )

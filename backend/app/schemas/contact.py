@@ -47,6 +47,8 @@ class ContactUpdate(BaseModel):
     prospection_source: str | None = None
     pipeline_stage_id: uuid.UUID | None = None
     tag_ids: list[uuid.UUID] | None = None
+    status: str | None = None
+    assigned_to: uuid.UUID | None = None
 
 
 class ContactRow(BaseModel):
@@ -61,6 +63,7 @@ class ContactRow(BaseModel):
     deleted_at: datetime | None = None
     last_activity_summary: str | None = None
     pipeline_stage_id: uuid.UUID | None = None
+    status: str | None = None
     current_score: int | None = None
     current_score_trend: str | None = None
     created_at: datetime

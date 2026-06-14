@@ -3,7 +3,9 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import activities, agents, ai, auth, automations, branches, contacts, dashboard, health, kb, leads, metrics, onboarding, pipeline, platform, support, tags, webhooks
+from app.api import activities, agents, ai, auth, automations, branches, contacts, dashboard, health, kb, leads, metrics, onboarding, pipeline, platform, saved_views, support, tags, webhooks
+from app.api.industry_onboarding import onboarding_router as industry_onboarding_router
+from app.api.industry_onboarding import settings_router as industry_settings_router
 from app.api.users import team_router, users_router
 from app.middleware.tenant_context import TenantContextMiddleware
 from app.services.scheduler import lifespan_scheduler
@@ -64,9 +66,12 @@ app.include_router(metrics.router, prefix="/api")
 app.include_router(metrics.pipeline_router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(webhooks.router, prefix="/api")
+app.include_router(saved_views.router, prefix="/api")  # must precede contacts (avoids /{contact_id} collision)
 app.include_router(contacts.router, prefix="/api")
 app.include_router(activities.router, prefix="/api")
 app.include_router(tags.router, prefix="/api")
+app.include_router(industry_onboarding_router, prefix="/api")  # Sprint 8B: /api/v1/onboarding/*
+app.include_router(industry_settings_router, prefix="/api")    # Sprint 8B: /api/v1/settings/*
 app.include_router(health.router)  # /health — no prefix, used by deploy smoke tests
 
 

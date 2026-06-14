@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, StickyNote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -15,6 +15,8 @@ import { ContactStatusBadge } from "@/components/ui/ContactStatusBadge";
 import { ContactAvatar } from "@/components/ui/ContactAvatar";
 import { TagChip } from "@/components/ui/TagChip";
 import { LeadScoreBadge } from "@/components/leads/LeadScoreBadge";
+import { LastActivityCell } from "@/components/ui/LastActivityCell";
+import { QuickNotePopover } from "./QuickNotePopover";
 import type { ContactListResponse } from "@/lib/queries/contacts";
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -23,17 +25,6 @@ const SOURCE_LABELS: Record<string, string> = {
   referral:         "Referido",
   manual:           "Manual",
 };
-
-function formatRelative(iso: string | null): string {
-  if (!iso) return "—";
-  const diff = Date.now() - new Date(iso).getTime();
-  const d = Math.floor(diff / 86_400_000);
-  if (d === 0) return "Hoy";
-  if (d === 1) return "Ayer";
-  if (d < 30) return `hace ${d}d`;
-  if (d < 365) return `hace ${Math.floor(d / 30)}m`;
-  return `hace ${Math.floor(d / 365)}a`;
-}
 
 interface ContactsListViewProps {
   data: ContactListResponse | undefined;
@@ -91,8 +82,9 @@ export function ContactsListView({
               <TableHead>Estado</TableHead>
               <TableHead>Fuente</TableHead>
               <TableHead>Vendedor</TableHead>
-              <TableHead>Última actividad</TableHead>
+              <TableHead data-testid="last-activity-col">Última actividad</TableHead>
               <TableHead className="text-right">Score</TableHead>
+              <TableHead className="w-8" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -102,7 +94,7 @@ export function ContactsListView({
                 <TableRow
                   key={contact.id}
                   data-testid="contact-row"
-                  className="cursor-pointer hover:bg-muted/40"
+                  className="group cursor-pointer hover:bg-muted/40"
                   onClick={(e) => {
                     if ((e.target as HTMLElement).closest('[role="checkbox"]')) return;
                     navigate(`/contacts/${contact.id}`);
@@ -115,7 +107,7 @@ export function ContactsListView({
                     <Checkbox
                       checked={selectedIds.has(contact.id)}
                       onCheckedChange={() => onToggleSelect(contact.id)}
-                      aria-label={`Seleccionar ${fullName}`}
+                      aria-label={`Seleccionar ${contact.waPhone}`}
                     />
                   </TableCell>
 
@@ -165,7 +157,10 @@ export function ContactsListView({
                   </TableCell>
 
                   <TableCell className="text-xs text-muted-foreground">
-                    {formatRelative(contact.lastActivityAt)}
+                    <LastActivityCell
+                      lastActivitySummary={contact.lastActivitySummary}
+                      lastActivityAt={contact.lastActivityAt}
+                    />
                   </TableCell>
 
                   <TableCell className="text-right">
@@ -177,6 +172,23 @@ export function ContactsListView({
                     ) : (
                       <span className="text-muted-foreground text-xs">—</span>
                     )}
+                  </TableCell>
+
+                  <TableCell
+                    className="w-8 p-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <QuickNotePopover contact={contact}>
+                      <Button
+                        data-testid="quick-note-trigger"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 invisible group-hover:visible"
+                        title="Nota rápida"
+                      >
+                        <StickyNote className="h-3.5 w-3.5 text-muted-foreground" />
+                      </Button>
+                    </QuickNotePopover>
                   </TableCell>
                 </TableRow>
               );

@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { X } from "lucide-react";
+import { Building2, Phone, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import type { AIActionData, ContactInfo } from "@/lib/api";
 import { useAIBarStore } from "@/stores/aiBarStore";
+import { ContactStatusBadge } from "@/components/ui/ContactStatusBadge";
+import { ContactAvatar } from "@/components/ui/ContactAvatar";
+import type { LeadStatus } from "@/lib/queries/contacts";
 import {
   Sheet,
   SheetContent,
@@ -63,6 +67,139 @@ function resolveNavigatePath(label: string): string {
   const uuid = label.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   if (uuid) return `/whatsapp?lead=${uuid[0]}`;
   return "/dashboard";
+}
+
+// ── Contact action cards ──────────────────────────────────────────────────────
+
+function ContactCard({ contact, onNavigate }: { contact: ContactInfo; onNavigate: (p: string) => void }) {
+  const fullName = [contact.name, contact.lastName].filter(Boolean).join(" ") || "Sin nombre";
+  return (
+    <div className="rounded-xl border border-border bg-card/40 p-3 space-y-2 mt-2">
+      <div className="flex items-center gap-2">
+        <ContactAvatar id={contact.id} name={contact.name ?? null} lastName={contact.lastName ?? null} avatarUrl={null} size="sm" />
+        <div className="min-w-0">
+          <p className="text-sm font-medium truncate">{fullName}</p>
+          {contact.company && <p className="text-xs text-muted-foreground truncate">{contact.company}</p>}
+        </div>
+        {contact.status && (
+          <div className="ml-auto shrink-0">
+            <ContactStatusBadge status={contact.status as LeadStatus} />
+          </div>
+        )}
+      </div>
+      {contact.phone && (
+        <p className="flex items-center gap-1 text-xs font-mono text-muted-foreground">
+          <Phone className="h-3 w-3" />{contact.phone}
+        </p>
+      )}
+      <button
+        onClick={() => onNavigate(`/contacts/${contact.id}`)}
+        className="w-full text-xs h-7 rounded-lg border border-border bg-background/50 hover:bg-background transition-colors"
+      >
+        Ver ficha
+      </button>
+    </div>
+  );
+}
+
+function ContactListItem({ contact, onNavigate }: { contact: ContactInfo; onNavigate: (p: string) => void }) {
+  const fullName = [contact.name, contact.lastName].filter(Boolean).join(" ") || "Sin nombre";
+  return (
+    <button
+      onClick={() => onNavigate(`/contacts/${contact.id}`)}
+      className="flex items-center gap-2 w-full rounded-lg px-2 py-1.5 hover:bg-muted/50 transition-colors text-left"
+    >
+      <ContactAvatar id={contact.id} name={contact.name ?? null} lastName={contact.lastName ?? null} avatarUrl={null} size="sm" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium truncate">{fullName}</p>
+        {contact.company && <p className="text-[11px] text-muted-foreground truncate">{contact.company}</p>}
+      </div>
+      {contact.status && <ContactStatusBadge status={contact.status as LeadStatus} />}
+    </button>
+  );
+}
+
+function ActionDataCard({
+  data,
+  onNavigate,
+  onConfirmDelete,
+  onCancelDelete,
+}: {
+  data: AIActionData;
+  onNavigate: (p: string) => void;
+  onConfirmDelete: (d: AIActionData) => void;
+  onCancelDelete: () => void;
+}) {
+  if (data.action === "contact_created" && data.contact) {
+    return <ContactCard contact={data.contact} onNavigate={onNavigate} />;
+  }
+
+  if (data.action === "contact_found" && data.contact) {
+    return (
+      <div className="mt-2 space-y-1">
+        <ContactCard contact={data.contact} onNavigate={onNavigate} />
+      </div>
+    );
+  }
+
+  if (data.action === "contacts_found" && data.contacts) {
+    return (
+      <div className="mt-2 rounded-xl border border-border bg-card/40 p-2 space-y-0.5">
+        {data.contacts.map((c) => (
+          <ContactListItem key={c.id} contact={c} onNavigate={onNavigate} />
+        ))}
+        {data.total && data.total > (data.contacts.length) && (
+          <button
+            onClick={() => onNavigate("/contacts")}
+            className="w-full text-xs text-primary hover:underline pt-1 pb-0.5"
+          >
+            Ver todos ({data.total})
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (data.action === "activity_created") {
+    return (
+      <div className="mt-2 flex items-center gap-2 rounded-xl border border-border bg-card/40 px-3 py-2">
+        <span className="text-base">{data.emoji ?? "📝"}</span>
+        <p className="text-xs text-muted-foreground">{data.message}</p>
+      </div>
+    );
+  }
+
+  if (data.action === "requires_confirmation") {
+    return (
+      <div className="mt-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 space-y-2.5">
+        <p className="text-xs text-foreground">{data.message}</p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => onConfirmDelete(data)}
+            className="flex-1 h-7 rounded-lg text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
+          >
+            Sí, archivar
+          </button>
+          <button
+            onClick={onCancelDelete}
+            className="flex-1 h-7 rounded-lg text-xs border border-border hover:bg-muted/50 transition-colors"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (data.action === "ambiguous") {
+    return (
+      <div className="mt-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+        <p className="text-xs text-muted-foreground">{data.message}</p>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 // ── Urgency border ────────────────────────────────────────────────────────────
@@ -211,7 +348,7 @@ function ConfirmActionDialog({
 
 export function AIPanel() {
   const navigate = useNavigate();
-  const { isOpen, isLoading, history, currentContext, setOpen, setDraftInput } =
+  const { isOpen, isLoading, history, currentContext, setOpen, setDraftInput, setPendingCommand } =
     useAIBarStore();
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -338,6 +475,30 @@ export function AIPanel() {
                   <span className="text-[10px] text-muted-foreground px-1">
                     {formatTime(msg.timestamp)}
                   </span>
+
+                  {/* Contact action cards */}
+                  {msg.role === "assistant" && msg.action_data && (
+                    <div className="max-w-[85%] w-full">
+                      <ActionDataCard
+                        data={msg.action_data}
+                        onNavigate={handleNavigate}
+                        onConfirmDelete={(d) =>
+                          setPendingCommand({
+                            message: "__confirm__",
+                            displayText: "Confirmar archivado",
+                            context: {
+                              confirmation_action: {
+                                type: "contact_delete",
+                                confirmation_id: d.confirmationId,
+                                contact_id: d.contactId,
+                              },
+                            },
+                          })
+                        }
+                        onCancelDelete={() => {/* no-op — user cancelled */}}
+                      />
+                    </div>
+                  )}
 
                   {/* Suggested actions below assistant messages */}
                   {msg.role === "assistant" &&
