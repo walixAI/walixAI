@@ -95,6 +95,7 @@ async def list_suggestions(
 @router.post(
     "/suggestions/{suggestion_id}/confirm",
     response_model=SuggestionOut,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def confirm_suggestion(
     suggestion_id: uuid.UUID,

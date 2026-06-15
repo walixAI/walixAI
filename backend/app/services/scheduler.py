@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan_scheduler(_app):
-    # Jobs periódicos corren en proceso Celery separado. Ver app/celery_app.py
+    # Jobs periódicos corren en proceso Celery separado.
+    # Ver app/celery_app.py para el beat_schedule completo.
+    # Para correr en local:
+    #   celery -A app.celery_app worker --loglevel=info
+    #   celery -A app.celery_app beat   --loglevel=info
     logger.info("scheduler: Celery mode — no in-process scheduler (see Procfile)")
     yield
