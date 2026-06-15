@@ -1,3 +1,20 @@
-web: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+web:    alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
 worker: celery -A app.celery_app worker --loglevel=info --concurrency=2
-beat: celery -A app.celery_app beat --loglevel=info --scheduler celery.beat:PersistentScheduler
+beat:   celery -A app.celery_app beat   --loglevel=info --scheduler celery.beat:PersistentScheduler
+
+# ── Railway deploy ────────────────────────────────────────────────────────────
+# Railway solo arranca el proceso "web" para el servicio principal.
+# Para worker y beat, crear DOS servicios adicionales en Railway:
+#
+#   walix-worker → mismo repositorio/Dockerfile
+#     Start Command: celery -A app.celery_app worker --loglevel=info --concurrency=2
+#
+#   walix-beat   → mismo repositorio/Dockerfile
+#     Start Command: celery -A app.celery_app beat --loglevel=info
+#
+# Solo se necesita UN proceso beat aunque haya múltiples workers.
+# Ambos servicios necesitan las mismas variables de entorno que el servicio web.
+#
+# Nota: PersistentScheduler (no django_celery_beat) — el proyecto usa FastAPI,
+# no Django. PersistentScheduler guarda el estado en disco (/tmp/celerybeat-schedule)
+# y sobrevive reinicios del proceso beat.

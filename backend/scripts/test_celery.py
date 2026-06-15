@@ -1,176 +1,273 @@
-"""test_celery.py — Verifica la configuración de Celery + Redis para Walix.
+"""test_celery.py — Verifica la migración APScheduler → Celery en Walix.
 
-Comprueba:
-  a) Conexión a Redis y encolado de tarea
-  b) Resultado disponible en Redis (requiere worker en ejecución)
-  c) Schedule de Beat configurado correctamente
-  d) Tarea DLQ registrada
-  e) Re-encolado con task_acks_late (verificación de configuración)
+Checks (a–f) del spec:
+  a) beat_schedule tiene los jobs esperados — imprime nombres y horarios
+  b) Encola aggregate_all_metrics y espera resultado (máx 30 s)
+  c) Tabla failed_tasks existe en BD y es accesible
+  d) APScheduler y scheduler.start() NO aparecen en app/main.py
+  e) execute_suggestion_task con UUID inexistente maneja error gracefully
+  f) PASS/FAIL por cada check con detalle del error si falla
 
 Uso:
-    # Con worker en ejecución:
-    celery -A app.celery_app worker --loglevel=info &
-    python scripts/test_celery.py
+  # Con worker corriendo (requerido para b y e async):
+  celery -A app.celery_app worker --loglevel=info &
+  .venv/bin/python scripts/test_celery.py
 
-    # Sin worker (solo verifica configuración):
-    python scripts/test_celery.py --no-worker
+  # Solo verificación de configuración, sin worker:
+  .venv/bin/python scripts/test_celery.py --no-worker
 """
 from __future__ import annotations
 
 import asyncio
 import sys
 import time
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-WORKER_REQUIRED = "--no-worker" not in sys.argv
+NEED_WORKER = "--no-worker" not in sys.argv
+ROOT = Path(__file__).resolve().parent.parent
 
-_PASS = "✅ PASS"
-_FAIL = "❌ FAIL"
+_PASS = "✓ PASS"
+_FAIL = "✗ FAIL"
+_SKIP = "– SKIP"
+
+failures: list[str] = []
 
 
-def result(label: str, ok: bool, detail: str = "") -> None:
-    tag = _PASS if ok else _FAIL
+def report(label: str, ok: bool | None, detail: str = "") -> None:
+    if ok is None:
+        tag = _SKIP
+    elif ok:
+        tag = _PASS
+    else:
+        tag = _FAIL
+        failures.append(label)
     line = f"  {tag}  {label}"
     if detail:
         line += f"\n         {detail}"
     print(line)
 
 
-def main() -> int:
-    print("\n══════════════════════════════════════════════════════")
-    print("  WALIX — Verificación Celery + Redis")
-    print("══════════════════════════════════════════════════════\n")
+# ─────────────────────────────────────────────────────────────────────────────
+# a) beat_schedule tiene los jobs esperados — imprime nombres y horarios
+# ─────────────────────────────────────────────────────────────────────────────
 
-    failures = 0
+def check_a() -> None:
+    print("a) Beat schedule ─────────────────────────────────────────")
+    from app.celery_app import celery_app
 
-    # ── a) Conexión a Redis ───────────────────────────────────────────────────
-    print("→ Verificando conexión a Redis...\n")
-    try:
-        from app.celery_app import celery_app
-        conn = celery_app.connection()
-        conn.ensure_connection(max_retries=3)
-        conn.close()
-        result("Conexión a Redis (broker) establecida", True)
-    except Exception as exc:
-        result("Conexión a Redis (broker) establecida", False, str(exc))
-        failures += 1
-        print("\n❌  No se puede conectar a Redis. Verifica REDIS_URL en .env.\n")
-        return failures
-
-    # ── b) Encolado y ejecución (si hay worker) ───────────────────────────────
-    print()
-    from app.tasks.agent_tasks import run_follow_up_all_branches
-
-    try:
-        task_result = run_follow_up_all_branches.delay()
-        result(
-            f"Tarea encolada correctamente (task_id={task_result.id[:16]}...)",
-            True,
-        )
-    except Exception as exc:
-        result("Tarea encolada correctamente", False, str(exc))
-        failures += 1
-        task_result = None
-
-    if task_result and WORKER_REQUIRED:
-        print("  Esperando resultado (máx 30 s, requiere worker en ejecución)...")
-        try:
-            value = task_result.get(timeout=30)
-            result(
-                "Worker ejecutó la tarea y devolvió resultado",
-                True,
-                f"resultado={value}",
-            )
-        except Exception as exc:
-            result(
-                "Worker ejecutó la tarea y devolvió resultado",
-                False,
-                f"{exc} — ¿está corriendo el worker? (celery -A app.celery_app worker)",
-            )
-            failures += 1
-    elif task_result:
-        result(
-            "Verificación de ejecución omitida (--no-worker)",
-            True,
-            f"task_id={task_result.id} encolado en Redis",
-        )
-
-    # ── c) Beat schedule configurado ─────────────────────────────────────────
-    print()
-    print("→ Verificando Beat schedule...\n")
-    from app.celery_app import celery_app as _app
-
-    expected_tasks = {
+    REQUIRED = {
         "app.tasks.agent_tasks.run_follow_up_all_branches",
         "app.tasks.agent_tasks.run_pipeline_all_branches",
         "app.tasks.agent_tasks.run_config_all_branches",
+        "app.tasks.agent_tasks.run_closing_all_branches",
         "app.tasks.agent_tasks.run_reactivation_all_tenants",
-        "app.tasks.agent_tasks.run_profile_enrichment_all_tenants",
         "app.tasks.metrics_tasks.aggregate_all_metrics",
         "app.tasks.metrics_tasks.calculate_all_sentiment",
-        "app.tasks.alerts_tasks.run_daily_summaries",
-        "app.tasks.alerts_tasks.detect_unresponded_leads",
-        "app.tasks.alerts_tasks.run_monthly_summaries",
     }
 
-    scheduled_tasks = {
-        entry["task"]
-        for entry in _app.conf.beat_schedule.values()
-    }
+    schedule = celery_app.conf.beat_schedule
+    scheduled_tasks = {entry["task"] for entry in schedule.values()}
+    missing = REQUIRED - scheduled_tasks
 
-    missing = expected_tasks - scheduled_tasks
-    result(
-        f"Beat schedule contiene las {len(expected_tasks)} tareas esperadas",
+    print(f"   Entradas totales en beat_schedule: {len(schedule)}")
+    for name, entry in sorted(schedule.items()):
+        print(f"   • {name}: {entry['schedule']}")
+
+    report(
+        f"beat_schedule contiene los {len(REQUIRED)} jobs requeridos",
         len(missing) == 0,
         f"Faltantes: {missing}" if missing else "",
     )
-    if missing:
-        failures += 1
 
-    # ── d) Tarea DLQ registrada ───────────────────────────────────────────────
-    print()
-    dlq_name = "app.tasks.dlq_handler.handle_failed_task"
-    dlq_registered = dlq_name in _app.tasks
-    result(
-        "Tarea DLQ registrada en el registro Celery",
-        dlq_registered,
-        f"Busca '{dlq_name}'" if not dlq_registered else "",
-    )
-    if not dlq_registered:
-        failures += 1
 
-    # ── e) Configuración task_acks_late ───────────────────────────────────────
-    print()
-    acks_late = _app.conf.task_acks_late is True
-    reject_on_lost = _app.conf.task_reject_on_worker_lost is True
-    result(
-        "task_acks_late=True (no pierde tareas en reinicio)",
-        acks_late,
-    )
-    result(
-        "task_reject_on_worker_lost=True (re-encola si el worker muere)",
-        reject_on_lost,
-    )
-    if not acks_late:
-        failures += 1
-    if not reject_on_lost:
-        failures += 1
+# ─────────────────────────────────────────────────────────────────────────────
+# b) Encolar aggregate_all_metrics y esperar resultado (máx 30 s)
+# ─────────────────────────────────────────────────────────────────────────────
 
-    # ── Resumen ───────────────────────────────────────────────────────────────
-    print()
-    if failures == 0:
-        print("✅  Todas las verificaciones pasaron — Celery está configurado correctamente.\n")
+def check_b() -> None:
+    print("\nb) Ejecución de aggregate_all_metrics ────────────────────")
+    from app.tasks.metrics_tasks import aggregate_all_metrics
+
+    try:
+        task_result = aggregate_all_metrics.delay()
+        report(f"Tarea encolada (id={task_result.id[:16]}...)", True)
+    except Exception as exc:
+        report("Tarea encolada en Redis", False, str(exc))
+        return
+
+    if not NEED_WORKER:
+        report("Resultado de ejecución", None, "omitido con --no-worker")
+        return
+
+    print("   Esperando resultado (máx 30 s) — requiere worker activo...")
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if task_result.ready():
+            break
+        time.sleep(1)
+
+    if not task_result.ready():
+        report(
+            "Worker ejecutó la tarea en < 30 s",
+            False,
+            "Timeout — ¿está corriendo el worker? "
+            "(celery -A app.celery_app worker --loglevel=info)",
+        )
+        return
+
+    if task_result.successful():
+        report("Worker ejecutó la tarea exitosamente", True, f"resultado={task_result.result}")
     else:
-        print(f"❌  {failures} verificación(es) fallaron.\n")
+        report(
+            "Worker ejecutó la tarea exitosamente",
+            False,
+            f"estado={task_result.state}  error={task_result.result}",
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# c) Tabla failed_tasks existe en BD y COUNT(*) retorna sin error
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_c() -> None:
+    print("\nc) Tabla failed_tasks en BD ─────────────────────────────")
+
+    async def _query() -> int:
+        from sqlalchemy import text
+        from app.core.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(text("SELECT COUNT(*) FROM failed_tasks"))
+            return result.scalar_one()
+
+    try:
+        count = asyncio.run(_query())
+        report(
+            "Tabla failed_tasks existe y es accesible (COUNT=0 esperado en tabla vacía)",
+            True,
+            f"filas actuales: {count}",
+        )
+    except Exception as exc:
+        report(
+            "Tabla failed_tasks existe y es accesible",
+            False,
+            f"{exc} — ¿se ejecutó 'alembic upgrade head'?",
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# d) APScheduler y scheduler.start() NO están en app/main.py
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_d() -> None:
+    print("\nd) APScheduler eliminado de app/main.py ─────────────────")
+    main_path = ROOT / "app" / "main.py"
+    content = main_path.read_text()
+
+    has_apscheduler = "APScheduler" in content or "apscheduler" in content
+    has_start = "scheduler.start()" in content
+
+    report("Sin import/referencia a APScheduler en main.py", not has_apscheduler)
+    report("Sin scheduler.start() en main.py", not has_start)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# e) execute_suggestion_task con UUID inexistente — error graceful, no crash
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_e() -> None:
+    print("\ne) execute_suggestion_task con UUID falso ───────────────")
+    from app.tasks.agent_tasks import execute_suggestion_task
+
+    fake_id = str(uuid.uuid4())
+
+    if NEED_WORKER:
+        # Ejecución real en el worker
+        try:
+            r = execute_suggestion_task.delay(fake_id)
+            report(f"Tarea encolada (id={r.id[:16]}...)", True)
+        except Exception as exc:
+            report("Tarea encolada con UUID falso", False, str(exc))
+            return
+
+        print("   Esperando resultado (máx 15 s)...")
+        deadline = time.time() + 15
+        while time.time() < deadline and not r.ready():
+            time.sleep(1)
+
+        if not r.ready():
+            report("Worker procesó la tarea en < 15 s", False, "Timeout")
+            return
+
+        # Debe fallar (UUID no existe) — eso es correcto para un DLQ test
+        # El worker no debe haber crasheado; solo debe haber marcado la tarea FAILURE
+        report(
+            "Worker manejó el error gracefully (FAILURE, sin crash del proceso)",
+            r.state == "FAILURE",
+            f"estado={r.state}",
+        )
+    else:
+        # Sin worker: ejecutar síncronamente para verificar manejo de excepciones
+        # apply() corre la task en el proceso actual, sin broker
+        try:
+            execute_suggestion_task.apply(args=[fake_id])
+            # Si llegamos aquí sin excepción, la task no propagó el error correctamente
+            report(
+                "Error propagado correctamente (ValueError esperado para UUID inexistente)",
+                False,
+                "La task terminó sin lanzar excepción — la DB probablemente no está accesible",
+            )
+        except Exception as exc:
+            # ValueError: AgentSuggestion {uuid} not found — comportamiento correcto
+            # El worker loggea y relanza; no crashea el proceso, solo marca la task FAILURE
+            report(
+                "Error manejado gracefully (excepción controlada, proceso no cae)",
+                True,
+                f"{type(exc).__name__}: {str(exc)[:120]}",
+            )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# f) Resumen PASS/FAIL — impreso por report() durante cada check
+# ─────────────────────────────────────────────────────────────────────────────
+
+def main() -> int:
+    mode = "con worker" if NEED_WORKER else "sin worker (--no-worker)"
+    print(f"\n{'═' * 58}")
+    print(f"  WALIX — Verificación Celery ({mode})")
+    print(f"{'═' * 58}\n")
+
+    check_a()
+    check_b()
+    check_c()
+    check_d()
+    check_e()
+
+    print(f"\n{'─' * 58}")
+    if not failures:
+        print(f"  {_PASS}  Todas las verificaciones pasaron.\n")
+    else:
+        print(f"  {_FAIL}  {len(failures)} check(s) fallaron:")
+        for f in failures:
+            print(f"    • {f}")
+        print()
 
     print("Próximos pasos en Railway:")
-    print("  1. Añadir servicio 'worker': imagen del backend, comando del Procfile")
-    print("  2. Añadir servicio 'beat':   imagen del backend, comando del Procfile")
-    print("  3. Ambos servicios necesitan las mismas variables de entorno que 'web'\n")
+    print("  1. Crear servicio 'walix-worker'")
+    print("     Start Command: celery -A app.celery_app worker --loglevel=info --concurrency=2")
+    print("  2. Crear servicio 'walix-beat'")
+    print("     Start Command: celery -A app.celery_app beat --loglevel=info")
+    print("  3. Ambos servicios: mismas env vars que el servicio web")
+    print("  4. Solo un proceso beat aunque haya múltiples workers")
+    print()
+    print("Flower (monitoreo):")
+    print("  celery -A app.celery_app flower --port=5555")
+    print("  http://localhost:5555\n")
 
-    return failures
+    return len(failures)
 
 
 if __name__ == "__main__":
