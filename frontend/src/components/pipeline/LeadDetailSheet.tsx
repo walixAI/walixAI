@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { WBadge } from "@/components/walix/Badge";
 import { StatusBadge } from "@/components/whatsapp/StatusBadge";
 import { AssignmentDropdown } from "@/components/whatsapp/AssignmentDropdown";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 const SENTIMENT_LABELS: Record<string, string> = {
   neutral: "Neutral",
@@ -44,6 +45,7 @@ export function LeadDetailSheet({ leadId, stageName, stageColor, onClose }: Prop
   const navigate = useNavigate();
   const qc = useQueryClient();
   const aiBar = useAIBarStore();
+  const { entity } = useTenantLabels();
   const notifiedLeads = useRef<Set<string>>(new Set());
 
   const { data: lead, isLoading } = useQuery({
@@ -96,7 +98,7 @@ export function LeadDetailSheet({ leadId, stageName, stageColor, onClose }: Prop
             {isLoading ? (
               <Skeleton className="h-5 w-40" />
             ) : (
-              (lead?.name ?? lead?.wa_phone ?? "Lead")
+              (lead?.name ?? lead?.wa_phone ?? entity)
             )}
           </SheetTitle>
           {stageName && (

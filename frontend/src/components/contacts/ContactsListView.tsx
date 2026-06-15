@@ -18,6 +18,7 @@ import { LeadScoreBadge } from "@/components/leads/LeadScoreBadge";
 import { LastActivityCell } from "@/components/ui/LastActivityCell";
 import { QuickNotePopover } from "./QuickNotePopover";
 import type { ContactListResponse } from "@/lib/queries/contacts";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 const SOURCE_LABELS: Record<string, string> = {
   whatsapp_inbound: "WhatsApp",
@@ -46,6 +47,7 @@ export function ContactsListView({
   onToggleAll,
 }: ContactsListViewProps) {
   const navigate = useNavigate();
+  const { entity, entities, newEntityLabel } = useTenantLabels();
   const items = data?.items ?? [];
   const totalPages = data ? Math.ceil(data.total / data.pageSize) : 1;
   const allSelected = items.length > 0 && items.every((c) => selectedIds.has(c.id));
@@ -57,8 +59,8 @@ export function ContactsListView({
   if (!isLoading && items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
-        <p className="text-muted-foreground text-sm">No se encontraron contactos.</p>
-        <p className="text-muted-foreground text-xs mt-1">Cambia los filtros o crea un nuevo contacto.</p>
+        <p className="text-muted-foreground text-sm">No se encontraron {entities.toLowerCase()}.</p>
+        <p className="text-muted-foreground text-xs mt-1">Cambia los filtros o crea {newEntityLabel.toLowerCase()}.</p>
       </div>
     );
   }
@@ -76,7 +78,7 @@ export function ContactsListView({
                   aria-label="Seleccionar todos"
                 />
               </TableHead>
-              <TableHead>Contacto</TableHead>
+              <TableHead>{entity}</TableHead>
               <TableHead>Empresa</TableHead>
               <TableHead>Teléfono</TableHead>
               <TableHead>Estado</TableHead>

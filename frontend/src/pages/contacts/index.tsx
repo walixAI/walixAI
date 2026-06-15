@@ -22,6 +22,7 @@ import { ContactsCardsView } from "@/components/contacts/ContactsCardsView";
 import { BulkActionsInline } from "@/components/contacts/BulkActionsInline";
 import { ContactImportModal } from "@/components/contacts/ContactImportModal";
 import { SavedViewsSidebar } from "@/components/contacts/SavedViewsSidebar";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 import { SavedViewDialog } from "@/components/contacts/SavedViewDialog";
 import type { SavedViewRow } from "@/lib/queries/saved_views";
 import {
@@ -92,7 +93,7 @@ function countActiveFilters(f: ContactFilters): number {
 
 interface CreateFormData {
   phone: string;
-  name: string;
+  name: string;        // requerido
   lastName: string;
   company: string;
   prospectionSource: string;
@@ -233,22 +234,23 @@ export default function ContactsPage() {
   const createMutation = useMutation({
     mutationFn: (d: CreateFormData) =>
       createContact({
-        phone: d.phone,
+        phone: d.phone || undefined,
         name: d.name || null,
         lastName: d.lastName || null,
         company: d.company || null,
         prospectionSource: d.prospectionSource,
       }),
-    onSuccess: () => {
-      toast.success("Contacto creado");
+    onSuccess: (contact) => {
       reset();
       setCreateOpen(false);
       qc.invalidateQueries({ queryKey: ["contacts"] });
+      navigate(`/contacts/${contact.id}`);
     },
     onError: (e: Error) => toast.error("Error al crear contacto", { description: e.message }),
   });
 
   const activeFilterCount = countActiveFilters(filters);
+  const { newEntityLabel } = useTenantLabels();
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -337,31 +339,31 @@ export default function ContactsPage() {
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
         <SheetContent side="right" className="w-full sm:max-w-md">
           <SheetHeader>
-            <SheetTitle>Nuevo contacto</SheetTitle>
+            <SheetTitle>{newEntityLabel}</SheetTitle>
           </SheetHeader>
 
           <form
             onSubmit={handleSubmit((d) => createMutation.mutate(d))}
             className="flex flex-col gap-4 mt-4"
           >
-            <div className="space-y-1.5">
-              <Label>Teléfono WhatsApp *</Label>
-              <Input
-                {...register("phone", { required: true })}
-                placeholder="+521234567890"
-                className="font-mono"
-              />
-            </div>
-
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Nombre</Label>
-                <Input {...register("name")} placeholder="Juan" />
+                <Label>Nombre *</Label>
+                <Input {...register("name", { required: true })} placeholder="Juan" autoFocus />
               </div>
               <div className="space-y-1.5">
                 <Label>Apellido</Label>
                 <Input {...register("lastName")} placeholder="García" />
               </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Teléfono WhatsApp</Label>
+              <Input
+                {...register("phone")}
+                placeholder="+521234567890"
+                className="font-mono"
+              />
             </div>
 
             <div className="space-y-1.5">

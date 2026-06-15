@@ -7,6 +7,7 @@ import { ContactAvatar } from "@/components/ui/ContactAvatar";
 import { TagChip } from "@/components/ui/TagChip";
 import { LeadScoreBadge } from "@/components/leads/LeadScoreBadge";
 import type { ContactRow } from "@/lib/queries/contacts";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 const SOURCE_LABELS: Record<string, string> = {
   whatsapp_inbound: "WhatsApp",
@@ -23,6 +24,7 @@ interface ContactsCardsViewProps {
 
 export function ContactsCardsView({ contacts, isLoading, onEdit }: ContactsCardsViewProps) {
   const navigate = useNavigate();
+  const { entities, newEntityLabel } = useTenantLabels();
 
   if (isLoading) {
     return <ListRowsSkeleton count={9} />;
@@ -31,8 +33,8 @@ export function ContactsCardsView({ contacts, isLoading, onEdit }: ContactsCards
   if (contacts.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
-        <p className="text-muted-foreground text-sm">No se encontraron contactos.</p>
-        <p className="text-muted-foreground text-xs mt-1">Cambia los filtros o crea un nuevo contacto.</p>
+        <p className="text-muted-foreground text-sm">No se encontraron {entities.toLowerCase()}.</p>
+        <p className="text-muted-foreground text-xs mt-1">Cambia los filtros o crea {newEntityLabel.toLowerCase()}.</p>
       </div>
     );
   }

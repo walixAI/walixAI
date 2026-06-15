@@ -3,15 +3,16 @@ import {
   LayoutDashboard, Users, MessageCircle, Kanban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const items = [
-  { to: "/dashboard", label: "Inicio", icon: LayoutDashboard },
-  { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle, badge: true },
-  { to: "/pipeline", label: "Pipeline", icon: Kanban },
-  { to: "/contacts", label: "Contactos", icon: Users },
-];
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 export function BottomNav() {
+  const { entities } = useTenantLabels();
+  const items = [
+    { to: "/dashboard", label: "Inicio", icon: LayoutDashboard },
+    { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle, badge: true },
+    { to: "/pipeline", label: "Pipeline", icon: Kanban },
+    { to: "/contacts", label: entities, icon: Users },
+  ];
   return (
     <nav
       aria-label="Navegacion principal"

@@ -47,6 +47,23 @@ class UserMeOut(LoginUserOut):
     is_active: bool
 
 
+class TenantOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    industry_key: str = "generico"
+    industry_label: str | None = None
+    entity_name: str = "Contacto"
+    entity_plural: str = "Contactos"
+    contact_statuses: list = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MeResponse(BaseModel):
+    user: UserMeOut
+    tenant: TenantOut
+
+
 async def get_current_user(
     creds: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
     db: AsyncSession = Depends(get_db),
@@ -174,9 +191,25 @@ async def login(
     return LoginResponse(access_token=token, user=LoginUserOut.model_validate(user))
 
 
-@router.get("/me", response_model=UserMeOut)
-async def me(current_user: User = Depends(get_current_user)) -> UserMeOut:
-    return UserMeOut.model_validate(current_user)
+@router.get("/me", response_model=MeResponse)
+async def me(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MeResponse:
+    tenant = await db.get(Tenant, current_user.tenant_id)
+    tenant_out = TenantOut(
+        id=tenant.id if tenant else current_user.tenant_id,
+        name=tenant.name if tenant else "",
+        industry_key=tenant.industry_key if tenant else "generico",
+        industry_label=tenant.industry_label if tenant else None,
+        entity_name=(tenant.entity_name or "Contacto") if tenant else "Contacto",
+        entity_plural=(tenant.entity_plural or "Contactos") if tenant else "Contactos",
+        contact_statuses=tenant.contact_statuses_config or [] if tenant else [],
+    )
+    return MeResponse(
+        user=UserMeOut.model_validate(current_user),
+        tenant=tenant_out,
+    )
 
 
 __all__ = ["router", "get_current_user", "hash_password"]

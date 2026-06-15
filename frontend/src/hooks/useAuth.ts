@@ -3,7 +3,7 @@ import { useAuthStore } from "@/store/auth";
 import { api, getToken } from "@/lib/api";
 
 export function useInitAuth() {
-  const { setUser, setLoading } = useAuthStore();
+  const { setUser, setTenant, setLoading } = useAuthStore();
   useEffect(() => {
     const token = getToken();
     if (!token) {
@@ -12,8 +12,9 @@ export function useInitAuth() {
     }
     api
       .me()
-      .then((u) => {
-        setUser(u);
+      .then((data) => {
+        setUser(data.user);
+        setTenant(data.tenant);
         setLoading(false);
       })
       .catch(() => {

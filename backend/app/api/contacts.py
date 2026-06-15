@@ -560,10 +560,16 @@ async def create_contact(
             detail="No tienes una sucursal asignada",
         )
 
+    if not body.name and not body.wa_phone:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Se requiere al menos el nombre o el teléfono del contacto",
+        )
+
     lead = Lead(
         branch_id=current_user.branch_id,
         tenant_id=current_user.tenant_id,
-        wa_phone=body.wa_phone,
+        wa_phone=body.wa_phone or None,
         name=body.name,
         last_name=body.last_name,
         company=body.company,

@@ -19,14 +19,7 @@ import {
 } from "@/lib/queries/saved_views";
 import type { ContactFilters } from "@/lib/queries/contacts";
 import type { ViewMode } from "./ContactsViewToggle";
-
-const STATUS_LABELS: Record<string, string> = {
-  nuevo: "Nuevo",
-  en_calificacion: "En calificación",
-  calificado: "Calificado",
-  escalado: "Escalado",
-  perdido: "Perdido",
-};
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 const SOURCE_LABELS: Record<string, string> = {
   manual: "Manual",
@@ -35,12 +28,15 @@ const SOURCE_LABELS: Record<string, string> = {
   referral: "Referido",
 };
 
-function buildFilterBadges(filters: ContactFilters) {
+function buildFilterBadges(
+  filters: ContactFilters,
+  getStatusLabel: (key: string) => string,
+) {
   const badges: { label: string; value: string }[] = [];
   if (filters.status?.length)
     badges.push({
       label: "Estatus",
-      value: filters.status.map((s) => STATUS_LABELS[s] ?? s).join(", "),
+      value: filters.status.map((s) => getStatusLabel(s)).join(", "),
     });
   if (filters.source?.length)
     badges.push({
@@ -87,6 +83,7 @@ export function SavedViewDialog({
   onOpenChange,
 }: SavedViewDialogProps) {
   const qc = useQueryClient();
+  const { getStatusLabel } = useTenantLabels();
   const [name, setName] = useState(initialName);
   const [isDefault, setIsDefault] = useState(false);
 
@@ -123,7 +120,7 @@ export function SavedViewDialog({
       toast.error(e.message, { duration: 3000, position: "bottom-right" }),
   });
 
-  const filterBadges = mode === "create" ? buildFilterBadges(currentFilters) : [];
+  const filterBadges = mode === "create" ? buildFilterBadges(currentFilters, getStatusLabel) : [];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

@@ -21,12 +21,14 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ContactAvatar } from "@/components/ui/ContactAvatar";
 import { ContactStatusBadge } from "@/components/ui/ContactStatusBadge";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 export default function ContactDetailPage() {
   const { id: contactId = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user } = useAuth();
+  const { entity, entities } = useTenantLabels();
 
   const [activeTab, setActiveTab] = useState("resumen");
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -78,7 +80,7 @@ export default function ContactDetailPage() {
   const deleteMutation = useMutation({
     mutationFn: () => deleteContact(contactId),
     onSuccess: () => {
-      toast.success("Contacto eliminado");
+      toast.success(`${entity} eliminado`);
       qc.invalidateQueries({ queryKey: ["contacts"] });
       navigate("/contacts");
     },
@@ -93,7 +95,7 @@ export default function ContactDetailPage() {
         <div className="px-4 py-3 border-b border-border flex items-center gap-2">
           <Link to="/contacts" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
             <ArrowLeft className="h-3.5 w-3.5" />
-            Contactos
+            {entities}
           </Link>
         </div>
         <ContactDetailSkeleton />
@@ -104,9 +106,9 @@ export default function ContactDetailPage() {
   if (!contact) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3">
-        <p className="text-muted-foreground">Contacto no encontrado.</p>
+        <p className="text-muted-foreground">{entity} no encontrado.</p>
         <Button variant="outline" asChild>
-          <Link to="/contacts">← Volver a Contactos</Link>
+          <Link to="/contacts">← Volver a {entities}</Link>
         </Button>
       </div>
     );
@@ -126,7 +128,7 @@ export default function ContactDetailPage() {
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground shrink-0"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            Contactos
+            {entities}
           </Link>
           <span className="text-muted-foreground">/</span>
           <div className="flex items-center gap-2 min-w-0">

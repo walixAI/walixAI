@@ -21,6 +21,7 @@ import { ContactAvatar } from "@/components/ui/ContactAvatar";
 import { LeadScoreBadge } from "@/components/leads/LeadScoreBadge";
 import { updateContact } from "@/lib/queries/contacts";
 import type { ContactRow, ContactListResponse, LeadStatus, ContactFilters } from "@/lib/queries/contacts";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 const KANBAN_COLUMNS: LeadStatus[] = [
   "nuevo", "en_calificacion", "calificado", "escalado", "perdido",
@@ -94,6 +95,7 @@ function KanbanColumn({
 }) {
   const { isOver, setNodeRef } = useDroppable({ id: status });
   const cfg = STATUS_CONFIG[status];
+  const { entity } = useTenantLabels();
 
   return (
     <div data-testid={`kanban-column-${status}`} className="w-[240px] shrink-0 flex flex-col rounded-xl border border-border bg-card/50">
@@ -117,7 +119,7 @@ function KanbanColumn({
       >
         {contacts.length === 0 ? (
           <p className="text-[11px] text-muted-foreground text-center py-8 select-none">
-            Sin contactos
+            Sin {entity.toLowerCase()}s
           </p>
         ) : (
           contacts.map((c) => (

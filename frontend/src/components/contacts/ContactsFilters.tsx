@@ -11,13 +11,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ContactStatusBadge, STATUS_CONFIG } from "@/components/ui/ContactStatusBadge";
+import { ContactStatusBadge } from "@/components/ui/ContactStatusBadge";
 import type { LeadStatus, ContactFilters, TagRow } from "@/lib/queries/contacts";
 import type { TeamMemberOut } from "@/lib/api";
-
-const ALL_STATUSES: LeadStatus[] = [
-  "nuevo", "en_calificacion", "calificado", "escalado", "perdido",
-];
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 const SOURCES: { value: string; label: string }[] = [
   { value: "whatsapp_inbound", label: "WhatsApp" },
@@ -63,6 +60,7 @@ export function ContactsFilters({
   tags,
   activeCount,
 }: ContactsFiltersProps) {
+  const { statuses, searchEntityPlaceholder } = useTenantLabels();
   return (
     <div className="border-b border-border bg-background">
       {/* Always-visible search bar */}
@@ -71,7 +69,7 @@ export function ContactsFilters({
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <Input
             data-testid="contacts-search"
-            placeholder="Buscar por nombre, empresa, teléfono…"
+            placeholder={searchEntityPlaceholder}
             value={searchValue}
             onChange={(e) => onSearchChange(e.target.value)}
             className="pl-8 h-8 text-sm"
@@ -124,16 +122,16 @@ export function ContactsFilters({
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Estado</Label>
             <div className="space-y-1">
-              {ALL_STATUSES.map((s) => (
-                <label key={s} className="flex items-center gap-2 cursor-pointer group">
+              {statuses.map((s) => (
+                <label key={s.key} className="flex items-center gap-2 cursor-pointer group">
                   <Checkbox
-                    data-testid={`status-filter-${s}`}
-                    checked={filters.status?.includes(s) ?? false}
+                    data-testid={`status-filter-${s.key}`}
+                    checked={filters.status?.includes(s.key as LeadStatus) ?? false}
                     onCheckedChange={() =>
-                      onChange({ status: toggleArrayItem(filters.status, s), page: 1 })
+                      onChange({ status: toggleArrayItem(filters.status, s.key as LeadStatus), page: 1 })
                     }
                   />
-                  <ContactStatusBadge status={s} />
+                  <ContactStatusBadge status={s.key} />
                 </label>
               ))}
             </div>

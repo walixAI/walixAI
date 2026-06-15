@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ContactRow } from "@/lib/queries/contacts";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("es-MX", {
@@ -24,6 +25,7 @@ interface ContactTabConversacionesProps {
 export function ContactTabConversaciones({ contact }: ContactTabConversacionesProps) {
   const navigate = useNavigate();
   const contactId = contact.id;
+  const { entity } = useTenantLabels();
 
   const { data: conversation, isLoading } = useQuery({
     queryKey: ["conversation", contactId],
@@ -73,7 +75,7 @@ export function ContactTabConversaciones({ contact }: ContactTabConversacionesPr
             <MessageCircle className="h-6 w-6 text-muted-foreground" />
           </div>
           <p className="text-sm font-medium">Sin conversaciones</p>
-          <p className="text-xs text-muted-foreground mt-1">Este contacto no tiene hilos de WhatsApp.</p>
+          <p className="text-xs text-muted-foreground mt-1">Este {entity.toLowerCase()} no tiene hilos de WhatsApp.</p>
         </div>
         <Button
           variant="outline"

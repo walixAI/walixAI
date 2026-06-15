@@ -97,7 +97,7 @@ interface _RawUser {
 interface _RawContact {
   id: string;
   tenant_id?: string;
-  wa_phone: string;
+  wa_phone: string | null;
   name: string | null;
   last_name: string | null;
   company: string | null;
@@ -196,7 +196,7 @@ export async function getContact(id: string): Promise<ContactRow> {
 export async function createContact(data: Partial<ContactRow>): Promise<ContactRow> {
   // Reverse-map camelCase fields back to snake_case for the POST body
   const body = {
-    wa_phone: data.phone ?? "",
+    wa_phone: data.phone || null,
     name: data.name ?? null,
     last_name: data.lastName ?? null,
     company: data.company ?? null,

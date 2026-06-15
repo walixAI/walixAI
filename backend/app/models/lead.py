@@ -62,7 +62,7 @@ class Lead(Base):
         nullable=False,
         index=True,
     )
-    wa_phone: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    wa_phone: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Sprint 7 — Contacts module
     last_name: Mapped[str | None] = mapped_column(String(120), nullable=True)

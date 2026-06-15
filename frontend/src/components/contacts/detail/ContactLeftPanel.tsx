@@ -7,15 +7,12 @@ import {
 import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ContactAvatar } from "@/components/ui/ContactAvatar";
-import { ContactStatusBadge, STATUS_CONFIG } from "@/components/ui/ContactStatusBadge";
+import { ContactStatusBadge } from "@/components/ui/ContactStatusBadge";
 import { TagSelect } from "@/components/ui/TagSelect";
 import { EditFieldPopover } from "./EditFieldPopover";
 import type { ContactRow, LeadStatus, TagRow } from "@/lib/queries/contacts";
 import type { TeamMemberOut } from "@/lib/api";
-
-const STATUS_OPTIONS: { value: string; label: string }[] = Object.entries(STATUS_CONFIG).map(
-  ([value, { label }]) => ({ value, label }),
-);
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 const SOURCE_OPTIONS = [
   { value: "whatsapp_inbound", label: "WhatsApp" },
@@ -45,6 +42,8 @@ function ReadonlyField({ value }: { value: string }) {
 
 export function ContactLeftPanel({ contact, team, onUpdate }: ContactLeftPanelProps) {
   const fullName = [contact.name, contact.lastName].filter(Boolean).join(" ") || "Sin nombre";
+  const { statuses } = useTenantLabels();
+  const statusOptions = statuses.map((s) => ({ value: s.key, label: s.label }));
 
   // Tags popover state
   const [tagsOpen, setTagsOpen] = useState(false);
@@ -124,7 +123,7 @@ export function ContactLeftPanel({ contact, team, onUpdate }: ContactLeftPanelPr
           <EditFieldPopover
             value={contact.status}
             fieldType="select"
-            options={STATUS_OPTIONS}
+            options={statusOptions}
             onSave={(v) => onUpdate({ status: v as LeadStatus })}
             displayNode={<ContactStatusBadge status={contact.status} />}
           />

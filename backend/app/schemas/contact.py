@@ -23,7 +23,7 @@ class UserMinimal(BaseModel):
 
 
 class ContactCreate(BaseModel):
-    wa_phone: str
+    wa_phone: str | None = None
     name: str | None = None
     last_name: str | None = None
     company: str | None = None
@@ -31,13 +31,21 @@ class ContactCreate(BaseModel):
     pipeline_stage_id: uuid.UUID | None = None
     tag_ids: list[uuid.UUID] = []
 
-    @field_validator("wa_phone")
+    @field_validator("wa_phone", mode="before")
     @classmethod
-    def phone_not_empty(cls, v: str) -> str:
+    def clean_phone(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
         v = v.strip()
-        if not v:
-            raise ValueError("wa_phone is required")
-        return v
+        return v or None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def clean_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
 
 
 class ContactUpdate(BaseModel):
@@ -55,7 +63,7 @@ class ContactRow(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    wa_phone: str
+    wa_phone: str | None = None
     name: str | None = None
     last_name: str | None = None
     company: str | None = None

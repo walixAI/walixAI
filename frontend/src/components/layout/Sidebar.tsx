@@ -7,16 +7,7 @@ import { cn } from "@/lib/utils";
 import { Logo } from "@/components/walix/Logo";
 import { WBadge } from "@/components/walix/Badge";
 import { useState } from "react";
-
-const MAIN_ITEMS = [
-  { to: "/dashboard",  label: "Dashboard",   icon: LayoutDashboard },
-  { to: "/pipeline",   label: "Pipeline",     icon: Kanban },
-  { to: "/forecast",   label: "Forecast",     icon: TrendingUp },
-  { to: "/automations", label: "Automatizaciones", icon: Zap },
-  { to: "/whatsapp",   label: "WhatsApp",     icon: MessageCircle, badge: true },
-  { to: "/contacts",   label: "Contactos",    icon: Users },
-  { to: "/reports",    label: "Reportes",     icon: BarChart3 },
-];
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 const CONFIG_ITEMS = [
   { to: "/settings",      label: "Configuracion", icon: Settings, end: true },
@@ -25,6 +16,17 @@ const CONFIG_ITEMS = [
 
 export function Sidebar() {
   const [hovered, setHovered] = useState(false);
+  const { entities } = useTenantLabels();
+
+  const MAIN_ITEMS = [
+    { to: "/dashboard",   label: "Dashboard",       icon: LayoutDashboard },
+    { to: "/pipeline",    label: "Pipeline",         icon: Kanban },
+    { to: "/contacts",    label: entities,            icon: Users },
+    { to: "/forecast",    label: "Forecast",         icon: TrendingUp },
+    { to: "/automations", label: "Automatizaciones", icon: Zap },
+    { to: "/whatsapp",    label: "WhatsApp",         icon: MessageCircle, badge: true },
+    { to: "/reports",     label: "Reportes",         icon: BarChart3 },
+  ];
   const expanded = hovered;
   const collapsed = !expanded;
 

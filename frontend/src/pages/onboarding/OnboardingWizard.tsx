@@ -1,213 +1,226 @@
+/**
+ * Sprint 8B — Onboarding conversacional.
+ *
+ * Flujo:
+ *   1. Describe  — el usuario escribe libremente sobre su negocio
+ *   2. Confirmar — Walix muestra la industria detectada + pipeline preview
+ *   3. Aplicando — se aplica el template y se redirige al dashboard
+ */
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useMutation } from "@tanstack/react-query";
+import {
+  ArrowRight,
+  BookOpen,
+  CheckCircle2,
+  ChevronDown,
+  Loader2,
+  Sparkles,
+} from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Logo } from "@/components/walix/Logo";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-// ── Constants ──────────────────────────────────────────────────────────────────
+// ── Constantes (espejo de onboarding_guide.py) ────────────────────────────────
 
-const INDUSTRIES = [
-  { id: "salud",        label: "Salud",             emoji: "🏥", hint: "Clínicas, consultorios, hospitales" },
-  { id: "inmobiliaria", label: "Inmobiliaria",       emoji: "🏠", hint: "Venta y renta de propiedades" },
-  { id: "educacion",    label: "Educación",          emoji: "📚", hint: "Escuelas, cursos, capacitación" },
-  { id: "fintech",      label: "Fintech / Seguros",  emoji: "💰", hint: "Créditos, inversión, seguros" },
-] as const;
-
-const SECONDARY_INDUSTRIES = [
-  { id: "restaurantes",  label: "Restaurantes",   emoji: "🍽️" },
-  { id: "automotriz",    label: "Automotriz",      emoji: "🚗" },
-  { id: "construccion",  label: "Construcción",    emoji: "🔨" },
-  { id: "legal",         label: "Legal",           emoji: "⚖️" },
-  { id: "belleza",       label: "Belleza / Spa",   emoji: "💄" },
-  { id: "logistica",     label: "Logística",       emoji: "🚚" },
-] as const;
-
-const ALL_PRESET_IDS = [
-  ...INDUSTRIES.map((i) => i.id),
-  ...SECONDARY_INDUSTRIES.map((i) => i.id),
-] as string[];
-
-const LOADING_TEXTS = [
-  "Analizando tu negocio...",
-  "Generando criterios de calificación...",
-  "Creando el pipeline...",
-  "Configurando mensajes...",
+const SUGGESTED_TOPICS = [
+  "El nombre de tu negocio o clínica",
+  "A qué te dedicas y a quién atiendes",
+  "Tu mayor problema con el seguimiento de clientes",
+  "Cuántas personas atienden WhatsApp hoy",
 ];
 
-const INDUSTRY_EXAMPLES: Record<string, { title: string; text: string }[]> = {
-  salud: [
-    {
-      title: "Clínica de especialidad",
-      text: "Somos una clínica de endocrinología pediátrica en Monterrey. Atendemos niños de 0 a 18 años con problemas de diabetes, obesidad y talla baja. Nuestros leads llegan por Meta Ads. Queremos calificar si el paciente es menor de edad, si tiene diagnóstico previo, si el padre o tutor puede agendar cita esta semana y si cuenta con seguro médico o paga de contado.",
-    },
-    {
-      title: "Consultorio dental",
-      text: "Somos un consultorio dental en CDMX. Ofrecemos ortodoncia, implantes y limpieza. Nuestros pacientes son adultos de 20 a 55 años. Queremos saber si el lead tiene dolor activo, qué tratamiento le interesa, si tiene seguro dental y cuándo puede agendar su primera consulta.",
-    },
-  ],
-  inmobiliaria: [
-    {
-      title: "Venta residencial",
-      text: "Somos una inmobiliaria en Monterrey. Vendemos casas residenciales de 1.5 a 8 millones de pesos a familias que buscan primera vivienda o inversión. Queremos calificar si el lead ya tiene preaprobación de crédito hipotecario, su rango de presupuesto, la zona de interés y si puede visitar una propiedad esta semana.",
-    },
-    {
-      title: "Renta de oficinas",
-      text: "Rentamos espacios de oficina y coworking en Santa Fe, CDMX. Nuestros clientes son startups y empresas medianas. Queremos saber el número de personas, el plazo de renta requerido, si necesitan sala de juntas privada y cuándo quieren iniciar.",
-    },
-  ],
-  educacion: [
-    {
-      title: "Escuela de idiomas",
-      text: "Somos una escuela de inglés en línea para adultos trabajadores. Ofrecemos cursos de nivel básico a avanzado con clases en vivo dos veces por semana. Queremos calificar si el prospecto trabaja actualmente, su nivel actual de inglés, si busca inglés de negocios o conversacional y si puede iniciar este mes.",
-    },
-    {
-      title: "Cursos de capacitación",
-      text: "Ofrecemos diplomados en marketing digital y ventas para profesionales en México. Nuestros cursos duran 3 meses y son en línea. Queremos saber si el prospecto trabaja en el área, qué habilidad quiere desarrollar, si su empresa subsidia la capacitación y si puede inscribirse en la siguiente cohorte.",
-    },
-  ],
-  fintech: [
-    {
-      title: "Créditos personales",
-      text: "Somos una financiera que otorga créditos personales de 5,000 a 100,000 pesos en 24 horas. Atendemos empleados formales y microempresarios en todo México. Queremos calificar si tiene empleo formal o negocio propio, el monto que necesita, para qué lo usará y si tiene historial crediticio.",
-    },
-    {
-      title: "Seguros",
-      text: "Vendemos seguros de gastos médicos mayores y de vida para familias y empresas en México. Queremos calificar si el lead ya tiene seguro actual, cuántas personas cubriría la póliza, el rango de edad de los asegurados y si tiene presupuesto mensual definido.",
-    },
-  ],
-  otro: [
-    {
-      title: "Ejemplo genérico",
-      text: "Describe qué vendes o servicios que ofreces, a quién va dirigido (perfil del cliente ideal), de dónde vienen tus leads y qué información necesitas recopilar para saber si un prospecto vale la pena atender. Entre más detalle incluyas, mejor configurará el sistema el bot, el pipeline y los criterios de calificación.",
-    },
-  ],
+const EXAMPLE_TEXT =
+  'Ej: "Tengo una clínica de endocrinología pediátrica en Guadalajara. ' +
+  "Atendemos a niños con problemas de tiroides y diabetes. Somos 2 médicos y una recepcionista. " +
+  "El mayor problema es que los papás nos contactan por WhatsApp, agendamos la cita, " +
+  'pero luego no vienen y no les damos seguimiento."';
+
+const INDUSTRY_ICONS: Record<string, string> = {
+  salud:                   "🏥",
+  bienes_raices:           "🏠",
+  educacion:               "📚",
+  estetica_wellness:       "💆",
+  automotriz:              "🚗",
+  restaurante:             "🍽️",
+  servicios_profesionales: "💼",
+  generico:                "🏢",
 };
 
-// ── Root component ─────────────────────────────────────────────────────────────
+const ALL_INDUSTRIES = [
+  { key: "salud",                   label: "Clínica / Consultorio" },
+  { key: "bienes_raices",           label: "Bienes Raíces" },
+  { key: "educacion",               label: "Escuela / Academia" },
+  { key: "estetica_wellness",       label: "Estética / Spa / Wellness" },
+  { key: "automotriz",              label: "Taller / Agencia Automotriz" },
+  { key: "restaurante",             label: "Restaurante / Food & Beverage" },
+  { key: "servicios_profesionales", label: "Servicios Profesionales" },
+  { key: "generico",                label: "Otro negocio" },
+];
+
+// ── Tipos del análisis ────────────────────────────────────────────────────────
+
+interface AnalysisResult {
+  session_id: string;
+  industry_key: string;
+  industry_label: string;
+  entity_name: string;
+  confidence: number;
+  pipeline_preview: Array<{ key: string; label: string; order: number; color: string }>;
+  reasoning: string;
+}
+
+// ── Componente principal ──────────────────────────────────────────────────────
 
 export default function OnboardingWizard() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const branchId = searchParams.get("branch_id") ?? "";
+  const [step, setStep] = useState<"describe" | "confirm" | "applying">("describe");
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [industry, setIndustry] = useState("");
-  const [businessName, setBusinessName] = useState("");
+  // Estado step 1
   const [description, setDescription] = useState("");
-  const [loadingIdx, setLoadingIdx] = useState(0);
-  const [prefilled, setPrefilled] = useState(false);
+  const [sessionId, setSessionId] = useState<string | undefined>();
+  const [followUpQuestions, setFollowUpQuestions] = useState<string[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  const { data: existing } = useQuery({
-    queryKey: ["bot-config", branchId],
-    queryFn: () => api.getBotConfig(branchId),
-    enabled: !!branchId,
-  });
+  // Estado step 2
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [selectedIndustry, setSelectedIndustry] = useState<string>("");
+  const [overriding, setOverriding] = useState(false);
 
-  // Pre-populate fields once the existing config loads
-  useEffect(() => {
-    if (!existing || prefilled) return;
-    if (existing.industry) setIndustry(existing.industry);
-    if (existing.branch_name) setBusinessName(existing.branch_name);
-    if (existing.business_description) setDescription(existing.business_description);
-    setPrefilled(true);
-  }, [existing, prefilled]);
+  // Estado step 3
+  const [applyResult, setApplyResult] = useState<{ message: string; entity_name: string } | null>(null);
 
-  const mutation = useMutation({
+  // ── Analizar ──────────────────────────────────────────────────────────────
+
+  async function handleAnalyze() {
+    if (!description.trim()) return;
+    setIsAnalyzing(true);
+    setFollowUpQuestions([]);
+    try {
+      const res = await api.analyzeIndustry({
+        description: description.trim(),
+        session_id: sessionId,
+      });
+
+      setSessionId(res.session_id);
+
+      if (res.needs_more_info) {
+        setFollowUpQuestions(res.follow_up_questions ?? []);
+        if (res.hint) toast.info(res.hint);
+        return;
+      }
+
+      if (res.industry_key && !res.needs_more_info) {
+        setAnalysis({
+          session_id: res.session_id,
+          industry_key: res.industry_key,
+          industry_label: res.industry_label ?? res.industry_key,
+          entity_name: res.entity_name ?? "Contacto",
+          confidence: res.confidence ?? 0,
+          pipeline_preview: res.pipeline_preview ?? [],
+          reasoning: res.reasoning ?? "",
+        });
+        setSelectedIndustry(res.industry_key);
+        setStep("confirm");
+      }
+    } catch (e: unknown) {
+      toast.error("No pudimos analizar tu descripción. Intenta de nuevo.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  // ── Confirmar ─────────────────────────────────────────────────────────────
+
+  const confirmMutation = useMutation({
     mutationFn: () =>
-      api.generateOnboarding({
-        branch_id: branchId,
-        business_description: [businessName.trim(), description.trim()]
-          .filter(Boolean)
-          .join("\n\n"),
-        industry,
+      api.confirmIndustry({
+        description: description.trim(),
+        industry_key: selectedIndustry,
+        override_industry: selectedIndustry !== analysis?.industry_key,
       }),
-    onSuccess: (draft) => {
-      navigate(`/onboarding/preview/${draft.id}`);
+    onSuccess: (data) => {
+      setApplyResult({ message: data.message, entity_name: data.entity_name });
+    },
+    onError: () => {
+      toast.error("Error al configurar. Intenta de nuevo.");
+      setStep("confirm");
     },
   });
 
-  // Cycle loading text while the API call is in-flight
+  function handleConfirm() {
+    setStep("applying");
+    confirmMutation.mutate();
+  }
+
   useEffect(() => {
-    if (step !== 3 || !mutation.isPending) return;
-    setLoadingIdx(0);
-    const id = setInterval(
-      () => setLoadingIdx((i) => (i + 1) % LOADING_TEXTS.length),
-      2000,
-    );
-    return () => clearInterval(id);
-  }, [step, mutation.isPending]);
+    if (applyResult) {
+      const t = setTimeout(() => navigate("/dashboard"), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [applyResult, navigate]);
 
-  function goToStep3() {
-    setStep(3);
-    mutation.mutate();
-  }
-
-  function handleRetry() {
-    mutation.reset();
-    setStep(2);
-  }
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-muted/30 flex flex-col">
-      {/* Page header */}
       <header className="h-14 shrink-0 border-b bg-background flex items-center px-6">
         <Logo collapsed={false} />
       </header>
 
-      {/* Centered content */}
       <main className="flex-1 flex items-center justify-center p-4 py-10">
         <div className="w-full max-w-lg space-y-5">
 
-          {/* Progress bar */}
+          {/* Progress */}
           <div className="space-y-1.5">
             <div className="flex gap-1.5">
-              {([1, 2, 3] as const).map((s) => (
+              {(["describe", "confirm", "applying"] as const).map((s) => (
                 <div
                   key={s}
                   className={cn(
                     "h-1.5 flex-1 rounded-full transition-colors duration-300",
-                    s <= step ? "bg-primary" : "bg-muted",
+                    stepIndex(s) <= stepIndex(step) ? "bg-primary" : "bg-muted",
                   )}
                 />
               ))}
             </div>
             <p className="text-[11px] text-muted-foreground">
-              Paso {step} de 3
+              Paso {stepIndex(step)} de 3
             </p>
           </div>
 
-          {/* Step card */}
+          {/* Card */}
           <div className="rounded-2xl border bg-card shadow-sm p-6 sm:p-8">
-            {step === 1 && (
-              <Step1
-                industry={industry}
-                businessName={businessName}
-                onIndustryChange={setIndustry}
-                onBusinessNameChange={setBusinessName}
-                onNext={() => setStep(2)}
-              />
-            )}
-            {step === 2 && (
-              <Step2
+            {step === "describe" && (
+              <StepDescribe
                 description={description}
-                industry={industry}
-                onChange={setDescription}
-                onBack={() => setStep(1)}
-                onGenerate={goToStep3}
+                onDescriptionChange={setDescription}
+                followUpQuestions={followUpQuestions}
+                isAnalyzing={isAnalyzing}
+                onAnalyze={handleAnalyze}
               />
             )}
-            {step === 3 && (
-              <Step3
-                loadingText={LOADING_TEXTS[loadingIdx]}
-                isLoading={mutation.isPending}
-                error={mutation.error?.message ?? null}
-                onRetry={handleRetry}
+            {step === "confirm" && analysis && (
+              <StepConfirm
+                analysis={analysis}
+                selectedIndustry={selectedIndustry}
+                overriding={overriding}
+                onOverrideToggle={() => setOverriding((v) => !v)}
+                onIndustryChange={(k) => setSelectedIndustry(k)}
+                onBack={() => setStep("describe")}
+                onConfirm={handleConfirm}
+              />
+            )}
+            {step === "applying" && (
+              <StepApplying
+                result={applyResult}
+                industryLabel={
+                  ALL_INDUSTRIES.find((i) => i.key === selectedIndustry)?.label ?? selectedIndustry
+                }
               />
             )}
           </div>
@@ -217,242 +230,283 @@ export default function OnboardingWizard() {
   );
 }
 
-// ── Step 1 — Industry + business name ─────────────────────────────────────────
+function stepIndex(s: "describe" | "confirm" | "applying") {
+  return { describe: 1, confirm: 2, applying: 3 }[s];
+}
 
-function Step1({
-  industry,
-  businessName,
-  onIndustryChange,
-  onBusinessNameChange,
-  onNext,
+// ── Step 1 — Describe ─────────────────────────────────────────────────────────
+
+function StepDescribe({
+  description,
+  onDescriptionChange,
+  followUpQuestions,
+  isAnalyzing,
+  onAnalyze,
 }: {
-  industry: string;
-  businessName: string;
-  onIndustryChange: (v: string) => void;
-  onBusinessNameChange: (v: string) => void;
-  onNext: () => void;
+  description: string;
+  onDescriptionChange: (v: string) => void;
+  followUpQuestions: string[];
+  isAnalyzing: boolean;
+  onAnalyze: () => void;
 }) {
-  // Local state for the free-text input; initialized from prop if it was a custom value
-  const [customInput, setCustomInput] = useState(() =>
-    ALL_PRESET_IDS.includes(industry) ? "" : industry,
-  );
-
-  const handlePresetSelect = (id: string) => {
-    setCustomInput("");
-    onIndustryChange(id);
-  };
-
-  const handleCustomChange = (v: string) => {
-    setCustomInput(v);
-    onIndustryChange(v.trim());
-  };
-
-  const canContinue = !!industry && businessName.trim().length > 0;
+  const wordCount = description.trim().split(/\s+/).filter(Boolean).length;
+  const canAnalyze = wordCount >= 10 && !isAnalyzing;
 
   return (
     <div className="space-y-6">
       <div>
         <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Empecemos
+          Cuéntanos
         </p>
         <h2 className="mt-1 text-xl font-semibold leading-snug">
-          ¿Qué tipo de negocio tienes?
+          ¿Cómo es tu negocio?
         </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Descríbelo con tus propias palabras y Walix se configura solo.
+        </p>
       </div>
 
-      {/* Primary industry grid */}
-      <div className="grid grid-cols-2 gap-3">
-        {INDUSTRIES.map((ind) => (
-          <button
-            key={ind.id}
-            type="button"
-            onClick={() => handlePresetSelect(ind.id)}
-            className={cn(
-              "flex flex-col items-center gap-2 rounded-xl border-2 p-4 text-center",
-              "transition-all duration-150 hover:border-primary/50 hover:bg-primary/5",
-              industry === ind.id && !customInput
-                ? "border-primary bg-primary/5 shadow-sm"
-                : "border-border bg-background",
-            )}
-          >
-            <span className="text-3xl leading-none" aria-hidden="true">{ind.emoji}</span>
-            <span className="text-sm font-semibold leading-tight">{ind.label}</span>
-            <span className="text-[11px] text-muted-foreground leading-snug">{ind.hint}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Secondary industries */}
-      <div className="space-y-2">
-        <p className="text-xs font-medium text-muted-foreground">Más industrias</p>
-        <div className="flex flex-wrap gap-2">
-          {SECONDARY_INDUSTRIES.map((ind) => (
-            <button
-              key={ind.id}
-              type="button"
-              onClick={() => handlePresetSelect(ind.id)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium",
-                "transition-all duration-150 hover:border-primary/50 hover:bg-primary/5",
-                industry === ind.id && !customInput
-                  ? "border-primary bg-primary/5 text-primary"
-                  : "border-border bg-background text-foreground",
-              )}
-            >
-              <span aria-hidden="true">{ind.emoji}</span>
-              {ind.label}
-            </button>
-          ))}
+      {/* Suggested topics */}
+      <div className="flex items-start gap-2.5 rounded-xl bg-primary/5 border border-primary/10 p-3.5">
+        <BookOpen className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-primary">Incluye estos temas:</p>
+          <ul className="space-y-0.5">
+            {SUGGESTED_TOPICS.map((t) => (
+              <li key={t} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                <span className="text-primary mt-0.5">·</span>{t}
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
 
-      {/* Custom industry */}
+      {/* Textarea */}
       <div className="space-y-1.5">
-        <Label htmlFor="custom-industry">O escribe tu industria</Label>
-        <Input
-          id="custom-industry"
-          placeholder="Ej. Agencia de viajes, Veterinaria..."
-          value={customInput}
-          onChange={(e) => handleCustomChange(e.target.value)}
-          className={cn(customInput && "border-primary ring-1 ring-primary/30")}
+        <Textarea
+          autoFocus
+          rows={7}
+          placeholder={EXAMPLE_TEXT}
+          value={description}
+          onChange={(e) => onDescriptionChange(e.target.value)}
+          className="resize-y text-sm"
         />
+        <p className={cn(
+          "text-[11px] text-right tabular-nums transition-colors",
+          wordCount < 10 ? "text-muted-foreground" : "text-primary",
+        )}>
+          {wordCount} palabra{wordCount !== 1 ? "s" : ""}
+          {wordCount < 20 && " — escribe un poco más para mejores resultados"}
+        </p>
       </div>
 
-      {/* Business name */}
-      <div className="space-y-1.5">
-        <Label htmlFor="business-name">¿Cómo se llama tu empresa?</Label>
-        <Input
-          id="business-name"
-          placeholder="Ej. Clínica EndoPed Monterrey"
-          value={businessName}
-          onChange={(e) => onBusinessNameChange(e.target.value)}
-        />
-      </div>
+      {/* Follow-up questions */}
+      {followUpQuestions.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
+          <p className="text-xs font-semibold text-amber-800">
+            Para afinar la configuración, cuéntanos:
+          </p>
+          <ul className="space-y-1">
+            {followUpQuestions.map((q) => (
+              <li key={q} className="text-sm text-amber-900 flex items-start gap-1.5">
+                <ArrowRight className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-600" />
+                {q}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
-      <Button className="w-full" disabled={!canContinue} onClick={onNext}>
-        Continuar
+      <Button className="w-full gap-2" disabled={!canAnalyze} onClick={onAnalyze}>
+        {isAnalyzing ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Analizando tu negocio…
+          </>
+        ) : (
+          <>
+            <Sparkles className="h-4 w-4" />
+            Analizar mi negocio
+          </>
+        )}
       </Button>
     </div>
   );
 }
 
-// ── Step 2 — Business description ─────────────────────────────────────────────
+// ── Step 2 — Confirmar ────────────────────────────────────────────────────────
 
-function Step2({
-  description,
-  industry,
-  onChange,
+function StepConfirm({
+  analysis,
+  selectedIndustry,
+  overriding,
+  onOverrideToggle,
+  onIndustryChange,
   onBack,
-  onGenerate,
+  onConfirm,
 }: {
-  description: string;
-  industry: string;
-  onChange: (v: string) => void;
+  analysis: AnalysisResult;
+  selectedIndustry: string;
+  overriding: boolean;
+  onOverrideToggle: () => void;
+  onIndustryChange: (k: string) => void;
   onBack: () => void;
-  onGenerate: () => void;
+  onConfirm: () => void;
 }) {
-  const canGenerate = description.trim().length > 0;
-  const examples = INDUSTRY_EXAMPLES[industry] ?? INDUSTRY_EXAMPLES.otro;
+  const icon = INDUSTRY_ICONS[selectedIndustry] ?? "🏢";
+  const confPct = Math.round((analysis.confidence ?? 0) * 100);
 
   return (
     <div className="space-y-6">
       <div>
         <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Paso 2
+          Listo
         </p>
         <h2 className="mt-1 text-xl font-semibold leading-snug">
-          Cuéntanos sobre tu negocio
+          Industria detectada
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Describe qué ofreces, a quién y qué información necesitas de cada lead para calificarlo.
+          Revisa la configuración y confirma.
         </p>
       </div>
 
-      <Textarea
-        rows={7}
-        placeholder="Escribe aquí la descripción de tu negocio..."
-        value={description}
-        onChange={(e) => onChange(e.target.value)}
-        className="resize-y"
-      />
-
-      {/* Industry examples */}
-      <div className="space-y-2">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          Ejemplos para tu industria
-        </p>
-        <div className="space-y-2">
-          {examples.map((ex) => (
-            <div
-              key={ex.title}
-              className="rounded-lg border border-border bg-muted/40 p-3 space-y-2"
-            >
-              <p className="text-xs font-semibold text-foreground">{ex.title}</p>
-              <p className="text-[11px] text-muted-foreground leading-relaxed">{ex.text}</p>
-              <button
-                type="button"
-                onClick={() => onChange(ex.text)}
-                className="text-[11px] font-medium text-primary hover:underline focus-visible:outline-none"
-              >
-                Usar como base
-              </button>
+      {/* Industry card */}
+      <div className="rounded-xl border-2 border-primary/30 bg-primary/5 p-5 space-y-3">
+        <div className="flex items-center gap-3">
+          <span className="text-4xl leading-none">{icon}</span>
+          <div>
+            <p className="text-lg font-bold leading-tight">
+              {ALL_INDUSTRIES.find((i) => i.key === selectedIndustry)?.label ?? selectedIndustry}
+            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <div className="h-1.5 w-20 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-primary transition-all"
+                  style={{ width: `${confPct}%` }}
+                />
+              </div>
+              <span className="text-xs text-muted-foreground">{confPct}% confianza</span>
             </div>
-          ))}
+          </div>
         </div>
+        {analysis.reasoning && (
+          <p className="text-xs text-muted-foreground italic border-t border-border/50 pt-2">
+            "{analysis.reasoning}"
+          </p>
+        )}
       </div>
 
-      <div className="flex gap-3">
+      {/* Entity name */}
+      <div className="flex items-center gap-2 text-sm">
+        <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+        <span>
+          Tus contactos se llamarán{" "}
+          <strong>{analysis.entity_name}</strong>
+        </span>
+      </div>
+
+      {/* Pipeline preview */}
+      {analysis.pipeline_preview.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Pipeline de etapas
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {analysis.pipeline_preview.map((stage) => (
+              <span
+                key={stage.key}
+                className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium text-white"
+                style={{ backgroundColor: stage.color }}
+              >
+                {stage.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Override industry */}
+      <div>
+        <button
+          type="button"
+          onClick={onOverrideToggle}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronDown
+            className={cn("h-3.5 w-3.5 transition-transform", overriding && "rotate-180")}
+          />
+          {overriding ? "Ocultar opciones" : "¿No es tu industria? Cámbiala"}
+        </button>
+
+        {overriding && (
+          <div className="mt-2.5 grid grid-cols-2 gap-1.5">
+            {ALL_INDUSTRIES.map((ind) => (
+              <button
+                key={ind.key}
+                type="button"
+                onClick={() => onIndustryChange(ind.key)}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs text-left transition-all",
+                  selectedIndustry === ind.key
+                    ? "border-primary bg-primary/5 font-semibold"
+                    : "border-border hover:border-primary/40 hover:bg-muted/50",
+                )}
+              >
+                <span>{INDUSTRY_ICONS[ind.key]}</span>
+                <span className="truncate">{ind.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-3 pt-1">
         <Button variant="outline" className="flex-1" onClick={onBack}>
           Atrás
         </Button>
-        <Button className="flex-1" disabled={!canGenerate} onClick={onGenerate}>
-          Generar configuración
+        <Button className="flex-1 gap-2" onClick={onConfirm}>
+          <CheckCircle2 className="h-4 w-4" />
+          Confirmar y activar
         </Button>
       </div>
     </div>
   );
 }
 
-// ── Step 3 — Generating / error ────────────────────────────────────────────────
+// ── Step 3 — Applying ─────────────────────────────────────────────────────────
 
-function Step3({
-  loadingText,
-  isLoading,
-  error,
-  onRetry,
+function StepApplying({
+  result,
+  industryLabel,
 }: {
-  loadingText: string;
-  isLoading: boolean;
-  error: string | null;
-  onRetry: () => void;
+  result: { message: string; entity_name: string } | null;
+  industryLabel: string;
 }) {
-  if (error) {
+  if (result) {
     return (
-      <div className="flex flex-col items-center gap-5 py-6 text-center">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
-          <AlertCircle className="h-8 w-8 text-destructive" />
+      <div className="flex flex-col items-center gap-5 py-8 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+          <CheckCircle2 className="h-8 w-8 text-primary" />
         </div>
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Algo salió mal</h2>
-          <p className="text-sm text-muted-foreground max-w-xs mx-auto">{error}</p>
+        <div className="space-y-2">
+          <h2 className="text-xl font-semibold">{result.message}</h2>
+          <p className="text-sm text-muted-foreground">
+            Redirigiendo a tu dashboard…
+          </p>
         </div>
-        <Button className="w-full" onClick={onRetry}>
-          Intentar de nuevo
-        </Button>
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col items-center gap-6 py-8 text-center">
-      <Loader2 className="h-16 w-16 animate-spin text-primary" />
+    <div className="flex flex-col items-center gap-6 py-10 text-center">
+      <Loader2 className="h-14 w-14 animate-spin text-primary" />
       <div className="space-y-2">
-        <h2 className="text-xl font-semibold">Configurando tu bot...</h2>
-        <p
-          key={loadingText}
-          className="text-sm text-muted-foreground animate-fade-in"
-        >
-          {isLoading ? loadingText : "Finalizando..."}
+        <h2 className="text-xl font-semibold">Configurando tu Walix…</h2>
+        <p className="text-sm text-muted-foreground">
+          Creando el pipeline para{" "}
+          <span className="font-medium text-foreground">{industryLabel}</span>
         </p>
       </div>
     </div>

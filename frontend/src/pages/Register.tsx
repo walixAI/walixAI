@@ -39,7 +39,7 @@ export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const setUser = useAuthStore((s) => s.setUser);
+  const { setUser, setTenant } = useAuthStore();
 
   const set = (field: Field, value: string) => {
     setForm((f) => ({ ...f, [field]: value }));
@@ -72,7 +72,9 @@ export default function Register() {
         password: form.password,
       });
       setToken(access_token);
-      setUser(user);
+      const meData = await api.me();
+      setUser(meData.user);
+      setTenant(meData.tenant);
       toast.success("Cuenta creada", {
         description: `Bienvenido a Walix, ${user.name}. Ahora configura tu workspace.`,
       });

@@ -165,6 +165,21 @@ export interface WalixUser {
   is_active?: boolean;
 }
 
+export interface TenantData {
+  id: string;
+  name: string;
+  industry_key: string;
+  industry_label: string | null;
+  entity_name: string;
+  entity_plural: string;
+  contact_statuses: Array<{ key: string; label: string; color: string }>;
+}
+
+export interface MeResponse {
+  user: WalixUser;
+  tenant: TenantData;
+}
+
 export interface LeadListResponse {
   items: LeadListItem[];
   total: number;
@@ -610,7 +625,7 @@ export const api = {
     });
   },
 
-  async me(): Promise<WalixUser> {
+  async me(): Promise<MeResponse> {
     return request("/api/auth/me");
   },
 
@@ -726,6 +741,47 @@ export const api = {
     return request("/api/onboarding/approve", {
       method: "POST",
       body: JSON.stringify({ draft_id: draftId }),
+    });
+  },
+
+  // Sprint 8B — Industry Templates
+  async analyzeIndustry(data: {
+    description: string;
+    session_id?: string;
+  }): Promise<{
+    session_id: string;
+    needs_more_info: boolean;
+    industry_key?: string | null;
+    industry_label?: string;
+    entity_name?: string;
+    confidence?: number;
+    pipeline_preview?: Array<{ key: string; label: string; order: number; color: string }>;
+    extracted_data?: Record<string, unknown>;
+    reasoning?: string;
+    follow_up_questions?: string[];
+    hint?: string;
+    turn?: number;
+  }> {
+    return request("/api/v1/onboarding/analyze", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async confirmIndustry(data: {
+    description: string;
+    industry_key: string;
+    override_industry?: boolean;
+  }): Promise<{
+    message: string;
+    entity_name: string;
+    entity_plural: string;
+    pipeline_stages: Array<{ key: string; label: string; color: string }>;
+    next_steps: string[];
+  }> {
+    return request("/api/v1/onboarding/confirm", {
+      method: "POST",
+      body: JSON.stringify(data),
     });
   },
 

@@ -7,6 +7,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { ContactsViewToggle, type ViewMode } from "./ContactsViewToggle";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 interface ContactsPageHeaderProps {
   total: number;
@@ -33,6 +34,7 @@ export function ContactsPageHeader({
   isExporting,
   onSaveView,
 }: ContactsPageHeaderProps) {
+  const { entities, newEntityLabel, totalLabel } = useTenantLabels();
   const saveViewBtn = (
     <Button
       data-testid="save-view-btn"
@@ -53,10 +55,10 @@ export function ContactsPageHeader({
       className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border bg-background shrink-0"
     >
       <div className="flex items-center gap-3">
-        <h1 className="text-lg font-semibold leading-none">Contactos</h1>
+        <h1 className="text-lg font-semibold leading-none">{entities}</h1>
         {!isLoading && (
           <span className="text-sm text-muted-foreground tabular-nums">
-            {total.toLocaleString("es-MX")}
+            {totalLabel(total)}
           </span>
         )}
         {activeFilterCount > 0 && (
@@ -118,7 +120,7 @@ export function ContactsPageHeader({
           onClick={onNewContact}
         >
           <Plus className="h-3.5 w-3.5" />
-          Nuevo contacto
+          {newEntityLabel}
         </Button>
       </div>
     </div>

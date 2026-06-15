@@ -40,7 +40,7 @@ export default function Login() {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const setUser = useAuthStore((s) => s.setUser);
+  const { setUser, setTenant } = useAuthStore();
 
   const canSubmit = email.trim().length > 0 && password.length > 0;
 
@@ -63,7 +63,9 @@ export default function Login() {
     try {
       const { access_token, user } = await api.login(email.trim(), password);
       setToken(access_token);
-      setUser(user);
+      const meData = await api.me();
+      setUser(meData.user);
+      setTenant(meData.tenant);
       toast.success("Bienvenido, " + user.name);
       navigate(user.role === "platform_owner" ? "/platform" : "/dashboard");
     } catch (err: any) {
