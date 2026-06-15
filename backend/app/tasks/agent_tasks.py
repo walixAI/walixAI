@@ -185,6 +185,58 @@ def run_profile_enrichment_all_tenants(self) -> dict:
         raise self.retry(exc=exc)
 
 
+@celery_app.task(
+    bind=True,
+    name="app.tasks.agent_tasks.run_closing_all_branches",
+    max_retries=3,
+    default_retry_delay=120,
+)
+def run_closing_all_branches(self) -> dict:
+    """Scan all active branches for high-score leads (>=70) and generate closing proposals."""
+    from sqlalchemy import select
+    from app.agents.closing_agent import run_closing_agent
+    from app.core.database import AsyncSessionLocal
+    from app.models.lead import Lead, LeadStatus
+
+    _TERMINAL = [LeadStatus.PERDIDO, LeadStatus.CALIFICADO]
+    _MIN_SCORE = 70
+
+    async def _run() -> dict:
+        branch_ids = await _get_active_branch_ids()
+        results = {"branches": len(branch_ids), "suggestions_created": 0, "errors": 0}
+
+        for bid in branch_ids:
+            try:
+                async with AsyncSessionLocal() as db:
+                    rows = await db.execute(
+                        select(Lead.id, Lead.tenant_id).where(
+                            Lead.branch_id == bid,
+                            Lead.deleted_at.is_(None),
+                            Lead.status.notin_(_TERMINAL),
+                            Lead.current_score >= _MIN_SCORE,
+                        ).limit(10)
+                    )
+                    candidates = rows.all()
+
+                for lead_id, tenant_id in candidates:
+                    try:
+                        created = await run_closing_agent(lead_id, tenant_id)
+                        results["suggestions_created"] += int(bool(created))
+                    except Exception:
+                        logger.exception("closing_agent failed for lead=%s", lead_id)
+                        results["errors"] += 1
+            except Exception:
+                logger.exception("run_closing_all_branches failed for branch=%s", bid)
+                results["errors"] += 1
+
+        return results
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+
 # ── On-demand execution ───────────────────────────────────────────────────────
 
 @celery_app.task(

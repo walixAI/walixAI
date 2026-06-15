@@ -39,6 +39,7 @@ def _async_url(url: str) -> str:
 
 
 _redis_url = settings.REDIS_URL
+_use_ssl = _redis_url.startswith("rediss://")
 
 celery_app = Celery(
     "walix",
@@ -64,6 +65,10 @@ celery_app.conf.update(
     task_soft_time_limit=300,       # SoftTimeLimitExceeded at 5 min → clean shutdown
     task_time_limit=360,            # Hard kill at 6 min
     result_expires=3600,            # Results in Redis for 1 h
+    # Upstash uses rediss:// (TLS). ssl_cert_reqs=None skips cert verification,
+    # required for Upstash's self-signed cert on the free plan.
+    broker_use_ssl={"ssl_cert_reqs": None} if _use_ssl else None,
+    redis_backend_use_ssl={"ssl_cert_reqs": None} if _use_ssl else None,
 )
 
 # ── Periodic schedule (replaces APScheduler) ──────────────────────────────────
@@ -82,9 +87,13 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.agent_tasks.run_config_all_branches",
         "schedule": crontab(hour=8, minute=0, day_of_week=1),
     },
-    "reactivation-agent-weekly": {
+    "closing-agent-daily": {
+        "task": "app.tasks.agent_tasks.run_closing_all_branches",
+        "schedule": crontab(hour=9, minute=0),
+    },
+    "reactivation-agent-daily": {
         "task": "app.tasks.agent_tasks.run_reactivation_all_tenants",
-        "schedule": crontab(hour=8, minute=0, day_of_week=1),
+        "schedule": crontab(hour=10, minute=0),
     },
     "profile-enrichment-every-72h": {
         "task": "app.tasks.agent_tasks.run_profile_enrichment_all_tenants",
