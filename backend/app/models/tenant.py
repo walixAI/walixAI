@@ -18,6 +18,7 @@ _ONBOARDING_STATUS_VALUES = ["pending", "draft", "approved", "active"]
 
 
 class TenantPlan(str, enum.Enum):
+    TRIAL = "trial"       # 14-day free trial (Sprint 9)
     STARTER = "starter"
     GROWTH = "growth"
     BUSINESS = "business"
@@ -70,6 +71,18 @@ class Tenant(Base):
     onboarding_completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+    # ── Sprint 9: Trial & Registration ────────────────────────────────────────
+    trial_ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    registration_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    stripe_customer_id: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True
+    )
+    referral_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     companies: Mapped[list["Company"]] = relationship(
         back_populates="tenant", cascade="all, delete-orphan"

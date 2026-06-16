@@ -3,11 +3,13 @@ import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { BottomNav } from "./BottomNav";
 import { ImpersonationBanner } from "./ImpersonationBanner";
+import { TrialBanner } from "./TrialBanner";
 
 export function AppLayout() {
   return (
     <div className="min-h-screen w-full flex flex-col bg-background">
       <ImpersonationBanner />
+      <TrialBanner />
       <div className="flex flex-1 min-h-0">
         <Sidebar />
         <div className="flex-1 flex flex-col min-w-0">

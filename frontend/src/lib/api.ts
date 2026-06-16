@@ -625,6 +625,38 @@ export const api = {
     });
   },
 
+  // Sprint 9 — full tenant registration (v2)
+  async registerV2(data: {
+    name: string;
+    email: string;
+    password: string;
+    workspace_name: string;
+    phone?: string | null;
+    referral_source?: string | null;
+  }): Promise<{ access_token: string; user: WalixUser }> {
+    return request("/api/v2/auth/register", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async checkEmail(email: string): Promise<{ available: boolean }> {
+    return request("/api/auth/check-email", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  async getTrialStatus(): Promise<{
+    plan: string;
+    is_trial: boolean;
+    trial_ends_at: string | null;
+    days_remaining: number;
+    trial_expired: boolean;
+  }> {
+    return request("/api/tenant/trial-status");
+  },
+
   async me(): Promise<MeResponse> {
     return request("/api/auth/me");
   },

@@ -150,6 +150,10 @@ class PlatformStats(BaseModel):
     total_mrr: int
     renewals_next_30_days: list[RenewalItem]
     ai_costs_this_month: float
+    # Sprint 9 — trial funnel
+    total_trial_tenants: int
+    total_expired_trials: int
+    total_paying_tenants: int
 
 
 class TenantListItem(BaseModel):
@@ -256,6 +260,25 @@ async def platform_stats(
     token_map = await _ai_tokens_by_tenant(db, month_start, now)
     ai_cost = round(sum(_tokens_to_usd(v) for v in token_map.values()), 4)
 
+    # Sprint 9 — trial funnel (uses trial_ends_at field, falls back to heuristic)
+    trial_tenants = [
+        t for t in all_tenants
+        if getattr(t.plan, "value", str(t.plan)) == TenantPlan.TRIAL.value
+    ]
+    active_trials = [
+        t for t in trial_tenants
+        if t.trial_ends_at and t.trial_ends_at.replace(tzinfo=timezone.utc) > now
+    ]
+    expired_trials = [
+        t for t in trial_tenants
+        if not t.trial_ends_at or t.trial_ends_at.replace(tzinfo=timezone.utc) <= now
+    ]
+    paying_tenants = [
+        t for t in all_tenants
+        if getattr(t.plan, "value", str(t.plan)) != TenantPlan.TRIAL.value
+        and t.is_active
+    ]
+
     return PlatformStats(
         total_tenants=total,
         active_tenants=active_count,
@@ -265,6 +288,9 @@ async def platform_stats(
         total_mrr=total_mrr,
         renewals_next_30_days=renewals,
         ai_costs_this_month=ai_cost,
+        total_trial_tenants=len(active_trials),
+        total_expired_trials=len(expired_trials),
+        total_paying_tenants=len(paying_tenants),
     )
 
 

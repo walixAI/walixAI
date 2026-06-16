@@ -1,9 +1,10 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,7 @@ from app.models.tenant import Branch, Company, Tenant, TenantPlan
 from app.models.user import User, UserRole
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+v2_router = APIRouter(prefix="/v2/auth", tags=["auth"])
 
 _bearer_scheme = HTTPBearer(auto_error=True)
 
@@ -212,4 +214,129 @@ async def me(
     )
 
 
-__all__ = ["router", "get_current_user", "hash_password"]
+# ── POST /auth/check-email ────────────────────────────────────────────────────
+
+class CheckEmailRequest(BaseModel):
+    email: str
+
+
+class CheckEmailResponse(BaseModel):
+    available: bool
+
+
+@router.post("/check-email", response_model=CheckEmailResponse)
+async def check_email(
+    body: CheckEmailRequest,
+    db: AsyncSession = Depends(get_db),
+) -> CheckEmailResponse:
+    """Return {available: true} if the email is not yet registered."""
+    result = await db.execute(select(User).where(User.email == body.email.strip().lower()))
+    available = result.scalar_one_or_none() is None
+    return CheckEmailResponse(available=available)
+
+
+# ── POST /v2/auth/register ────────────────────────────────────────────────────
+
+_TRIAL_DAYS = 14
+
+REFERRAL_SOURCES = ["google", "instagram", "facebook", "recomendacion", "otro"]
+
+
+class RegisterV2Request(BaseModel):
+    name: str
+    email: str
+    password: str
+    workspace_name: str
+    phone: str | None = None
+    referral_source: str | None = None
+
+    @field_validator("password")
+    @classmethod
+    def password_min_length(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("La contraseña debe tener al menos 8 caracteres")
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Este campo no puede estar vacío")
+        return v.strip()
+
+    @field_validator("workspace_name")
+    @classmethod
+    def workspace_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("El nombre del negocio no puede estar vacío")
+        return v.strip()
+
+
+@v2_router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
+async def register_v2(
+    body: RegisterV2Request,
+    db: AsyncSession = Depends(get_db),
+) -> LoginResponse:
+    """Full tenant registration: creates Tenant + Company + Branch + User in one transaction.
+
+    Sets plan=TRIAL with trial_ends_at = now + 14 days.
+    Owner gets branch_id=None (access to all branches).
+    """
+    email = body.email.strip().lower()
+
+    existing = await db.execute(select(User).where(User.email == email))
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Este correo ya está registrado",
+        )
+
+    now = datetime.now(timezone.utc)
+    trial_ends_at = now + timedelta(days=_TRIAL_DAYS)
+
+    tenant = Tenant(
+        name=body.workspace_name,
+        email=email,
+        plan=TenantPlan.TRIAL,
+        is_active=True,
+        trial_ends_at=trial_ends_at,
+        industry_key="generico",
+        referral_source=body.referral_source,
+    )
+    db.add(tenant)
+    await db.flush()
+
+    company = Company(
+        tenant_id=tenant.id,
+        name=body.workspace_name,
+    )
+    db.add(company)
+    await db.flush()
+
+    branch = Branch(
+        company_id=company.id,
+        tenant_id=tenant.id,
+        name=f"{body.workspace_name} · Principal",
+        is_active=True,
+    )
+    db.add(branch)
+    await db.flush()
+
+    user = User(
+        tenant_id=tenant.id,
+        branch_id=None,  # owners access all branches
+        email=email,
+        name=body.name,
+        hashed_password=hash_password(body.password),
+        role=UserRole.OWNER,
+        is_active=True,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    token = create_access_token({"sub": str(user.id), "tenant_id": str(user.tenant_id)})
+    return LoginResponse(access_token=token, user=LoginUserOut.model_validate(user))
+
+
+__all__ = ["router", "v2_router", "get_current_user", "hash_password"]

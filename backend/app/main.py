@@ -3,11 +3,12 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import activities, agents, ai, auth, automations, branches, contacts, dashboard, health, kb, leads, metrics, onboarding, pipeline, platform, saved_views, support, tags, webhooks
+from app.api import activities, agents, ai, auth, automations, branches, contacts, dashboard, health, kb, leads, metrics, onboarding, pipeline, platform, saved_views, support, tags, tenant, webhooks
 from app.api.industry_onboarding import onboarding_router as industry_onboarding_router
 from app.api.industry_onboarding import settings_router as industry_settings_router
 from app.api.users import team_router, users_router
 from app.middleware.tenant_context import TenantContextMiddleware
+from app.middleware.trial_guard import TrialGuardMiddleware
 from app.services.scheduler import lifespan_scheduler
 from app.core.config import settings
 
@@ -45,6 +46,11 @@ app.add_middleware(
 # TenantContextMiddleware runs as the outermost layer (last added = first to
 # run). It sets request.state.tenant_id from the JWT so that get_db can call
 # set_config before any query. Requests without a JWT get NULL_UUID (safe).
+# Middleware execution order (LIFO: last added = outermost = runs first):
+#   1. TenantContextMiddleware  → decodes JWT, sets request.state.tenant_id
+#   2. TrialGuardMiddleware     → reads tenant_id set by step 1, checks trial expiry
+# Adding TrialGuard first makes it inner (runs after TenantContext).
+app.add_middleware(TrialGuardMiddleware)
 app.add_middleware(TenantContextMiddleware)
 
 
@@ -72,6 +78,8 @@ app.include_router(activities.router, prefix="/api")
 app.include_router(tags.router, prefix="/api")
 app.include_router(industry_onboarding_router, prefix="/api")  # Sprint 8B: /api/v1/onboarding/*
 app.include_router(industry_settings_router, prefix="/api")    # Sprint 8B: /api/v1/settings/*
+app.include_router(tenant.router, prefix="/api")               # Sprint 9: /api/tenant/*
+app.include_router(auth.v2_router, prefix="/api")              # Sprint 9: /api/v2/auth/*
 app.include_router(health.router)  # /health — no prefix, used by deploy smoke tests
 
 
