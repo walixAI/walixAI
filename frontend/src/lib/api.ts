@@ -523,6 +523,42 @@ export interface ForecastOut {
   at_risk_leads: ForecastLeadOut[];
 }
 
+// ── ROI types ─────────────────────────────────────────────────────────────────
+
+export interface PipelineStageROI {
+  stage_name: string;
+  stage_key: string | null;
+  count: number;
+  avg_days_in_stage: number | null;
+}
+
+export interface ROIOut {
+  period_days: number;
+  period_label: string;
+  leads_total: number;
+  leads_by_source: Record<string, number>;
+  bot_qualified: number;
+  bot_qualification_rate: number;
+  avg_qualification_score: number | null;
+  avg_messages_to_qualify: number | null;
+  handoffs_executed: number;
+  converted: number;
+  conversion_rate: number;
+  pipeline_by_stage: PipelineStageROI[];
+  bot_messages_sent: number;
+  estimated_minutes_saved: number;
+  estimated_hours_saved: number;
+  revenue_per_conversion: number | null;
+  estimated_revenue: number | null;
+  avg_response_time_minutes: number | null;
+  leads_waiting_response: number;
+  sentiment_breakdown: Record<string, number>;
+  agent_suggestions_generated: number;
+  agent_suggestions_accepted: number;
+  agent_acceptance_rate: number;
+  assumptions: Record<string, string>;
+}
+
 // ── Agent suggestion types ────────────────────────────────────────────────────
 
 export interface AgentSuggestion {
@@ -971,6 +1007,19 @@ export const api = {
   async getForecast(branch_id?: string): Promise<ForecastOut> {
     const qs = branch_id ? `?branch_id=${branch_id}` : "";
     return request(`/api/metrics/forecast${qs}`);
+  },
+
+  async getRoi(period: 7 | 30 | 90 = 30, branch_id?: string): Promise<ROIOut> {
+    const qs = new URLSearchParams({ period: String(period) });
+    if (branch_id) qs.set("branch_id", branch_id);
+    return request(`/api/metrics/roi?${qs}`);
+  },
+
+  async updateRoiConfig(revenue_per_conversion: number): Promise<{ message: string }> {
+    return request("/api/tenant/roi-config", {
+      method: "PATCH",
+      body: JSON.stringify({ revenue_per_conversion }),
+    });
   },
 
   // Agent suggestions

@@ -32,6 +32,7 @@ const ContactsPage = lazy(() => import("@/pages/contacts"));
 const ContactDetailPage = lazy(() => import("@/pages/contacts/[id]"));
 const BillingPage = lazy(() => import("@/pages/billing/BillingPage"));
 const BillingSuccess = lazy(() => import("@/pages/billing/BillingSuccess"));
+const ROIDashboard = lazy(() => import("@/pages/roi/ROIDashboard"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -90,6 +91,7 @@ const AppRoutes = () => {
             }
           >
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/roi" element={<ROIDashboard />} />
             <Route path="/whatsapp" element={<Whatsapp />} />
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/contacts/:id" element={<ContactDetailPage />} />

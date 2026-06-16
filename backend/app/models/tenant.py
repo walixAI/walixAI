@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -83,6 +83,11 @@ class Tenant(Base):
         String(100), nullable=True, index=True
     )
     referral_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # ── Sprint 11: ROI Dashboard ───────────────────────────────────────────────
+    roi_revenue_per_conversion: Mapped[float | None] = mapped_column(
+        Numeric(10, 2), nullable=True
+    )
 
     companies: Mapped[list["Company"]] = relationship(
         back_populates="tenant", cascade="all, delete-orphan"

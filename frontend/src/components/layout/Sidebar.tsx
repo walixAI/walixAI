@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard, Users, Users2, MessageCircle, BarChart3,
-  Settings, Kanban, TrendingUp, Zap, CreditCard,
+  Settings, Kanban, TrendingUp, Zap, CreditCard, BarChart2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/walix/Logo";
@@ -16,8 +16,11 @@ export function Sidebar() {
   const { user } = useAuth();
   const isOwner = user?.role === "owner" || user?.role === "platform_owner";
 
+  const roiVisible = isOwner || user?.role === "gerente" || user?.role === "doctor";
+
   const MAIN_ITEMS = [
     { to: "/dashboard",   label: "Dashboard",       icon: LayoutDashboard },
+    ...(roiVisible ? [{ to: "/roi", label: "ROI", icon: BarChart2 }] : []),
     { to: "/pipeline",    label: "Pipeline",         icon: Kanban },
     { to: "/contacts",    label: entities,            icon: Users },
     { to: "/forecast",    label: "Forecast",         icon: TrendingUp },
