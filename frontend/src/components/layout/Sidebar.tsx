@@ -1,22 +1,20 @@
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard, Users, Users2, MessageCircle, BarChart3,
-  Settings, Kanban, TrendingUp, Zap,
+  Settings, Kanban, TrendingUp, Zap, CreditCard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/walix/Logo";
 import { WBadge } from "@/components/walix/Badge";
 import { useState } from "react";
 import { useTenantLabels } from "@/hooks/useTenantLabels";
-
-const CONFIG_ITEMS = [
-  { to: "/settings",      label: "Configuracion", icon: Settings, end: true },
-  { to: "/settings/team", label: "Equipo",         icon: Users2 },
-];
+import { useAuth } from "@/hooks/useAuth";
 
 export function Sidebar() {
   const [hovered, setHovered] = useState(false);
   const { entities } = useTenantLabels();
+  const { user } = useAuth();
+  const isOwner = user?.role === "owner" || user?.role === "platform_owner";
 
   const MAIN_ITEMS = [
     { to: "/dashboard",   label: "Dashboard",       icon: LayoutDashboard },
@@ -70,7 +68,11 @@ export function Sidebar() {
             )}
           </div>
 
-          {CONFIG_ITEMS.map((item) => (
+          {[
+            { to: "/settings",      label: "Configuracion", icon: Settings, end: true },
+            { to: "/settings/team", label: "Equipo",         icon: Users2 },
+            ...(isOwner ? [{ to: "/billing", label: "Facturación", icon: CreditCard }] : []),
+          ].map((item) => (
             <NavItem key={item.to} {...item} collapsed={collapsed} />
           ))}
         </nav>

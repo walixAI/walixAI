@@ -33,7 +33,8 @@ _WHITELIST_PREFIXES = (
     "/api/v2/auth/",
     "/api/tenant/trial-status",
     "/api/v1/billing/",
-    "/",          # root probe
+    "/api/webhooks/stripe",   # Stripe sends no JWT — no tenant context
+    "/",                      # root probe
 )
 
 

@@ -17,3 +17,4 @@ openai
 tiktoken
 celery[redis]==5.3.6
 flower==2.0.1
+stripe==8.11.0

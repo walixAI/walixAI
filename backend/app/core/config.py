@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     WALIX_INTERNAL_WA_NUMBER_ID: str | None = None
     WALIX_INTERNAL_WA_TOKEN: str | None = None
 
+    # ── Stripe (Sprint 10 — Billing) ──────────────────────────────────────────
+    # Use sk_test_... in development, sk_live_... in production.
+    # All Stripe vars are optional so the app starts without billing configured.
+    STRIPE_SECRET_KEY: str | None = None
+    STRIPE_WEBHOOK_SECRET: str | None = None
+    STRIPE_PRICE_STARTER: str | None = None
+    STRIPE_PRICE_GROWTH: str | None = None
+    STRIPE_PRICE_BUSINESS: str | None = None
+
     @property
     def effective_database_url(self) -> str:
         # Railway's internal hostname (.railway.internal) only resolves inside

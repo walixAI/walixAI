@@ -30,6 +30,8 @@ const ForecastPage = lazy(() => import("@/pages/forecast/ForecastPage"));
 const AutomationsPage = lazy(() => import("@/pages/automations/AutomationsPage"));
 const ContactsPage = lazy(() => import("@/pages/contacts"));
 const ContactDetailPage = lazy(() => import("@/pages/contacts/[id]"));
+const BillingPage = lazy(() => import("@/pages/billing/BillingPage"));
+const BillingSuccess = lazy(() => import("@/pages/billing/BillingSuccess"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -107,6 +109,8 @@ const AppRoutes = () => {
             <Route path="/pipeline" element={<PipelinePage />} />
             <Route path="/forecast" element={<ForecastPage />} />
             <Route path="/automations" element={<AutomationsPage />} />
+            <Route path="/billing" element={<BillingPage />} />
+            <Route path="/billing/success" element={<BillingSuccess />} />
           </Route>
 
           {/* Onboarding flow — protected, no AppLayout */}

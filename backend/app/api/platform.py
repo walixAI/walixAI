@@ -26,6 +26,7 @@ from app.core.security import create_access_token
 from app.models.ai_log import AICommandLog
 from app.models.conversation import Conversation, Message
 from app.models.lead import Lead
+from app.models.subscription import FailedPayment, Subscription
 from app.models.tenant import Branch, Tenant, TenantPlan
 from app.models.user import User, UserRole
 
@@ -154,6 +155,10 @@ class PlatformStats(BaseModel):
     total_trial_tenants: int
     total_expired_trials: int
     total_paying_tenants: int
+    # Sprint 10 — Stripe billing
+    stripe_mrr_mxn: int
+    failed_payments_30d: int
+    tenants_by_plan: dict[str, int]
 
 
 class TenantListItem(BaseModel):
@@ -279,6 +284,26 @@ async def platform_stats(
         and t.is_active
     ]
 
+    # Sprint 10 — Stripe billing stats
+    STRIPE_PLAN_MRR_MXN = {"starter": 699, "growth": 1499, "business": 2999}
+
+    active_subs_result = await db.execute(
+        select(Subscription).where(Subscription.status == "active")
+    )
+    active_subs = active_subs_result.scalars().all()
+    stripe_mrr_mxn = sum(STRIPE_PLAN_MRR_MXN.get(s.plan, 0) for s in active_subs)
+
+    failed_cutoff = now - timedelta(days=30)
+    failed_count_result = await db.execute(
+        select(func.count(FailedPayment.id)).where(FailedPayment.created_at >= failed_cutoff)
+    )
+    failed_payments_30d = failed_count_result.scalar_one() or 0
+
+    tenants_by_plan: dict[str, int] = {}
+    for t in all_tenants:
+        plan_key = getattr(t.plan, "value", str(t.plan))
+        tenants_by_plan[plan_key] = tenants_by_plan.get(plan_key, 0) + 1
+
     return PlatformStats(
         total_tenants=total,
         active_tenants=active_count,
@@ -291,6 +316,9 @@ async def platform_stats(
         total_trial_tenants=len(active_trials),
         total_expired_trials=len(expired_trials),
         total_paying_tenants=len(paying_tenants),
+        stripe_mrr_mxn=stripe_mrr_mxn,
+        failed_payments_30d=failed_payments_30d,
+        tenants_by_plan=tenants_by_plan,
     )
 
 

@@ -661,6 +661,47 @@ export const api = {
     return request("/api/auth/me");
   },
 
+  // Billing (Sprint 10)
+  async getBillingPlans(): Promise<Array<{
+    key: string;
+    name: string;
+    price_mxn: number;
+    price_id: string | null;
+    features: string[];
+    highlighted: boolean;
+  }>> {
+    return request("/api/v1/billing/plans");
+  },
+
+  async createCheckoutSession(plan: string): Promise<{ checkout_url: string }> {
+    return request("/api/v1/billing/create-checkout-session", {
+      method: "POST",
+      body: JSON.stringify({ plan }),
+    });
+  },
+
+  async getBillingSubscription(): Promise<{
+    plan: string;
+    status: string;
+    current_period_end: string | null;
+    cancel_at_period_end: boolean;
+    days_until_renewal: number;
+  }> {
+    return request("/api/v1/billing/subscription");
+  },
+
+  async cancelSubscription(): Promise<{ message: string }> {
+    return request("/api/v1/billing/cancel", { method: "POST" });
+  },
+
+  async reactivateSubscription(): Promise<{ message: string }> {
+    return request("/api/v1/billing/reactivate", { method: "POST" });
+  },
+
+  async getBillingPortal(): Promise<{ portal_url: string }> {
+    return request("/api/v1/billing/portal", { method: "POST" });
+  },
+
   // Leads
   async listLeads(params?: { all?: boolean; status?: LeadStatus; date?: string }): Promise<LeadListResponse> {
     const qs = new URLSearchParams();
