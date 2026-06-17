@@ -802,7 +802,7 @@ export default function Settings() {
     enabled: needsBranchSelect,
   });
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
-  const branchId = user?.branch_id ?? selectedBranchId || (branches[0]?.id ?? "");
+  const branchId = user?.branch_id ?? (selectedBranchId || (branches[0]?.id ?? ""));
 
   function setTab(tab: string) {
     setSearchParams({ tab });
