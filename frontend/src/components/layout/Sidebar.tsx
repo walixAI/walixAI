@@ -1,7 +1,7 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, Users2, MessageCircle, BarChart3,
-  Settings, Kanban, TrendingUp, Zap, CreditCard, BarChart2,
+  Settings, Kanban, TrendingUp, Zap, CreditCard, BarChart2, Bot, BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/walix/Logo";
@@ -14,7 +14,9 @@ export function Sidebar() {
   const [hovered, setHovered] = useState(false);
   const { entities } = useTenantLabels();
   const { user } = useAuth();
+  const location = useLocation();
   const isOwner = user?.role === "owner" || user?.role === "platform_owner";
+  const canManageBot = isOwner || user?.role === "gerente" || user?.role === "it";
 
   const roiVisible = isOwner || user?.role === "gerente" || user?.role === "doctor";
 
@@ -72,15 +74,59 @@ export function Sidebar() {
           </div>
 
           {[
-            { to: "/settings",      label: "Configuracion", icon: Settings, end: true },
-            { to: "/settings/team", label: "Equipo",         icon: Users2 },
-            ...(isOwner ? [{ to: "/billing", label: "Facturación", icon: CreditCard }] : []),
-          ].map((item) => (
-            <NavItem key={item.to} {...item} collapsed={collapsed} />
-          ))}
+            { to: "/settings?tab=bot",       label: "Bot IA",              icon: Bot,      showIf: canManageBot },
+            { to: "/settings?tab=kb",        label: "Base de conocimiento", icon: BookOpen, showIf: canManageBot },
+            { to: "/settings?tab=whatsapp",  label: "WhatsApp / Meta",     icon: Zap,      showIf: canManageBot },
+            { to: "/settings/team",          label: "Equipo",               icon: Users2,   showIf: true },
+            ...(isOwner ? [{ to: "/billing", label: "Facturación", icon: CreditCard, showIf: true }] : []),
+          ]
+            .filter((item) => item.showIf)
+            .map((item) => (
+              <SettingsNavItem key={item.to} to={item.to} label={item.label} icon={item.icon} collapsed={collapsed} />
+            ))}
         </nav>
       </aside>
     </div>
+  );
+}
+
+// For settings tabs: matches by ?tab= query param
+function SettingsNavItem({
+  to,
+  label,
+  icon: Icon,
+  collapsed,
+}: {
+  to: string;
+  label: string;
+  icon: React.ElementType;
+  collapsed: boolean;
+}) {
+  const location = useLocation();
+  // e.g. to="/settings?tab=bot"  → check if current ?tab matches
+  const [path, qs] = to.split("?");
+  const tabParam = qs ? new URLSearchParams(qs).get("tab") : null;
+  const currentTab = new URLSearchParams(location.search).get("tab") ?? "bot";
+  const isActive = location.pathname === path && (tabParam === null || currentTab === tabParam)
+    || (to === "/settings/team" && location.pathname === "/settings/team")
+    || (to === "/billing" && location.pathname === "/billing");
+
+  return (
+    <NavLink
+      to={to}
+      title={collapsed ? label : undefined}
+      aria-label={label}
+      className={cn(
+        "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
+        collapsed && "justify-center px-0",
+        isActive
+          ? "bg-primary text-primary-foreground shadow-glow"
+          : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      )}
+    >
+      <Icon className="h-[18px] w-[18px] shrink-0" />
+      {!collapsed && <span className="flex-1 truncate">{label}</span>}
+    </NavLink>
   );
 }
 

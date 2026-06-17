@@ -6,7 +6,7 @@
  *   2. Confirmar — Walix muestra la industria detectada + pipeline preview
  *   3. Aplicando — se aplica el template y se redirige al dashboard
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -167,14 +167,7 @@ export default function OnboardingWizard() {
     confirmMutation.mutate();
   }
 
-  useEffect(() => {
-    if (applyResult) {
-      // Dar más tiempo si el bot config se generó para que el usuario lo lea
-      const delay = applyResult.bot_config_generated ? 4000 : 3000;
-      const t = setTimeout(() => navigate("/dashboard"), delay);
-      return () => clearTimeout(t);
-    }
-  }, [applyResult, navigate]);
+  // No auto-redirect — user clicks the button manually (see StepApplying)
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -487,6 +480,13 @@ function StepConfirm({
 
 // ── Step 3 — Applying ─────────────────────────────────────────────────────────
 
+const TONE_LABELS: Record<string, string> = {
+  amigable:    "😊 Amigable",
+  profesional: "💼 Profesional",
+  formal:      "🎯 Formal",
+  cercano:     "🤝 Cercano",
+};
+
 function StepApplying({
   result,
   industryLabel,
@@ -495,36 +495,99 @@ function StepApplying({
     message: string;
     entity_name: string;
     bot_config_generated: boolean;
-    bot_config: { system_prompt: string; tone: string; qualification_questions: unknown[] } | null;
+    bot_config: { system_prompt: string; tone: string; qualification_questions: Array<{ order: number; question: string; field_key: string }> } | null;
   } | null;
   industryLabel: string;
 }) {
+  const navigate = useNavigate();
+  const [botExpanded, setBotExpanded] = useState(false);
+
   if (result) {
+    const bc = result.bot_config;
     return (
-      <div className="flex flex-col items-center gap-5 py-8 text-center">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-          <CheckCircle2 className="h-8 w-8 text-primary" />
+      <div className="space-y-6 py-4">
+        {/* Success header */}
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+            <CheckCircle2 className="h-8 w-8 text-primary" />
+          </div>
+          <h2 className="text-xl font-semibold">¡Tu workspace está listo!</h2>
+          <p className="text-sm text-muted-foreground">{result.message}</p>
         </div>
-        <div className="space-y-2">
-          <h2 className="text-xl font-semibold">{result.message}</h2>
 
-          {result.bot_config_generated ? (
-            <div className="flex items-center justify-center gap-1.5 text-sm text-success">
-              <CheckCircle2 className="h-4 w-4" />
-              <span>Bot de WhatsApp configurado automáticamente</span>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Puedes configurar tu bot de WhatsApp en{" "}
-              <span className="font-medium text-foreground">Configuración → Bot IA</span>
+        {/* Bot config result */}
+        {result.bot_config_generated && bc ? (
+          <div className="rounded-xl border border-border bg-muted/30 overflow-hidden">
+            <button
+              className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-left"
+              onClick={() => setBotExpanded((v) => !v)}
+            >
+              <span className="flex items-center gap-2 text-success">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                Tu bot ya está configurado
+              </span>
+              <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", botExpanded && "rotate-180")} />
+            </button>
+            {botExpanded && (
+              <div className="px-4 pb-4 space-y-3 border-t border-border">
+                {/* Tono */}
+                <div className="flex items-center gap-2 pt-3">
+                  <span className="text-xs text-muted-foreground">Tono:</span>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                    {TONE_LABELS[bc.tone] ?? bc.tone}
+                  </span>
+                </div>
+                {/* Preguntas */}
+                {bc.qualification_questions.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1.5">Preguntas de calificación:</p>
+                    <ol className="space-y-1">
+                      {bc.qualification_questions.map((q, i) => (
+                        <li key={i} className="text-xs text-foreground flex gap-2">
+                          <span className="text-muted-foreground shrink-0">{q.order}.</span>
+                          <span>{q.question}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+                {/* Primer párrafo del system prompt */}
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Vista previa del sistema:</p>
+                  <p className="text-xs text-foreground/80 bg-background rounded p-2 leading-relaxed line-clamp-3">
+                    {bc.system_prompt.split("\n")[0]}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-warning/30 bg-warning/5 px-4 py-3 flex items-start gap-2">
+            <span className="text-warning mt-0.5">⚠️</span>
+            <p className="text-sm text-warning">
+              No pudimos configurar tu bot automáticamente.
+              Puedes hacerlo en <span className="font-semibold">Configuración → Bot</span>.
             </p>
-          )}
+          </div>
+        )}
 
-          <p className="text-xs text-muted-foreground mt-1">
-            Redirigiendo a tu dashboard…
-          </p>
+        {/* Action buttons */}
+        <div className="flex flex-col gap-2">
+          <Button className="w-full gap-2" onClick={() => navigate("/dashboard")}>
+            Ir al Dashboard
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+          {result.bot_config_generated && (
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              onClick={() => navigate("/settings?tab=bot")}
+            >
+              <BookOpen className="h-4 w-4" />
+              Ajustar configuración del bot
+            </Button>
+          )}
         </div>
-        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
       </div>
     );
   }
