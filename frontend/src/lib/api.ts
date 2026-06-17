@@ -124,19 +124,20 @@ export interface BranchOut {
 }
 
 export interface BotConfigOut {
+  branch_name: string;
   onboarding_status: string;
   bot_name: string | null;
   industry: string | null;
-  branch_name: string;
   business_description: string | null;
   latest_draft_id: string | null;
-  // Sprint 12 — config generada desde onboarding
-  bot_system_prompt: string | null;
-  bot_tone: string | null;
-  bot_qualification_questions: Array<{ order: number; question: string; field_key: string }> | null;
+  onboarding_description: string | null;
+  // Sprint 12 §5 — spec-compliant names
+  system_prompt: string | null;
+  tone: string | null;
+  qualification_questions: Array<{ order: number; question: string; field_key: string }> | null;
   bot_config_generated_at: string | null;
   bot_config_updated_at: string | null;
-  onboarding_description: string | null;
+  is_auto_generated: boolean;
 }
 
 export interface KBFragmentOut {
@@ -147,7 +148,7 @@ export interface KBFragmentOut {
 }
 
 export interface KBDocumentStatus {
-  id?: string;
+  id: string;
   filename: string;
   title: string;
   chunk_count: number;
@@ -159,6 +160,33 @@ export interface KBStatusResponse {
   total_documents: number;
   total_chunks: number;
   last_indexed: string | null;
+}
+
+export interface KBDocumentListItem {
+  id: string;
+  title: string;
+  content_preview: string | null;
+  chunk_count: number;
+  is_auto_generated: boolean;
+  created_at: string;
+}
+
+export interface KBDocumentDetail {
+  id: string;
+  title: string;
+  content: string | null;
+  chunk_count: number;
+  is_auto_generated: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KBDocumentOut {
+  id: string;
+  title: string;
+  chunk_count: number;
+  is_auto_generated: boolean;
+  created_at: string;
 }
 
 export interface AgentOut {
@@ -1059,7 +1087,7 @@ export const api = {
 
   async updateBotConfig(
     branchId: string,
-    data: { bot_system_prompt?: string; bot_tone?: string; bot_qualification_questions?: Array<{ order: number; question: string; field_key: string }> },
+    data: { system_prompt?: string; tone?: string; qualification_questions?: Array<{ order: number; question: string; field_key: string }> },
   ): Promise<BotConfigOut> {
     return request(`/api/branches/${branchId}/bot-config`, {
       method: "PATCH",
@@ -1067,10 +1095,36 @@ export const api = {
     });
   },
 
-  async regenerateBotConfig(branchId: string): Promise<{ message: string; system_prompt: string; tone: string; qualification_questions: unknown[] }> {
+  async regenerateBotConfig(branchId: string): Promise<{ message: string; bot_config: { system_prompt: string; tone: string; qualification_questions: unknown[] } }> {
     return request(`/api/branches/${branchId}/bot-config/regenerate`, { method: "POST" });
   },
 
+  // KB documents (Sprint 12 §6)
+  async listKBDocuments(params?: { page?: number; limit?: number }): Promise<KBDocumentListItem[]> {
+    const qs = new URLSearchParams();
+    if (params?.page) qs.set("page", String(params.page));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const q = qs.toString() ? `?${qs}` : "";
+    return request(`/api/kb/documents${q}`);
+  },
+
+  async getKBDocument(docId: string): Promise<KBDocumentDetail> {
+    return request(`/api/kb/documents/${docId}`);
+  },
+
+  async createKBDocument(data: { title: string; content: string }): Promise<KBDocumentOut> {
+    return request("/api/kb/documents", { method: "POST", body: JSON.stringify(data) });
+  },
+
+  async updateKBDocument(docId: string, data: { title?: string; content?: string }): Promise<KBDocumentOut> {
+    return request(`/api/kb/documents/${docId}`, { method: "PATCH", body: JSON.stringify(data) });
+  },
+
+  async deleteKBDocument(docId: string, confirm = false): Promise<{ deleted: boolean; warning?: string; id?: string }> {
+    return request(`/api/kb/documents/${docId}${confirm ? "?confirm=true" : ""}`, { method: "DELETE" });
+  },
+
+  // Legacy aliases
   async addKBFragment(data: { title: string; content: string }): Promise<KBFragmentOut> {
     return request("/api/kb/fragments", { method: "POST", body: JSON.stringify(data) });
   },

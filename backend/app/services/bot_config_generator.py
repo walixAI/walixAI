@@ -289,9 +289,11 @@ class BotConfigGeneratorService:
             tenant_id=tenant_id,
             filename=f"onboarding_{doc_id.hex[:8]}.txt",
             title=title,
+            content=content,
             content_hash=content_hash,
             chunk_count=len(chunks),
             indexed_at=now,
+            is_auto_generated=True,
         )
         db.add(doc)
         await db.flush()

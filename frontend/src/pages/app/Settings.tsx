@@ -410,34 +410,44 @@ function BotConfigCard({ branchId, canManage }: { branchId: string; canManage: b
     onError: () => toast.error("No hay descripción disponible para regenerar"),
   });
 
-  const addFragMutation = useMutation({
-    mutationFn: () => api.addKBFragment({ title: fragTitle, content: fragContent }),
+  const addDocMutation = useMutation({
+    mutationFn: () => api.createKBDocument({ title: fragTitle, content: fragContent }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["kb-status"] });
+      qc.invalidateQueries({ queryKey: ["kb-documents"] });
       setShowAddFragment(false);
       setFragTitle("");
       setFragContent("");
-      toast.success("Fragmento agregado al Knowledge Base");
+      toast.success("Documento agregado al Knowledge Base");
     },
-    onError: () => toast.error("Error al agregar fragmento (verifica OPENAI_API_KEY)"),
+    onError: () => toast.error("Error al indexar (verifica OPENAI_API_KEY)"),
   });
 
-  const { data: kbStatus } = useQuery({
-    queryKey: ["kb-status"],
-    queryFn: () => api.getKBStatus(),
+  const { data: kbDocs } = useQuery({
+    queryKey: ["kb-documents"],
+    queryFn: () => api.listKBDocuments({ limit: 50 }),
     enabled: canManage,
     staleTime: 60_000,
   });
 
-  const deleteFragMutation = useMutation({
-    mutationFn: (docId: string) => api.deleteKBFragment(docId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["kb-status"] });
-      toast.success("Fragmento eliminado");
+  const deleteDocMutation = useMutation({
+    mutationFn: async (docId: string) => {
+      const res = await api.deleteKBDocument(docId);
+      if (!res.deleted && res.warning) {
+        if (window.confirm(`⚠️ ${res.warning}\n\n¿Eliminar de todas formas?`)) {
+          await api.deleteKBDocument(docId, true);
+        } else {
+          throw new Error("cancelled");
+        }
+      }
     },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["kb-documents"] });
+      toast.success("Documento eliminado");
+    },
+    onError: (e: Error) => { if (e.message !== "cancelled") toast.error("Error al eliminar"); },
   });
 
-  const hasGeneratedConfig = !!botConfig?.bot_system_prompt;
+  const hasGeneratedConfig = !!botConfig?.system_prompt;
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-card divide-y divide-border">
@@ -512,10 +522,10 @@ function BotConfigCard({ branchId, canManage }: { branchId: string; canManage: b
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tono del bot</p>
             </div>
             <Select
-              value={toneDraft || botConfig.bot_tone || "amigable"}
+              value={toneDraft || botConfig.tone || "amigable"}
               onValueChange={(v) => {
                 setToneDraft(v);
-                saveMutation.mutate({ bot_tone: v });
+                saveMutation.mutate({ tone: v });
               }}
               disabled={saveMutation.isPending}
             >
@@ -536,7 +546,7 @@ function BotConfigCard({ branchId, canManage }: { branchId: string; canManage: b
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">System prompt</p>
               {!editingPrompt && (
                 <button
-                  onClick={() => { setPromptDraft(botConfig.bot_system_prompt ?? ""); setEditingPrompt(true); }}
+                  onClick={() => { setPromptDraft(botConfig.system_prompt ?? ""); setEditingPrompt(true); }}
                   className="text-xs text-primary hover:underline flex items-center gap-1"
                 >
                   <Pencil className="h-3 w-3" /> Editar
@@ -555,7 +565,7 @@ function BotConfigCard({ branchId, canManage }: { branchId: string; canManage: b
                   <Button
                     size="sm"
                     disabled={saveMutation.isPending}
-                    onClick={() => saveMutation.mutate({ bot_system_prompt: promptDraft })}
+                    onClick={() => saveMutation.mutate({ system_prompt: promptDraft })}
                   >
                     {saveMutation.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
                     Guardar
@@ -567,17 +577,17 @@ function BotConfigCard({ branchId, canManage }: { branchId: string; canManage: b
               </div>
             ) : (
               <p className="text-xs text-foreground/80 bg-muted rounded-lg p-3 leading-relaxed whitespace-pre-wrap font-mono">
-                {botConfig.bot_system_prompt}
+                {botConfig.system_prompt}
               </p>
             )}
           </div>
 
           {/* Preguntas de calificación */}
-          {botConfig.bot_qualification_questions && botConfig.bot_qualification_questions.length > 0 && (
+          {botConfig.qualification_questions && botConfig.qualification_questions.length > 0 && (
             <div className="p-5 space-y-2">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Preguntas de calificación</p>
               <div className="space-y-1.5">
-                {botConfig.bot_qualification_questions.map((q, i) => (
+                {botConfig.qualification_questions.map((q, i) => (
                   <div key={i} className="flex items-start gap-2 text-sm">
                     <span className="text-xs font-bold text-muted-foreground mt-0.5 w-4 shrink-0">{q.order}.</span>
                     <div className="flex-1">
@@ -618,9 +628,9 @@ function BotConfigCard({ branchId, canManage }: { branchId: string; canManage: b
           <div className="flex items-center gap-2">
             <BookOpen className="h-4 w-4 text-muted-foreground" />
             <p className="text-sm font-semibold">Knowledge Base</p>
-            {kbStatus && (
+            {kbDocs && (
               <span className="text-[11px] text-muted-foreground">
-                {kbStatus.total_documents} doc{kbStatus.total_documents !== 1 ? "s" : ""} · {kbStatus.total_chunks} fragmentos
+                {kbDocs.length} doc{kbDocs.length !== 1 ? "s" : ""}
               </span>
             )}
           </div>
@@ -662,10 +672,10 @@ function BotConfigCard({ branchId, canManage }: { branchId: string; canManage: b
             <div className="flex gap-2">
               <Button
                 size="sm"
-                disabled={!fragTitle || !fragContent || addFragMutation.isPending}
-                onClick={() => addFragMutation.mutate()}
+                disabled={!fragTitle || !fragContent || addDocMutation.isPending}
+                onClick={() => addDocMutation.mutate()}
               >
-                {addFragMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                {addDocMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
                 Indexar en KB
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setShowAddFragment(false)}>
@@ -676,19 +686,28 @@ function BotConfigCard({ branchId, canManage }: { branchId: string; canManage: b
         )}
 
         {/* Documents list */}
-        {kbStatus && kbStatus.documents.length > 0 && (
+        {kbDocs && kbDocs.length > 0 && (
           <div className="divide-y divide-border border border-border rounded-lg overflow-hidden">
-            {kbStatus.documents.map((doc) => (
-              <div key={doc.filename} className="flex items-center gap-3 px-4 py-2.5">
+            {kbDocs.map((doc) => (
+              <div key={doc.id} className="flex items-center gap-3 px-4 py-2.5">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{doc.title}</p>
-                  <p className="text-[10px] text-muted-foreground">{doc.chunk_count} fragmentos</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-medium truncate">{doc.title}</p>
+                    {doc.is_auto_generated && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0">AUTO</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    {doc.chunk_count} fragmentos
+                    {doc.content_preview && ` · ${doc.content_preview.slice(0, 60)}…`}
+                  </p>
                 </div>
-                {canManage && "id" in doc && (
+                {canManage && (
                   <button
-                    onClick={() => deleteFragMutation.mutate((doc as { id: string }).id)}
-                    disabled={deleteFragMutation.isPending}
+                    onClick={() => deleteDocMutation.mutate(doc.id)}
+                    disabled={deleteDocMutation.isPending}
                     className="text-muted-foreground hover:text-danger transition-colors shrink-0"
+                    title={doc.is_auto_generated ? "Generado automáticamente — pedirá confirmación" : "Eliminar"}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -698,7 +717,7 @@ function BotConfigCard({ branchId, canManage }: { branchId: string; canManage: b
           </div>
         )}
 
-        {kbStatus && kbStatus.documents.length === 0 && (
+        {kbDocs && kbDocs.length === 0 && (
           <p className="text-xs text-muted-foreground">
             El Knowledge Base está vacío. Agrega textos para que el bot responda preguntas específicas de tu negocio.
           </p>
