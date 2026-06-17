@@ -232,6 +232,18 @@ async def confirm_onboarding(
         )
     ).scalars().all()
 
+    bot_config_generated: bool = summary.get("bot_config_generated", False)
+    bot_config: dict | None = summary.get("bot_config")
+
+    next_steps = [
+        "Conecta tu número de WhatsApp Business",
+        "Invita a tu equipo",
+    ]
+    if bot_config_generated:
+        next_steps.insert(0, "Tu bot ya está configurado — puedes ajustarlo en Configuración")
+    else:
+        next_steps.insert(0, "Configura tu bot de WhatsApp en Configuración → Bot IA")
+
     return {
         "message": f"Tu Walix está configurado para {template['label']}",
         "entity_name": tenant.entity_name,
@@ -240,11 +252,9 @@ async def confirm_onboarding(
             {"key": s.stage_key, "label": s.name, "color": s.color}
             for s in stages
         ],
-        "next_steps": [
-            "Sube tu knowledge base para que los agentes conozcan tu negocio",
-            "Conecta tu número de WhatsApp Business",
-            "Invita a tu equipo",
-        ],
+        "bot_config_generated": bot_config_generated,
+        "bot_config": bot_config,
+        "next_steps": next_steps,
     }
 
 

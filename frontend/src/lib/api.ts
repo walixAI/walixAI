@@ -916,6 +916,12 @@ export const api = {
     entity_plural: string;
     pipeline_stages: Array<{ key: string; label: string; color: string }>;
     next_steps: string[];
+    bot_config_generated: boolean;
+    bot_config: {
+      system_prompt: string;
+      tone: string;
+      qualification_questions: Array<{ order: number; question: string; field_key: string }>;
+    } | null;
   }> {
     return request("/api/v1/onboarding/confirm", {
       method: "POST",

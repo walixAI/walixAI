@@ -92,7 +92,12 @@ export default function OnboardingWizard() {
   const [overriding, setOverriding] = useState(false);
 
   // Estado step 3
-  const [applyResult, setApplyResult] = useState<{ message: string; entity_name: string } | null>(null);
+  const [applyResult, setApplyResult] = useState<{
+    message: string;
+    entity_name: string;
+    bot_config_generated: boolean;
+    bot_config: { system_prompt: string; tone: string; qualification_questions: unknown[] } | null;
+  } | null>(null);
 
   // ── Analizar ──────────────────────────────────────────────────────────────
 
@@ -144,7 +149,12 @@ export default function OnboardingWizard() {
         override_industry: selectedIndustry !== analysis?.industry_key,
       }),
     onSuccess: (data) => {
-      setApplyResult({ message: data.message, entity_name: data.entity_name });
+      setApplyResult({
+        message: data.message,
+        entity_name: data.entity_name,
+        bot_config_generated: data.bot_config_generated ?? false,
+        bot_config: data.bot_config ?? null,
+      });
     },
     onError: () => {
       toast.error("Error al configurar. Intenta de nuevo.");
@@ -159,7 +169,9 @@ export default function OnboardingWizard() {
 
   useEffect(() => {
     if (applyResult) {
-      const t = setTimeout(() => navigate("/dashboard"), 2500);
+      // Dar más tiempo si el bot config se generó para que el usuario lo lea
+      const delay = applyResult.bot_config_generated ? 4000 : 3000;
+      const t = setTimeout(() => navigate("/dashboard"), delay);
       return () => clearTimeout(t);
     }
   }, [applyResult, navigate]);
@@ -479,7 +491,12 @@ function StepApplying({
   result,
   industryLabel,
 }: {
-  result: { message: string; entity_name: string } | null;
+  result: {
+    message: string;
+    entity_name: string;
+    bot_config_generated: boolean;
+    bot_config: { system_prompt: string; tone: string; qualification_questions: unknown[] } | null;
+  } | null;
   industryLabel: string;
 }) {
   if (result) {
@@ -490,11 +507,24 @@ function StepApplying({
         </div>
         <div className="space-y-2">
           <h2 className="text-xl font-semibold">{result.message}</h2>
-          <p className="text-sm text-muted-foreground">
+
+          {result.bot_config_generated ? (
+            <div className="flex items-center justify-center gap-1.5 text-sm text-success">
+              <CheckCircle2 className="h-4 w-4" />
+              <span>Bot de WhatsApp configurado automáticamente</span>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Puedes configurar tu bot de WhatsApp en{" "}
+              <span className="font-medium text-foreground">Configuración → Bot IA</span>
+            </p>
+          )}
+
+          <p className="text-xs text-muted-foreground mt-1">
             Redirigiendo a tu dashboard…
           </p>
         </div>
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -507,6 +537,9 @@ function StepApplying({
         <p className="text-sm text-muted-foreground">
           Creando el pipeline para{" "}
           <span className="font-medium text-foreground">{industryLabel}</span>
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Generando la configuración inicial del bot con IA…
         </p>
       </div>
     </div>
