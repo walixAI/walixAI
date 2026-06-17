@@ -193,11 +193,24 @@ async def confirm_onboarding(
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
 
+    # Recuperar extracted_data de la sesión si existe, o inferir ahora
+    extracted_data: dict = {}
+    try:
+        analyze_result = await _inference_svc.analyze(
+            text=body.description,
+            session_id=None,
+            turn=1,
+            db=db,
+        )
+        extracted_data = analyze_result.extracted_data or {}
+    except Exception:
+        pass
+
     summary = await _setup_svc.apply_industry_template(
         tenant=tenant,
         industry_key=body.industry_key,
         onboarding_description=body.description,
-        extracted_data={},
+        extracted_data=extracted_data,
         db=db,
     )
 

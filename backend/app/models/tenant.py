@@ -89,6 +89,11 @@ class Tenant(Base):
         Numeric(10, 2), nullable=True
     )
 
+    # ── Sprint 12: Bot config desde onboarding ────────────────────────────────
+    onboarding_extracted_data: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True
+    )
+
     companies: Mapped[list["Company"]] = relationship(
         back_populates="tenant", cascade="all, delete-orphan"
     )
@@ -165,5 +170,16 @@ class Branch(Base):
     )
     bot_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
     business_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Sprint 12: Bot config generada desde onboarding ───────────────────────
+    bot_system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bot_tone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    bot_qualification_questions: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    bot_config_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    bot_config_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     company: Mapped["Company"] = relationship(back_populates="branches")

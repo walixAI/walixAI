@@ -126,6 +126,19 @@ class BotConfigOut(BaseModel):
     branch_name: str
     business_description: str | None
     latest_draft_id: uuid.UUID | None
+    # Sprint 12 — config generada desde onboarding
+    bot_system_prompt: str | None = None
+    bot_tone: str | None = None
+    bot_qualification_questions: list | None = None
+    bot_config_generated_at: str | None = None
+    bot_config_updated_at: str | None = None
+    onboarding_description: str | None = None
+
+
+class BotConfigUpdateIn(BaseModel):
+    bot_system_prompt: str | None = None
+    bot_tone: str | None = None
+    bot_qualification_questions: list | None = None
 
 
 @router.get("/{branch_id}/bot-config", response_model=BotConfigOut)
@@ -135,12 +148,15 @@ async def get_bot_config(
     db: AsyncSession = Depends(get_db),
 ) -> BotConfigOut:
     from app.models.onboarding import OnboardingDraft
+    from app.models.tenant import Tenant
     from sqlalchemy import desc
 
     await _require_branch_access(current_user, branch_id, db)
     branch = await db.get(Branch, branch_id)
     if not branch or branch.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sucursal no encontrada")
+
+    tenant = await db.get(Tenant, branch.tenant_id)
 
     draft_result = await db.execute(
         select(OnboardingDraft)
@@ -157,7 +173,103 @@ async def get_bot_config(
         branch_name=branch.name,
         business_description=branch.business_description,
         latest_draft_id=latest_draft.id if latest_draft else None,
+        bot_system_prompt=branch.bot_system_prompt,
+        bot_tone=branch.bot_tone,
+        bot_qualification_questions=branch.bot_qualification_questions,
+        bot_config_generated_at=branch.bot_config_generated_at.isoformat() if branch.bot_config_generated_at else None,
+        bot_config_updated_at=branch.bot_config_updated_at.isoformat() if branch.bot_config_updated_at else None,
+        onboarding_description=tenant.onboarding_description if tenant else None,
     )
+
+
+@router.patch("/{branch_id}/bot-config")
+async def update_bot_config(
+    branch_id: uuid.UUID,
+    body: BotConfigUpdateIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BotConfigOut:
+    """Guarda ediciones manuales del owner/it sobre la config del bot."""
+    from datetime import datetime, timezone
+    from app.models.onboarding import OnboardingDraft
+    from app.models.tenant import Tenant
+    from sqlalchemy import desc
+
+    if current_user.role not in (UserRole.OWNER, UserRole.IT):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo owner o IT pueden editar la config del bot")
+
+    await _require_branch_access(current_user, branch_id, db)
+    branch = await db.get(Branch, branch_id)
+    if not branch or branch.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sucursal no encontrada")
+
+    if body.bot_system_prompt is not None:
+        branch.bot_system_prompt = body.bot_system_prompt
+    if body.bot_tone is not None:
+        branch.bot_tone = body.bot_tone
+    if body.bot_qualification_questions is not None:
+        branch.bot_qualification_questions = body.bot_qualification_questions
+
+    branch.bot_config_updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(branch)
+
+    tenant = await db.get(Tenant, branch.tenant_id)
+    draft_result = await db.execute(
+        select(OnboardingDraft).where(OnboardingDraft.branch_id == branch_id)
+        .order_by(desc(OnboardingDraft.created_at)).limit(1)
+    )
+    latest_draft = draft_result.scalar_one_or_none()
+
+    return BotConfigOut(
+        onboarding_status=branch.onboarding_status,
+        bot_name=branch.bot_name,
+        industry=branch.industry,
+        branch_name=branch.name,
+        business_description=branch.business_description,
+        latest_draft_id=latest_draft.id if latest_draft else None,
+        bot_system_prompt=branch.bot_system_prompt,
+        bot_tone=branch.bot_tone,
+        bot_qualification_questions=branch.bot_qualification_questions,
+        bot_config_generated_at=branch.bot_config_generated_at.isoformat() if branch.bot_config_generated_at else None,
+        bot_config_updated_at=branch.bot_config_updated_at.isoformat() if branch.bot_config_updated_at else None,
+        onboarding_description=tenant.onboarding_description if tenant else None,
+    )
+
+
+@router.post("/{branch_id}/bot-config/regenerate")
+async def regenerate_bot_config(
+    branch_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Regenera la config del bot desde la descripción del onboarding usando Claude."""
+    from app.models.tenant import Tenant
+    from app.services.bot_config_generator import bot_config_generator
+
+    if current_user.role not in (UserRole.OWNER, UserRole.IT):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo owner o IT pueden regenerar la config")
+
+    await _require_branch_access(current_user, branch_id, db)
+    branch = await db.get(Branch, branch_id)
+    if not branch or branch.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sucursal no encontrada")
+
+    tenant = await db.get(Tenant, branch.tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+
+    config = await bot_config_generator.regenerate_for_branch(
+        branch=branch, tenant=tenant, db=db,
+    )
+    if config is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No hay descripción del negocio disponible para generar la configuración",
+        )
+
+    await db.commit()
+    return {"message": "Configuración regenerada correctamente.", **config}
 
 
 # ── Meta Lead Ads config ───────────────────────────────────────────────────────

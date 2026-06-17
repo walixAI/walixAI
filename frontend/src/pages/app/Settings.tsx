@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Copy, ChevronRight, ChevronLeft, Loader2, Pencil, Unplug, Zap, Bot, Settings2 } from "lucide-react";
+import { CheckCircle2, Copy, ChevronRight, ChevronLeft, Loader2, Pencil, Unplug, Zap, Bot, Settings2, RefreshCw, Plus, Trash2, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import { api, type MetaConfigIn } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
@@ -363,23 +364,16 @@ function ConnectedCard({
 
 // ── Bot config card ────────────────────────────────────────────────────────────
 
-const INDUSTRY_LABELS: Record<string, string> = {
-  salud: "Salud",
-  inmobiliaria: "Inmobiliaria",
-  educacion: "Educacion",
-  fintech: "Fintech / Seguros",
-  otro: "Otro",
-};
-
-const STATUS_META: Record<string, { label: string; className: string }> = {
-  pending:  { label: "Sin configurar", className: "bg-muted text-muted-foreground" },
-  draft:    { label: "Borrador",       className: "bg-yellow-100 text-yellow-700" },
-  approved: { label: "Activo",         className: "bg-emerald-100 text-emerald-700" },
-  active:   { label: "Activo",         className: "bg-emerald-100 text-emerald-700" },
-};
+const TONE_OPTIONS = [
+  { value: "amigable",    label: "Amigable — cercano y cálido" },
+  { value: "profesional", label: "Profesional — claro y directo" },
+  { value: "formal",      label: "Formal — institucional" },
+  { value: "cercano",     label: "Cercano — como un conocido de confianza" },
+];
 
 function BotConfigCard({ branchId, canManage }: { branchId: string; canManage: boolean }) {
   const navigate = useNavigate();
+  const qc = useQueryClient();
 
   const { data: botConfig, isLoading } = useQuery({
     queryKey: ["bot-config", branchId],
@@ -387,76 +381,329 @@ function BotConfigCard({ branchId, canManage }: { branchId: string; canManage: b
     enabled: !!branchId && canManage,
   });
 
-  const statusMeta =
-    STATUS_META[botConfig?.onboarding_status ?? "pending"] ?? STATUS_META.pending;
+  const [editingPrompt, setEditingPrompt] = useState(false);
+  const [promptDraft, setPromptDraft] = useState("");
+  const [toneDraft, setToneDraft] = useState("");
+
+  // KB fragment state
+  const [showAddFragment, setShowAddFragment] = useState(false);
+  const [fragTitle, setFragTitle] = useState("");
+  const [fragContent, setFragContent] = useState("");
+
+  const saveMutation = useMutation({
+    mutationFn: (data: Parameters<typeof api.updateBotConfig>[1]) =>
+      api.updateBotConfig(branchId, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bot-config", branchId] });
+      setEditingPrompt(false);
+      toast.success("Configuración guardada");
+    },
+    onError: () => toast.error("Error al guardar"),
+  });
+
+  const regenMutation = useMutation({
+    mutationFn: () => api.regenerateBotConfig(branchId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bot-config", branchId] });
+      toast.success("Config regenerada desde la descripción del negocio");
+    },
+    onError: () => toast.error("No hay descripción disponible para regenerar"),
+  });
+
+  const addFragMutation = useMutation({
+    mutationFn: () => api.addKBFragment({ title: fragTitle, content: fragContent }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["kb-status"] });
+      setShowAddFragment(false);
+      setFragTitle("");
+      setFragContent("");
+      toast.success("Fragmento agregado al Knowledge Base");
+    },
+    onError: () => toast.error("Error al agregar fragmento (verifica OPENAI_API_KEY)"),
+  });
+
+  const { data: kbStatus } = useQuery({
+    queryKey: ["kb-status"],
+    queryFn: () => api.getKBStatus(),
+    enabled: canManage,
+    staleTime: 60_000,
+  });
+
+  const deleteFragMutation = useMutation({
+    mutationFn: (docId: string) => api.deleteKBFragment(docId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["kb-status"] });
+      toast.success("Fragmento eliminado");
+    },
+  });
+
+  const hasGeneratedConfig = !!botConfig?.bot_system_prompt;
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5 shadow-card space-y-4">
-      <div className="flex items-start justify-between gap-4">
+    <div className="rounded-xl border border-border bg-card shadow-card divide-y divide-border">
+      {/* Header */}
+      <div className="p-5 flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl bg-primary flex items-center justify-center shrink-0">
             <Bot className="h-5 w-5 text-primary-foreground" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold">Bot IA</h2>
+            <h2 className="text-sm font-semibold">Bot IA — WhatsApp</h2>
             <p className="text-xs text-muted-foreground">
-              Configura el agente de WhatsApp, pipeline y criterios de calificacion.
+              {hasGeneratedConfig
+                ? "Config generada automáticamente desde el onboarding. Puedes editarla aquí."
+                : "Configura el agente de WhatsApp y los criterios de calificación."}
             </p>
           </div>
         </div>
-        {botConfig && (
-          <span className={cn("text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0", statusMeta.className)}>
-            {statusMeta.label}
+        {hasGeneratedConfig && (
+          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 shrink-0">
+            Activo
           </span>
         )}
       </div>
 
       {!canManage ? (
-        <p className="text-xs text-muted-foreground">
-          Solo el owner o el equipo de IT puede gestionar esta configuracion.
-        </p>
+        <div className="p-5">
+          <p className="text-xs text-muted-foreground">Solo owner o IT pueden gestionar la config del bot.</p>
+        </div>
       ) : isLoading ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+        <div className="p-5 flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           Cargando...
         </div>
-      ) : botConfig && botConfig.onboarding_status !== "pending" ? (
-        <div className="space-y-3">
-          <div className="border border-border rounded-lg divide-y divide-border">
-            {botConfig.bot_name && (
-              <Row label="Nombre del bot" value={botConfig.bot_name} />
-            )}
-            {botConfig.industry && (
-              <Row label="Industria" value={INDUSTRY_LABELS[botConfig.industry] ?? botConfig.industry} />
-            )}
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              botConfig.latest_draft_id
-                ? navigate(`/onboarding/preview/${botConfig.latest_draft_id}`)
-                : navigate(`/onboarding/new?branch_id=${branchId}`)
-            }
-          >
-            <Settings2 className="h-3.5 w-3.5 mr-1.5" />
-            Reconfigurar bot
-          </Button>
+      ) : !hasGeneratedConfig ? (
+        /* ── Sin config generada ── */
+        <div className="p-5 space-y-3">
+          {botConfig?.onboarding_description ? (
+            <>
+              <p className="text-xs text-muted-foreground">
+                El onboarding está completo. Genera la config del bot automáticamente desde tu descripción del negocio.
+              </p>
+              <Button
+                size="sm"
+                onClick={() => regenMutation.mutate()}
+                disabled={regenMutation.isPending}
+              >
+                {regenMutation.isPending
+                  ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+                Generar config del bot con IA
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">
+                Primero completa el onboarding para que Walix conozca tu negocio.
+              </p>
+              <Button size="sm" onClick={() => navigate(`/onboarding/new?branch_id=${branchId}`)}>
+                <Bot className="h-3.5 w-3.5 mr-1.5" />
+                Iniciar onboarding
+              </Button>
+            </>
+          )}
         </div>
       ) : (
-        <div className="space-y-3">
-          <p className="text-xs text-muted-foreground">
-            Aun no has configurado el bot para esta sucursal.
-          </p>
-          <Button
-            size="sm"
-            onClick={() => navigate(`/onboarding/new?branch_id=${branchId}`)}
-          >
-            <Bot className="h-3.5 w-3.5 mr-1.5" />
-            Configurar bot
-          </Button>
-        </div>
+        /* ── Config generada — mostrar y editar ── */
+        <>
+          {/* Tono */}
+          <div className="p-5 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tono del bot</p>
+            </div>
+            <Select
+              value={toneDraft || botConfig.bot_tone || "amigable"}
+              onValueChange={(v) => {
+                setToneDraft(v);
+                saveMutation.mutate({ bot_tone: v });
+              }}
+              disabled={saveMutation.isPending}
+            >
+              <SelectTrigger className="h-8 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TONE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value} className="text-sm">{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* System prompt */}
+          <div className="p-5 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">System prompt</p>
+              {!editingPrompt && (
+                <button
+                  onClick={() => { setPromptDraft(botConfig.bot_system_prompt ?? ""); setEditingPrompt(true); }}
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                >
+                  <Pencil className="h-3 w-3" /> Editar
+                </button>
+              )}
+            </div>
+            {editingPrompt ? (
+              <div className="space-y-2">
+                <Textarea
+                  value={promptDraft}
+                  onChange={(e) => setPromptDraft(e.target.value)}
+                  rows={8}
+                  className="text-sm font-mono"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    disabled={saveMutation.isPending}
+                    onClick={() => saveMutation.mutate({ bot_system_prompt: promptDraft })}
+                  >
+                    {saveMutation.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
+                    Guardar
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditingPrompt(false)}>
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-foreground/80 bg-muted rounded-lg p-3 leading-relaxed whitespace-pre-wrap font-mono">
+                {botConfig.bot_system_prompt}
+              </p>
+            )}
+          </div>
+
+          {/* Preguntas de calificación */}
+          {botConfig.bot_qualification_questions && botConfig.bot_qualification_questions.length > 0 && (
+            <div className="p-5 space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Preguntas de calificación</p>
+              <div className="space-y-1.5">
+                {botConfig.bot_qualification_questions.map((q, i) => (
+                  <div key={i} className="flex items-start gap-2 text-sm">
+                    <span className="text-xs font-bold text-muted-foreground mt-0.5 w-4 shrink-0">{q.order}.</span>
+                    <div className="flex-1">
+                      <p>{q.question}</p>
+                      <p className="text-[10px] text-muted-foreground font-mono">{q.field_key}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Regenerar */}
+          <div className="p-5">
+            <button
+              onClick={() => regenMutation.mutate()}
+              disabled={regenMutation.isPending}
+              className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1.5 transition-colors"
+            >
+              {regenMutation.isPending
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <RefreshCw className="h-3 w-3" />}
+              Regenerar desde descripción del negocio
+            </button>
+            {botConfig.bot_config_generated_at && (
+              <p className="text-[10px] text-muted-foreground/60 mt-1">
+                Generado: {new Date(botConfig.bot_config_generated_at).toLocaleDateString("es-MX")}
+                {botConfig.bot_config_updated_at && ` · Editado: ${new Date(botConfig.bot_config_updated_at).toLocaleDateString("es-MX")}`}
+              </p>
+            )}
+          </div>
+        </>
       )}
+
+      {/* ── Knowledge Base ── */}
+      <div className="p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <BookOpen className="h-4 w-4 text-muted-foreground" />
+            <p className="text-sm font-semibold">Knowledge Base</p>
+            {kbStatus && (
+              <span className="text-[11px] text-muted-foreground">
+                {kbStatus.total_documents} doc{kbStatus.total_documents !== 1 ? "s" : ""} · {kbStatus.total_chunks} fragmentos
+              </span>
+            )}
+          </div>
+          {canManage && (
+            <button
+              onClick={() => setShowAddFragment(!showAddFragment)}
+              className="text-xs text-primary hover:underline flex items-center gap-1"
+            >
+              <Plus className="h-3 w-3" /> Agregar texto
+            </button>
+          )}
+        </div>
+
+        {/* Add fragment form */}
+        {showAddFragment && (
+          <div className="border border-border rounded-lg p-4 space-y-3 bg-muted/30">
+            <p className="text-xs text-muted-foreground">
+              Pega cualquier texto que el bot deba conocer: preguntas frecuentes, servicios, precios, horarios...
+            </p>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Título</Label>
+              <Input
+                placeholder="ej. Servicios y precios"
+                value={fragTitle}
+                onChange={(e) => setFragTitle(e.target.value)}
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Contenido</Label>
+              <Textarea
+                placeholder="Escribe o pega el texto que el bot debe conocer..."
+                value={fragContent}
+                onChange={(e) => setFragContent(e.target.value)}
+                rows={5}
+                className="text-sm"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                disabled={!fragTitle || !fragContent || addFragMutation.isPending}
+                onClick={() => addFragMutation.mutate()}
+              >
+                {addFragMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                Indexar en KB
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowAddFragment(false)}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Documents list */}
+        {kbStatus && kbStatus.documents.length > 0 && (
+          <div className="divide-y divide-border border border-border rounded-lg overflow-hidden">
+            {kbStatus.documents.map((doc) => (
+              <div key={doc.filename} className="flex items-center gap-3 px-4 py-2.5">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{doc.title}</p>
+                  <p className="text-[10px] text-muted-foreground">{doc.chunk_count} fragmentos</p>
+                </div>
+                {canManage && "id" in doc && (
+                  <button
+                    onClick={() => deleteFragMutation.mutate((doc as { id: string }).id)}
+                    disabled={deleteFragMutation.isPending}
+                    className="text-muted-foreground hover:text-danger transition-colors shrink-0"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {kbStatus && kbStatus.documents.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            El Knowledge Base está vacío. Agrega textos para que el bot responda preguntas específicas de tu negocio.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

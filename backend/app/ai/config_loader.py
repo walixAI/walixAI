@@ -1,9 +1,10 @@
 """Branch AI configuration loader for Walix.
 
 Resolution order for get_branch_config():
-  1. branch.ai_config (custom JSONB) when onboarding_status == "active"
-  2. INDUSTRY_TEMPLATES[branch.industry]  (default for that vertical)
-  3. INDUSTRY_TEMPLATES["salud"]          (global fallback)
+  1. branch.bot_system_prompt (Sprint 12 — generado/editado desde onboarding)
+  2. branch.ai_config (custom JSONB) when onboarding_status == "active"
+  3. INDUSTRY_TEMPLATES[branch.industry]  (default for that vertical)
+  4. INDUSTRY_TEMPLATES["salud"]          (global fallback)
 
 This module is the single point of truth for:
   - Building the 2-layer base system prompt consumed by bot_engine.py
@@ -31,6 +32,14 @@ async def get_branch_config(branch_id: str | uuid.UUID, db: AsyncSession) -> dic
 
     if branch is None:
         return get_default_config("salud")
+
+    # Sprint 12: bot_system_prompt tiene prioridad sobre ai_config legacy
+    if branch.bot_system_prompt:
+        base = get_default_config(branch.industry or "salud")
+        config: dict[str, Any] = {**base, "bot_persona": {**base.get("bot_persona", {}), "system_prompt": branch.bot_system_prompt}}
+        if branch.bot_qualification_questions:
+            config["_qualification_questions"] = branch.bot_qualification_questions
+        return config
 
     if branch.ai_config and branch.onboarding_status == "active":
         return branch.ai_config

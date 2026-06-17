@@ -51,6 +51,7 @@ class TenantSetupService:
         tenant.entity_plural = template["entity_plural"]
         tenant.contact_statuses_config = template["contact_statuses"]
         tenant.onboarding_description = onboarding_description
+        tenant.onboarding_extracted_data = extracted_data or {}
         tenant.onboarding_completed_at = datetime.now(timezone.utc)
 
         # c) Archivar stages anteriores del tenant.
@@ -95,5 +96,18 @@ class TenantSetupService:
 
 
 async def _post_onboarding_hook(tenant_id: Any, extracted_data: dict, db: AsyncSession) -> None:
-    """Placeholder para integración futura con config_agent post-onboarding."""
-    pass
+    """Genera la config del bot WhatsApp automáticamente desde la descripción del onboarding."""
+    from app.models.tenant import Tenant
+    from app.services.bot_config_generator import bot_config_generator
+
+    tenant = await db.get(Tenant, tenant_id)
+    if tenant is None:
+        return
+    try:
+        await bot_config_generator.generate_and_apply(
+            tenant=tenant,
+            extracted_data=extracted_data,
+            db=db,
+        )
+    except Exception:
+        logger.warning("post_onboarding_hook: bot config generation failed for tenant %s", tenant_id)

@@ -130,6 +130,35 @@ export interface BotConfigOut {
   branch_name: string;
   business_description: string | null;
   latest_draft_id: string | null;
+  // Sprint 12 — config generada desde onboarding
+  bot_system_prompt: string | null;
+  bot_tone: string | null;
+  bot_qualification_questions: Array<{ order: number; question: string; field_key: string }> | null;
+  bot_config_generated_at: string | null;
+  bot_config_updated_at: string | null;
+  onboarding_description: string | null;
+}
+
+export interface KBFragmentOut {
+  id: string;
+  title: string;
+  chunk_count: number;
+  indexed_at: string | null;
+}
+
+export interface KBDocumentStatus {
+  id?: string;
+  filename: string;
+  title: string;
+  chunk_count: number;
+  indexed_at: string | null;
+}
+
+export interface KBStatusResponse {
+  documents: KBDocumentStatus[];
+  total_documents: number;
+  total_chunks: number;
+  last_indexed: string | null;
 }
 
 export interface AgentOut {
@@ -1020,6 +1049,32 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ revenue_per_conversion }),
     });
+  },
+
+  async updateBotConfig(
+    branchId: string,
+    data: { bot_system_prompt?: string; bot_tone?: string; bot_qualification_questions?: Array<{ order: number; question: string; field_key: string }> },
+  ): Promise<BotConfigOut> {
+    return request(`/api/branches/${branchId}/bot-config`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async regenerateBotConfig(branchId: string): Promise<{ message: string; system_prompt: string; tone: string; qualification_questions: unknown[] }> {
+    return request(`/api/branches/${branchId}/bot-config/regenerate`, { method: "POST" });
+  },
+
+  async addKBFragment(data: { title: string; content: string }): Promise<KBFragmentOut> {
+    return request("/api/kb/fragments", { method: "POST", body: JSON.stringify(data) });
+  },
+
+  async deleteKBFragment(documentId: string): Promise<void> {
+    return request(`/api/kb/fragments/${documentId}`, { method: "DELETE" });
+  },
+
+  async getKBStatus(): Promise<KBStatusResponse> {
+    return request("/api/kb/status");
   },
 
   // Agent suggestions
