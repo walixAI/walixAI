@@ -30,7 +30,7 @@ import os
 if _tdb := os.environ.get("TEST_DATABASE_URL"):
     os.environ["DATABASE_URL"] = _tdb
 
-NEED_WORKER = "--no-worker" not in sys.argv
+NEED_WORKER = "--no-worker" not in sys.argv and os.environ.get("APP_ENV") != "test"
 ROOT = Path(__file__).resolve().parent.parent
 
 _PASS = "✓ PASS"
@@ -93,6 +93,12 @@ def check_a() -> None:
 
 def check_b() -> None:
     print("\nb) Ejecución de aggregate_all_metrics ────────────────────")
+    if not NEED_WORKER:
+        # En modo --no-worker/CI no intentamos conectar a Redis
+        report("Tarea encolada en Redis", None, "omitido en modo --no-worker/CI")
+        report("Resultado de ejecución", None, "omitido en modo --no-worker/CI")
+        return
+
     from app.tasks.metrics_tasks import aggregate_all_metrics
 
     try:
@@ -100,10 +106,6 @@ def check_b() -> None:
         report(f"Tarea encolada (id={task_result.id[:16]}...)", True)
     except Exception as exc:
         report("Tarea encolada en Redis", False, str(exc))
-        return
-
-    if not NEED_WORKER:
-        report("Resultado de ejecución", None, "omitido con --no-worker")
         return
 
     print("   Esperando resultado (máx 30 s) — requiere worker activo...")

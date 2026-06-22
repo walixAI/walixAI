@@ -119,14 +119,19 @@ jobs:
       LANGFUSE_HOST: https://us.cloud.langfuse.com
       FRONTEND_URL: http://localhost:3000
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY_TEST }}
-      # Tests que necesitan datos pre-sembrados, Celery, o servicios externos
+      # Tests que necesitan servicios externos genuinamente ausentes en CI:
+      #   test_handoff:      asistente@clinica.com + flujo WA complejo con conversaciones
+      #   test_meta_leads:   Meta Graph API para recuperar leadgen (step 3)
+      #   test_qualification: PHONE_NUMBER_ID real + Claude para el bot conversacional
+      #   test_sprint5:      /api/ai/command llama directamente a Claude
+      #   test_sprint6:      follow-up agent llama directamente a Claude
+      #   test_billing:      Stripe API (checks b,c) + test3@mail.com no existe en seed
+      #   test_rag:          OPENAI_API_KEY + KB indexada con embeddings
+      #   test_roi:          usuario test3@mail.com no existe en seed_ci.py
       SKIP_TESTS: >-
-        test_rls.py,test_nomenclatura.py,test_handoff.py,test_meta_leads.py,
-        test_qualification.py,test_sprint5.py,test_sprint6.py,test_billing.py,
-        test_celery.py,test_rag.py,test_roi.py,test_pipeline_api.py,
-        test_pipeline_ai.py,test_dashboard.py,test_deals.py,test_pipeline.py,
-        test_stage_probability.py,test_deal_owner.py,test_stage_history_endpoint.py,
-        test_bot_config_from_onboarding.py
+        test_handoff.py,test_meta_leads.py,test_qualification.py,
+        test_sprint5.py,test_sprint6.py,test_billing.py,test_rag.py,
+        test_roi.py
 
     steps:
       - uses: actions/checkout@v4
@@ -142,6 +147,9 @@ jobs:
 
       - name: Run Alembic migrations
         run: alembic upgrade head
+
+      - name: Seed CI database
+        run: python scripts/seed_ci.py
 
       - name: Start backend
         run: uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level warning &

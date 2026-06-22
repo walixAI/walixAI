@@ -69,6 +69,13 @@ async def setup_test_role(conn: asyncpg.Connection) -> None:
 
 
 async def cleanup_test_role(conn: asyncpg.Connection) -> None:
+    # REVOKE must come before DROP ROLE or Postgres raises DependentObjectsStillExistError
+    await conn.execute(
+        f"REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM {_TEST_ROLE}"
+    )
+    await conn.execute(
+        f"REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM {_TEST_ROLE}"
+    )
     await conn.execute(f"DROP ROLE IF EXISTS {_TEST_ROLE}")
 
 
