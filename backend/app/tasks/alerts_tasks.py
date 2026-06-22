@@ -46,58 +46,60 @@ def run_daily_summaries() -> dict:
     return asyncio.run(_run())
 
 
-@celery_app.task(name="app.tasks.alerts_tasks.detect_unresponded_leads")
-def detect_unresponded_leads() -> dict:
-    """Alert assigned users about leads that have exceeded their no-response threshold."""
+async def _async_detect_unresponded() -> dict:
+    """Async core of detect_unresponded_leads — importable for tests/scripts."""
     from sqlalchemy import or_, select
     from app.core.database import AsyncSessionLocal
     from app.models.alert import AlertRule
     from app.models.lead import Lead, LeadStatus
     from app.services.alert_generator import _in_silence_window, send_no_response_alert
 
-    async def _run() -> dict:
-        now = datetime.now(timezone.utc)
-        alert_cooldown = now - timedelta(hours=4)
-        results = {"alerts_sent": 0, "errors": 0}
+    now = datetime.now(timezone.utc)
+    alert_cooldown = now - timedelta(hours=4)
+    results = {"alerts_sent": 0, "errors": 0}
 
-        async with AsyncSessionLocal() as db:
-            rules_result = await db.execute(
-                select(AlertRule).where(AlertRule.is_active.is_(True))
-            )
-            rules = rules_result.scalars().all()
+    async with AsyncSessionLocal() as db:
+        rules_result = await db.execute(
+            select(AlertRule).where(AlertRule.is_active.is_(True))
+        )
+        rules = rules_result.scalars().all()
 
-        for rule in rules:
-            if _in_silence_window(rule.silence_start, rule.silence_end):
-                continue
-            threshold_time = now - timedelta(hours=rule.threshold_hours)
-            try:
-                async with AsyncSessionLocal() as db:
-                    leads_result = await db.execute(
-                        select(Lead).where(
-                            Lead.branch_id == rule.branch_id,
-                            Lead.status.notin_([LeadStatus.PERDIDO, LeadStatus.CALIFICADO]),
-                            Lead.updated_at < threshold_time,
-                            or_(
-                                Lead.last_alert_at.is_(None),
-                                Lead.last_alert_at < alert_cooldown,
-                            ),
-                        ).limit(10)
-                    )
-                    lead_ids = [lead.id for lead in leads_result.scalars().all()]
+    for rule in rules:
+        if _in_silence_window(rule.silence_start, rule.silence_end):
+            continue
+        threshold_time = now - timedelta(hours=rule.threshold_hours)
+        try:
+            async with AsyncSessionLocal() as db:
+                leads_result = await db.execute(
+                    select(Lead).where(
+                        Lead.branch_id == rule.branch_id,
+                        Lead.status.notin_([LeadStatus.PERDIDO, LeadStatus.CALIFICADO]),
+                        Lead.updated_at < threshold_time,
+                        or_(
+                            Lead.last_alert_at.is_(None),
+                            Lead.last_alert_at < alert_cooldown,
+                        ),
+                    ).limit(10)
+                )
+                lead_ids = [lead.id for lead in leads_result.scalars().all()]
 
-                for lead_id in lead_ids:
-                    try:
-                        await send_no_response_alert(lead_id, rule.id)
-                        results["alerts_sent"] += 1
-                    except Exception:
-                        logger.exception("no_response_alert failed lead=%s", lead_id)
-                        results["errors"] += 1
-            except Exception:
-                logger.exception("detect_unresponded failed for rule=%s", rule.id)
-                results["errors"] += 1
-        return results
+            for lead_id in lead_ids:
+                try:
+                    await send_no_response_alert(lead_id, rule.id)
+                    results["alerts_sent"] += 1
+                except Exception:
+                    logger.exception("no_response_alert failed lead=%s", lead_id)
+                    results["errors"] += 1
+        except Exception:
+            logger.exception("detect_unresponded failed for rule=%s", rule.id)
+            results["errors"] += 1
+    return results
 
-    return asyncio.run(_run())
+
+@celery_app.task(name="app.tasks.alerts_tasks.detect_unresponded_leads")
+def detect_unresponded_leads() -> dict:
+    """Alert assigned users about leads that have exceeded their no-response threshold."""
+    return asyncio.run(_async_detect_unresponded())
 
 
 @celery_app.task(name="app.tasks.alerts_tasks.run_monthly_summaries")

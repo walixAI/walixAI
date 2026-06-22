@@ -1,197 +1,221 @@
-import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Kanban, List } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { api, type BoardLeadCard } from "@/lib/api";
-import { useAuth } from "@/hooks/useAuth";
-import { useAIBarStore } from "@/stores/aiBarStore";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
+import { useMemo, useState } from "react";
+import { Clock } from "lucide-react";
+import { PipelineHeader } from "@/components/pipeline/PipelineHeader";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
-import { ListView } from "@/components/pipeline/ListView";
-import { LeadDetailSheet } from "@/components/pipeline/LeadDetailSheet";
-
-type ViewMode = "kanban" | "list";
-const VIEW_KEY = "walix-pipeline-view";
+import { DealsListView } from "@/components/pipeline/DealsListView";
+import { NewDealDialog } from "@/components/pipeline/NewDealDialog";
+import { LostReasonDialog } from "@/components/pipeline/LostReasonDialog";
+import { DealDrawer } from "@/components/pipeline/DealDrawer";
+import { type PipelineFiltersValue } from "@/components/pipeline/PipelineFilters";
+import { AiAlertBanner } from "@/components/walix/AiAlertBanner";
+import { usePipelinePrefs } from "@/lib/usePipelinePrefs";
+import {
+  useStages, useDeals, useContactsLite,
+  type PipelineDeal, type PipelineStage,
+} from "@/lib/queries/pipeline";
 
 export default function Pipeline() {
-  const { user } = useAuth();
-  const { setContext } = useAIBarStore();
+  const [prefs, setPrefs] = usePipelinePrefs();
 
-  const [view, setView] = useState<ViewMode>(
-    () => (localStorage.getItem(VIEW_KEY) as ViewMode | null) ?? "kanban",
-  );
+  const { data: stages = [], isLoading: stagesLoading } = useStages();
+  const { data: deals = [], isLoading: dealsLoading } = useDeals();
+  const { data: contacts = [] } = useContactsLite();
 
-  const isMultiBranch = user?.role === "owner" || user?.role === "it";
-  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  // Filtros desde prefs (Date serializado como ISO)
+  const filters: PipelineFiltersValue = useMemo(() => ({
+    ownerName: prefs.filters.ownerName,
+    amountMin: prefs.filters.amountMin,
+    amountMax: prefs.filters.amountMax,
+    closeBefore: prefs.filters.closeBefore ? new Date(prefs.filters.closeBefore) : undefined,
+    source: prefs.filters.source,
+    tag: prefs.filters.tag,
+  }), [prefs.filters]);
 
-  const { data: branches = [] } = useQuery({
-    queryKey: ["branches"],
-    queryFn: () => api.listBranches(),
-    enabled: isMultiBranch,
-  });
+  const setFilters = (v: PipelineFiltersValue) =>
+    setPrefs({
+      ...prefs,
+      filters: {
+        ownerName: v.ownerName,
+        amountMin: v.amountMin,
+        amountMax: v.amountMax,
+        closeBefore: v.closeBefore ? v.closeBefore.toISOString() : null,
+        source: v.source,
+        tag: v.tag,
+      },
+    });
 
-  const branchId: string =
-    user?.branch_id ??
-    (selectedBranchId || branches[0]?.id) ??
-    "";
+  const view = prefs.view;
+  const setView = (v: "kanban" | "list") => setPrefs({ ...prefs, view: v });
+  const search = prefs.search;
+  const setSearch = (v: string) => setPrefs({ ...prefs, search: v });
 
-  // Advisor filter
-  const [advisorId, setAdvisorId] = useState<string>("all");
+  const [newDealOpen, setNewDealOpen] = useState(false);
+  const [newDealStage, setNewDealStage] = useState<string | null>(null);
+  const [lostDeal, setLostDeal] = useState<PipelineDeal | null>(null);
+  const [openDeal, setOpenDeal] = useState<PipelineDeal | null>(null);
 
-  const { data: team = [] } = useQuery({
-    queryKey: ["team", branchId],
-    queryFn: () => api.getTeam(branchId),
-    enabled: Boolean(branchId),
-    staleTime: 2 * 60_000,
-  });
+  const lostStage = stages.find((s) => s.isLost) ?? null;
 
-  // Lead detail sheet
-  const [selectedCard, setSelectedCard] = useState<{
-    leadId: string;
-    stageName: string;
-    stageColor: string | null;
-  } | null>(null);
-
-  // Update AI bar context when screen/branch changes
-  useEffect(() => {
-    if (branchId) setContext({ screen: "pipeline", branch_id: branchId });
-  }, [branchId, setContext]);
-
-  const handleViewChange = (v: ViewMode) => {
-    setView(v);
-    localStorage.setItem(VIEW_KEY, v);
+  // Resolución de contacto (nombre/color) desde el módulo de leads.
+  const contactById = useMemo(() => new Map(contacts.map((c) => [c.id, c])), [contacts]);
+  const contactName = (id: string | null) => {
+    if (!id) return undefined;
+    const c = contactById.get(id);
+    return c ? `${c.name}${c.lastName ? " " + c.lastName : ""}` : undefined;
   };
+  const contactColor = (id: string | null) => (id ? contactById.get(id)?.avatarColor ?? null : null);
 
-  const handleLeadClick = (
-    card: BoardLeadCard,
-    stageName: string,
-    stageColor: string | null,
-  ) => {
-    setSelectedCard({ leadId: card.id, stageName, stageColor });
-  };
+  // La fecha de última actividad viene en el propio deal (derivada por el backend).
+  const lastActivityByContact = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const d of deals) if (d.contactId) m.set(d.contactId, d.contactLastActivityAt);
+    return m;
+  }, [deals]);
+  const contactLastActivityAt = (id: string | null) => (id ? lastActivityByContact.get(id) ?? null : null);
 
-  const resolvedAdvisorId = advisorId === "all" ? null : advisorId;
-  const branchName = isMultiBranch
-    ? (branches.find((b) => b.id === branchId)?.name ?? "")
-    : "";
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const stageIds = new Set(stages.map((s) => s.id));
+    return deals.filter((d) => {
+      if (d.stageId && !stageIds.has(d.stageId)) return false;
+      if (filters.ownerName !== "all" && d.ownerName !== filters.ownerName) return false;
+      if (filters.amountMin && d.amount < Number(filters.amountMin)) return false;
+      if (filters.amountMax && d.amount > Number(filters.amountMax)) return false;
+      if (filters.closeBefore && d.expectedCloseDate && new Date(d.expectedCloseDate) > filters.closeBefore) return false;
+      if (filters.source !== "all" && d.source !== filters.source) return false;
+      if (filters.tag && !d.name.toLowerCase().includes(filters.tag.toLowerCase()) && !(d.notes ?? "").toLowerCase().includes(filters.tag.toLowerCase())) return false;
+      if (q) {
+        const cName = contactName(d.contactId)?.toLowerCase() ?? "";
+        const hay = `${d.name} ${d.notes ?? ""} ${cName}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [deals, filters, search, contactById, stages]);
+
+  const activeDeals = filtered.filter((d) => !d.isWon && !d.isLost);
+  const totalAmount = activeDeals.reduce((s, d) => s + d.amount, 0);
+  const weightedAmount = activeDeals.reduce((s, d) => s + (d.amount * d.probability) / 100, 0);
+
+  // Stale: >10 días sin actividad reciente del contacto / sin updates
+  const staleDeals = useMemo(() => {
+    const now = Date.now();
+    return activeDeals.filter((d) => {
+      const ref = (d.contactId ? lastActivityByContact.get(d.contactId) : null) ?? d.updatedAt;
+      return (now - new Date(ref).getTime()) / 86_400_000 > 10;
+    });
+  }, [activeDeals, lastActivityByContact]);
+  const staleAmount = staleDeals.reduce((s, d) => s + d.amount, 0);
+
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+  const closingThisMonth = activeDeals
+    .filter((d) => d.expectedCloseDate && new Date(d.expectedCloseDate) >= startOfMonth && new Date(d.expectedCloseDate) < endOfMonth)
+    .reduce((s, d) => s + d.amount, 0);
+
+  const closingPrevMonth = filtered
+    .filter((d) => d.expectedCloseDate && new Date(d.expectedCloseDate) >= startOfPrevMonth && new Date(d.expectedCloseDate) < startOfMonth)
+    .reduce((s, d) => s + d.amount, 0);
+
+  const closingDeltaPct =
+    closingPrevMonth > 0 ? ((closingThisMonth - closingPrevMonth) / closingPrevMonth) * 100 : null;
+
+  function openNewDeal(stage?: PipelineStage) {
+    setNewDealStage(stage?.id ?? null);
+    setNewDealOpen(true);
+  }
+
+  // Abre el DealDrawer (14C.3). El deal mostrado se re-deriva de la lista fresca por id,
+  // para que tras editar se vean los datos actualizados sin cerrar el drawer.
+  const onOpenDeal = (deal: PipelineDeal) => setOpenDeal(deal);
+  const openDealFresh = openDeal ? (deals.find((d) => d.id === openDeal.id) ?? openDeal) : null;
+
+  if (stagesLoading || dealsLoading) {
+    return <div className="py-20 text-center text-sm text-muted-foreground">Cargando pipeline…</div>;
+  }
 
   return (
-    <div className="h-full flex flex-col gap-4">
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 flex-wrap shrink-0">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Pipeline</h1>
-          {branchName && (
-            <p className="text-xs text-muted-foreground mt-0.5">{branchName}</p>
-          )}
-        </div>
+    <div className="space-y-4 max-w-full">
+      <PipelineHeader
+        view={view}
+        onView={setView}
+        filters={filters}
+        onFilters={setFilters}
+        search={search}
+        onSearch={setSearch}
+        onNew={() => openNewDeal()}
+        totalAmount={totalAmount}
+        weightedAmount={weightedAmount}
+        closingThisMonth={closingThisMonth}
+        closingDeltaPct={closingDeltaPct}
+        activeCount={activeDeals.length}
+      />
 
-        {/* View toggle */}
-        <div className="flex items-center rounded-lg border border-border overflow-hidden ml-auto">
-          <button
-            onClick={() => handleViewChange("kanban")}
-            className={cn(
-              "p-2 transition-colors",
-              view === "kanban"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted",
-            )}
-            aria-label="Vista kanban"
-          >
-            <Kanban className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => handleViewChange("list")}
-            className={cn(
-              "p-2 transition-colors",
-              view === "list"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted",
-            )}
-            aria-label="Vista lista"
-          >
-            <List className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* Branch selector (multi-branch roles only) */}
-        {isMultiBranch && branches.length > 1 && (
-          <Select value={branchId} onValueChange={setSelectedBranchId}>
-            <SelectTrigger className="h-8 w-44 text-xs">
-              <SelectValue placeholder="Selecciona sucursal" />
-            </SelectTrigger>
-            <SelectContent>
-              {branches.map((b) => (
-                <SelectItem key={b.id} value={b.id} className="text-xs">
-                  {b.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-
-        {/* Advisor filter */}
-        {team.length > 1 && (
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground shrink-0">Asesor</Label>
-            <Select value={advisorId} onValueChange={setAdvisorId}>
-              <SelectTrigger className="h-8 w-40 text-xs">
-                <SelectValue placeholder="Todos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all" className="text-xs">
-                  Todos
-                </SelectItem>
-                {team.map((member) => (
-                  <SelectItem key={member.id} value={member.id} className="text-xs">
-                    {member.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-      </div>
-
-      {/* ── Content ────────────────────────────────────────────────────────── */}
-      {!branchId ? (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-sm text-muted-foreground">
-            Selecciona una sucursal para ver el pipeline.
-          </p>
-        </div>
-      ) : view === "kanban" ? (
-        <div className="flex-1 overflow-x-auto min-h-0">
-          <KanbanBoard
-            branchId={branchId}
-            advisorId={resolvedAdvisorId}
-            onLeadClick={handleLeadClick}
-          />
-        </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto min-h-0">
-          <ListView
-            branchId={branchId}
-            advisorId={resolvedAdvisorId}
-            onLeadClick={handleLeadClick}
-          />
-        </div>
+      {staleDeals.length > 0 && (
+        <AiAlertBanner
+          variant="warning"
+          icon={<Clock className="h-4 w-4" />}
+          title={`${staleDeals.length} oportunidad${staleDeals.length === 1 ? "" : "es"} sin actividad hace más de 10 días`}
+          description={`Suman ${new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 }).format(staleAmount)} en pipeline. Revísalos antes de que se enfríen.`}
+        />
       )}
 
-      {/* Lead detail sheet */}
-      <LeadDetailSheet
-        leadId={selectedCard?.leadId ?? null}
-        stageName={selectedCard?.stageName}
-        stageColor={selectedCard?.stageColor}
-        onClose={() => setSelectedCard(null)}
+      {deals.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border bg-card py-16 px-6 text-center">
+          <h3 className="font-semibold text-lg">Crea tu primera oportunidad y empieza a cerrar</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            Organiza tus oportunidades en etapas y arrástralas entre columnas.
+          </p>
+          <button
+            onClick={() => openNewDeal()}
+            className="mt-4 inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:bg-primary/90"
+          >
+            + Nueva Oportunidad
+          </button>
+        </div>
+      ) : view === "kanban" ? (
+        <KanbanBoard
+          stages={stages}
+          deals={filtered}
+          contactName={contactName}
+          contactColor={contactColor}
+          contactLastActivityAt={contactLastActivityAt}
+          onOpenDeal={onOpenDeal}
+          onAddDeal={openNewDeal}
+          onRequestLost={setLostDeal}
+        />
+      ) : (
+        <DealsListView deals={filtered} contactName={contactName} onOpenDeal={onOpenDeal} />
+      )}
+
+      <NewDealDialog
+        open={newDealOpen}
+        onOpenChange={setNewDealOpen}
+        stages={stages}
+        defaultStageId={newDealStage}
+      />
+
+      <LostReasonDialog
+        open={!!lostDeal}
+        deal={lostDeal}
+        lostStage={lostStage}
+        onClose={() => setLostDeal(null)}
+      />
+
+      <DealDrawer
+        deal={openDealFresh}
+        stages={stages}
+        open={!!openDeal}
+        onClose={() => setOpenDeal(null)}
+        contactName={openDealFresh ? contactName(openDealFresh.contactId) : undefined}
       />
     </div>
   );
 }
+
+/* FASE 2 (removido): multi-pipeline (usePipelines/PipelineManagerDialog), DealDrawer,
+   QuickTaskDialog, BulkActionsBar, AiInsightsPanel, sugerencias IA, tasks/unread,
+   EmptyState/EmptyIllustration (reemplazado por bloque inline). */

@@ -308,6 +308,220 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// ── Opportunities ─────────────────────────────────────────────────────────────
+
+export interface OppCard {
+  id: string;
+  title: string;
+  amount: string | null;
+  currency: string;
+  probability: number | null;
+  close_date: string | null;
+  status: "open" | "won" | "lost";
+  stage_entered_at: string;
+  last_activity_at: string | null;
+  ai_suggestion: string | null;
+  ai_suggestion_urgency: string | null;
+  urgency_score: number | null;
+  assigned_to: string | null;
+  assigned_to_name: string | null;
+  lead_name: string | null;
+  lead_wa_phone: string | null;
+  days_in_stage: number;
+}
+
+export interface OppBoardStage {
+  id: string;
+  name: string;
+  slug: string;
+  color: string | null;
+  order_index: number;
+  is_won: boolean;
+  is_lost: boolean;
+  probability_default: number | null;
+  opportunities: OppCard[];
+  total: number;
+  total_amount: string;
+}
+
+export interface OppBoardRead {
+  stages: OppBoardStage[];
+  currency: string;
+}
+
+export interface OppForecastStage {
+  stage_id: string;
+  stage_name: string;
+  stage_color: string | null;
+  count: number;
+  total_amount: string;
+  weighted_amount: string;
+}
+
+export interface OppForecastRead {
+  stages: OppForecastStage[];
+  pipeline_total: string;
+  weighted_total: string;
+  currency: string;
+  active_count: number;
+  trend: "up" | "down" | "flat";
+}
+
+export interface OppStaleRead {
+  count: number;
+  total_amount: string;
+  items: OppCard[];
+}
+
+export interface OppRead {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  title: string;
+  amount: string | null;
+  currency: string;
+  probability: number | null;
+  close_date: string | null;
+  source: string | null;
+  status: "open" | "won" | "lost";
+  won_at: string | null;
+  lost_at: string | null;
+  lost_reason: string | null;
+  stage_entered_at: string;
+  last_activity_at: string | null;
+  ai_suggestion: string | null;
+  ai_suggestion_urgency: string | null;
+  urgency_score: number | null;
+  notes: string | null;
+  assigned_to: string | null;
+  assigned_to_name: string | null;
+  created_at: string;
+  updated_at: string;
+  lead: {
+    id: string;
+    name: string | null;
+    last_name: string | null;
+    wa_phone: string | null;
+  } | null;
+  stage: {
+    id: string;
+    name: string;
+    slug: string;
+    color: string | null;
+    order_index: number;
+    is_won: boolean;
+    is_lost: boolean;
+  } | null;
+  days_in_stage: number;
+}
+
+export interface OppCreateBody {
+  title: string;
+  lead_id?: string;
+  stage_id?: string;
+  assigned_to?: string;
+  amount?: string;
+  currency?: string;
+  probability?: number;
+  close_date?: string;
+  source?: string;
+  notes?: string;
+  branch_id?: string;
+}
+
+export interface OppUpdateBody {
+  title?: string;
+  lead_id?: string | null;
+  stage_id?: string | null;
+  assigned_to?: string | null;
+  amount?: string | null;
+  currency?: string;
+  probability?: number | null;
+  close_date?: string | null;
+  source?: string | null;
+  notes?: string | null;
+}
+
+export interface OppMarkLostBody {
+  lost_reason?: string;
+  reason_code?: string;
+}
+
+export interface OppListFilters {
+  branch_id?: string;
+  stage_id?: string;
+  status?: "open" | "won" | "lost";
+  assigned_to?: string;
+  search?: string;
+  min_amount?: number;
+  max_amount?: number;
+  close_date_before?: string;
+  source?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface OppListResponse {
+  items: OppRead[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface OppActivityOut {
+  id: string;
+  type: string;
+  description: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface OppHistoryOut {
+  id: string;
+  from_stage_id: string | null;
+  to_stage_id: string;
+  changed_by: string | null;
+  created_at: string;
+}
+
+export interface OppDetailRead extends OppRead {
+  activities: OppActivityOut[];
+  history: OppHistoryOut[];
+}
+
+// ── Pipeline AI ─────────────────────────────────────────────────────────────
+
+export interface OppNextStepOut {
+  text: string | null;
+  reasoning: string | null;
+  urgency: "high" | "medium" | "low" | null;
+}
+
+export interface OppProbabilityOut {
+  suggested: number;
+  signals: string[];
+  current: number | null;
+}
+
+export interface PipelineInsightRisk {
+  title: string;
+  severity: "high" | "medium" | "low";
+  description: string;
+}
+
+export interface PipelineInsightRecommendation {
+  title: string;
+  impact: "high" | "medium" | "low";
+  action: string;
+}
+
+export interface PipelineInsightsOut {
+  health_score: number;
+  summary: string;
+  risks: PipelineInsightRisk[];
+  recommendations: PipelineInsightRecommendation[];
+}
+
 // ── Platform Owner types ──────────────────────────────────────────────────────
 
 export interface RenewalItem {
@@ -1178,5 +1392,129 @@ export const api = {
 
   async reExecuteAutomation(id: string): Promise<AutomationOut> {
     return request(`/api/automations/${id}/re-execute`, { method: "POST" });
+  },
+
+  // ── Opportunities ──────────────────────────────────────────────────────────
+
+  async getOpportunityBoard(branchId?: string): Promise<OppBoardRead> {
+    const qs = new URLSearchParams();
+    if (branchId) qs.set("branch_id", branchId);
+    const q = qs.toString() ? `?${qs}` : "";
+    return request(`/api/opportunities/board${q}`);
+  },
+
+  async listOpportunities(filters: OppListFilters = {}): Promise<OppListResponse> {
+    const qs = new URLSearchParams();
+    (Object.entries(filters) as [string, string | number | undefined][]).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) qs.set(k, String(v));
+    });
+    const q = qs.toString() ? `?${qs}` : "";
+    return request(`/api/opportunities${q}`);
+  },
+
+  async createOpportunity(body: OppCreateBody): Promise<OppRead> {
+    return request("/api/opportunities", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  async getOpportunity(id: string): Promise<OppDetailRead> {
+    return request(`/api/opportunities/${id}`);
+  },
+
+  async updateOpportunity(id: string, patch: OppUpdateBody): Promise<OppRead> {
+    return request(`/api/opportunities/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  },
+
+  async moveOpportunityStage(id: string, stageId: string): Promise<OppRead> {
+    return request(`/api/opportunities/${id}/stage`, {
+      method: "PATCH",
+      body: JSON.stringify({ stage_id: stageId }),
+    });
+  },
+
+  async markOpportunityLost(id: string, body: OppMarkLostBody): Promise<OppRead> {
+    return request(`/api/opportunities/${id}/lost`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  async markOpportunityWon(id: string): Promise<OppRead> {
+    return request(`/api/opportunities/${id}/won`, { method: "POST" });
+  },
+
+  async bulkMoveOpportunities(ids: string[], stageId: string): Promise<OppRead[]> {
+    return request("/api/opportunities/bulk/stage", {
+      method: "POST",
+      body: JSON.stringify({ ids, stage_id: stageId }),
+    });
+  },
+
+  async bulkDeleteOpportunities(ids: string[]): Promise<{ deleted: number }> {
+    return request("/api/opportunities/bulk/delete", {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+  },
+
+  async deleteOpportunity(id: string): Promise<void> {
+    return request(`/api/opportunities/${id}`, { method: "DELETE" });
+  },
+
+  async getOpportunityForecast(branchId?: string): Promise<OppForecastRead> {
+    const qs = new URLSearchParams();
+    if (branchId) qs.set("branch_id", branchId);
+    const q = qs.toString() ? `?${qs}` : "";
+    return request(`/api/opportunities/forecast${q}`);
+  },
+
+  async getStaleOpportunities(branchId?: string, days = 10): Promise<OppStaleRead> {
+    const qs = new URLSearchParams({ days: String(days) });
+    if (branchId) qs.set("branch_id", branchId);
+    return request(`/api/opportunities/stale?${qs}`);
+  },
+
+  async exportOpportunitiesCsv(filters: OppListFilters = {}): Promise<Blob> {
+    const qs = new URLSearchParams();
+    (Object.entries(filters) as [string, string | number | undefined][]).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) qs.set(k, String(v));
+    });
+    const q = qs.toString() ? `?${qs}` : "";
+    const token = getToken();
+    const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8000";
+    const res = await fetch(`${BASE}/api/opportunities/export.csv${q}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.blob();
+  },
+
+  // ── Pipeline AI ────────────────────────────────────────────────────────────
+
+  async getOppNextStep(oppId: string): Promise<OppNextStepOut> {
+    return request(`/api/opportunities/${oppId}/ai/next-step`, { method: "POST" });
+  },
+
+  async getOppProbability(oppId: string): Promise<OppProbabilityOut> {
+    return request(`/api/opportunities/${oppId}/ai/probability`, { method: "POST" });
+  },
+
+  async getPipelineInsights(branchId: string): Promise<PipelineInsightsOut> {
+    return request("/api/opportunities/ai/insights", {
+      method: "POST",
+      body: JSON.stringify({ branch_id: branchId }),
+    });
+  },
+
+  async triggerBulkSuggestions(branchId: string): Promise<{ status: string; branch_id: string }> {
+    return request("/api/opportunities/ai/bulk-suggestions", {
+      method: "POST",
+      body: JSON.stringify({ branch_id: branchId }),
+    });
   },
 };

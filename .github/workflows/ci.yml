@@ -72,6 +72,90 @@ jobs:
       - name: Run tests
         run: pytest tests/sprint7/ -v --tb=short --timeout=60
 
+  # ── Backend integration scripts ─────────────────────────────────────────────
+  script-tests:
+    name: Backend — scripts de integración
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: walix
+          POSTGRES_PASSWORD: walix
+          POSTGRES_DB: walix_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U walix"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://walix:walix@localhost:5432/walix_test
+      TEST_DATABASE_URL: postgresql+asyncpg://walix:walix@localhost:5432/walix_test
+      REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: ci-secret-key-not-used-in-prod
+      APP_ENV: test
+      META_VERIFY_TOKEN: ci-verify-token
+      META_APP_SECRET: ci-app-secret
+      LANGFUSE_PUBLIC_KEY: ci-langfuse-public
+      LANGFUSE_SECRET_KEY: ci-langfuse-secret
+      LANGFUSE_HOST: https://us.cloud.langfuse.com
+      FRONTEND_URL: http://localhost:3000
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY_TEST }}
+      # Tests que necesitan datos pre-sembrados, Celery, o servicios externos
+      SKIP_TESTS: >-
+        test_rls.py,test_nomenclatura.py,test_handoff.py,test_meta_leads.py,
+        test_qualification.py,test_sprint5.py,test_sprint6.py,test_billing.py,
+        test_celery.py,test_rag.py,test_roi.py,test_pipeline_api.py,
+        test_pipeline_ai.py,test_dashboard.py,test_deals.py,test_pipeline.py,
+        test_stage_probability.py,test_deal_owner.py,test_stage_history_endpoint.py,
+        test_bot_config_from_onboarding.py
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Alembic migrations
+        run: alembic upgrade head
+
+      - name: Start backend
+        run: uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level warning &
+
+      - name: Wait for backend
+        run: |
+          for i in $(seq 1 30); do
+            curl -s http://localhost:8000/health > /dev/null && echo "Backend UP" && break
+            sleep 2
+          done
+
+      - name: Run integration scripts
+        run: bash scripts/run_all_tests.sh
+
   # ── Frontend lint + build ────────────────────────────────────────────────────
   frontend-lint:
     name: Frontend — lint + build

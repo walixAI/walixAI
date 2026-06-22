@@ -36,6 +36,10 @@ _PASS = "✓ PASS"
 _FAIL = "✗ FAIL"
 _SKIP = "– SKIP"
 
+# En CI (APP_ENV=test o sin ANTHROPIC_API_KEY) se omiten checks que llaman a Claude
+import os as _os
+CI_MODE = _os.environ.get("APP_ENV") == "test" or not _os.environ.get("ANTHROPIC_API_KEY")
+
 failures: list[str] = []
 _created_doc_ids: list[str] = []          # KB docs created during the test
 _original_bot_config: dict | None = None  # saved before modifications
@@ -110,6 +114,13 @@ def check_a(client: httpx.Client, token: str) -> dict | None:
     industry_key = r.json().get("industry_key") or "salud"
 
     # Step 2: confirm (triggers Claude bot config generation — may take ~15s)
+    if CI_MODE:
+        report("(a.2) POST /v1/onboarding/confirm (omitido en CI — sin ANTHROPIC_API_KEY)", None)
+        report("(a.3) bot_config_generated", None, "omitido en CI")
+        report("(a.4) bot_config.system_prompt", None, "omitido en CI")
+        report("(a.5) bot_config.tone", None, "omitido en CI")
+        report("(a.6) bot_config.qualification_questions", None, "omitido en CI")
+        return None
     print("        ↳ Llamando a confirm + Claude (puede tardar ~15s)…")
     t0 = time.monotonic()
     r2 = client.post(
@@ -169,9 +180,12 @@ def check_b(client: httpx.Client, token: str, branch_id: str) -> dict | None:
     report("(b.3) tone persistido", ok_tone, f"tone={cfg.get('tone')}")
     report("(b.4) qualification_questions persistidas", ok_questions,
            f"count={len(cfg.get('qualification_questions') or [])}")
-    report("(b.5) is_auto_generated = true", ok_auto,
-           f"is_auto_generated={cfg.get('is_auto_generated')}, "
-           f"updated_at={cfg.get('bot_config_updated_at')}")
+    if CI_MODE:
+        report("(b.5) is_auto_generated = true", None, "omitido en CI (confirm skipped)")
+    else:
+        report("(b.5) is_auto_generated = true", ok_auto,
+               f"is_auto_generated={cfg.get('is_auto_generated')}, "
+               f"updated_at={cfg.get('bot_config_updated_at')}")
 
     return cfg
 
@@ -257,6 +271,12 @@ def check_e(client: httpx.Client, token: str, branch_id: str) -> None:
     r_before = client.get(f"/api/branches/{branch_id}/bot-config", headers=auth)
     gen_at_before = r_before.json().get("bot_config_generated_at") if r_before.status_code == 200 else None
 
+    if CI_MODE:
+        report("(e.1) POST bot-config/regenerate (omitido en CI — sin ANTHROPIC_API_KEY)", None)
+        report("(e.2) Response contiene bot_config", None, "omitido en CI")
+        report("(e.3) bot_config_generated_at actualizado", None, "omitido en CI")
+        report("(e.4) is_auto_generated reset", None, "omitido en CI")
+        return
     print("        ↳ Regenerando config con Claude (puede tardar ~15s)…")
     t0 = time.monotonic()
     r = client.post(f"/api/branches/{branch_id}/bot-config/regenerate", headers=auth)

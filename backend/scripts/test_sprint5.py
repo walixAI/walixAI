@@ -19,6 +19,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import os
+if _tdb := os.environ.get("TEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = _tdb
+
 import httpx
 from sqlalchemy import select, update
 
@@ -31,7 +35,7 @@ from app.models.support import SupportSession
 from app.models.tenant import Branch, Tenant
 from app.models.user import User, UserRole
 from app.services.alert_generator import send_daily_summary
-from app.services.scheduler import _job_detect_unresponded
+from app.tasks.alerts_tasks import _async_detect_unresponded as _job_detect_unresponded
 
 BASE_URL = "http://localhost:8000"
 ASESOR_EMAIL = "asistente@clinica.com"
@@ -505,3 +509,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+    sys.exit(1 if _fail else 0)

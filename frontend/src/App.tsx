@@ -19,7 +19,7 @@ import NotFound from "@/pages/NotFound";
 
 // Lazy: heavy pages
 const PlatformDashboard = lazy(() => import("@/pages/platform/PlatformDashboard"));
-const Dashboard = lazy(() => import("@/pages/dashboard/DashboardPage"));
+const Dashboard = lazy(() => import("@/pages/app/Dashboard"));
 const Whatsapp = lazy(() => import("@/pages/app/Whatsapp"));
 const SettingsPage = lazy(() => import("@/pages/app/Settings"));
 const PipelinePage = lazy(() => import("@/pages/app/Pipeline"));
@@ -33,6 +33,7 @@ const ContactDetailPage = lazy(() => import("@/pages/contacts/[id]"));
 const BillingPage = lazy(() => import("@/pages/billing/BillingPage"));
 const BillingSuccess = lazy(() => import("@/pages/billing/BillingSuccess"));
 const ROIDashboard = lazy(() => import("@/pages/roi/ROIDashboard"));
+const OpportunitiesPage = lazy(() => import("@/features/pipeline/PipelinePage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -113,6 +114,7 @@ const AppRoutes = () => {
             <Route path="/automations" element={<AutomationsPage />} />
             <Route path="/billing" element={<BillingPage />} />
             <Route path="/billing/success" element={<BillingSuccess />} />
+            <Route path="/opportunities" element={<OpportunitiesPage />} />
           </Route>
 
           {/* Onboarding flow — protected, no AppLayout */}

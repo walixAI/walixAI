@@ -20,6 +20,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import os
+if _tdb := os.environ.get("TEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = _tdb
+
 import httpx
 from sqlalchemy import delete, select
 

@@ -49,6 +49,11 @@ class PipelineStage(Base):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
+    # ── Pipeline (Oportunidades / Deals) ─────────────────────────────────────
+    probability_default: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )  # 0-100; sugerido al crear deal/oportunidad en esta etapa
+
     # ── Class helpers ──────────────────────────────────────────────────────────
 
     @classmethod

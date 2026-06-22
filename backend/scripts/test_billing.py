@@ -30,6 +30,10 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import os
+if _tdb := os.environ.get("TEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = _tdb
+
 BASE_URL = "http://localhost:8000"
 NO_STRIPE = "--no-stripe" in sys.argv
 

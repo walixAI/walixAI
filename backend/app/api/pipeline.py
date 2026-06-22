@@ -5,18 +5,31 @@ GET /api/pipeline/board — returns all active stages with their leads for the k
 
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
+from app.models.activity import LeadActivity
+from app.models.deal import Deal
 from app.models.lead import Lead, LeadSentiment, LeadStatus
 from app.models.pipeline import PipelineStage
 from app.models.user import User, UserRole
+
+# ── Pydantic schema para listado de usuarios del tenant ───────────────────────
+
+
+class TenantUserItem(BaseModel):
+    id: uuid.UUID
+    name: str
+    email: str
+
+    model_config = ConfigDict(from_attributes=True)
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
@@ -188,3 +201,142 @@ async def get_pipeline_board(
         )
 
     return BoardResponse(stages=board_stages)
+
+
+# ── Sprint 14A — Deal-based pipeline endpoints ────────────────────────────────
+
+
+class StageRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    color: str
+    is_won: bool
+    is_lost: bool
+    order_index: int
+    default_probability: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DealKanbanItem(BaseModel):
+    id: uuid.UUID
+    title: str
+    amount: Decimal
+    probability: int
+    pipeline_stage_id: uuid.UUID
+    stage_name: str
+    lead_id: uuid.UUID
+    owner_id: uuid.UUID | None
+    source: str | None
+    notes: str | None
+    expected_close_date: datetime | None
+    is_won: bool
+    is_lost: bool
+    lost_reason: str | None
+    lost_comment: str | None
+    created_at: datetime
+    updated_at: datetime
+    contact_last_activity_at: datetime | None
+
+
+@router.get("/stages", response_model=list[StageRead])
+async def get_pipeline_stages(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    stages = (
+        await db.execute(
+            select(PipelineStage)
+            .where(
+                PipelineStage.tenant_id == current_user.tenant_id,
+                PipelineStage.is_archived.is_(False),
+            )
+            .order_by(PipelineStage.order_index)
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": s.id,
+            "name": s.name,
+            "color": s.color,
+            "is_won": s.is_won,
+            "is_lost": s.is_lost,
+            "order_index": s.order_index,
+            "default_probability": s.probability_default,
+        }
+        for s in stages
+    ]
+
+
+@router.get("/deals", response_model=list[DealKanbanItem])
+async def get_pipeline_deals(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[DealKanbanItem]:
+    # Subquery: MAX(created_at) de lead_activities por lead_id
+    last_activity_sq = (
+        select(
+            LeadActivity.lead_id,
+            func.max(LeadActivity.created_at).label("last_at"),
+        )
+        .where(LeadActivity.tenant_id == current_user.tenant_id)
+        .group_by(LeadActivity.lead_id)
+        .subquery()
+    )
+
+    rows = (
+        await db.execute(
+            select(
+                Deal,
+                PipelineStage.name.label("stage_name"),
+                last_activity_sq.c.last_at.label("contact_last_activity_at"),
+            )
+            .join(PipelineStage, Deal.pipeline_stage_id == PipelineStage.id)
+            .outerjoin(last_activity_sq, Deal.lead_id == last_activity_sq.c.lead_id)
+            .where(Deal.tenant_id == current_user.tenant_id)
+            .order_by(Deal.updated_at.desc())
+        )
+    ).fetchall()
+
+    result: list[DealKanbanItem] = []
+    for deal, stage_name, last_at in rows:
+        result.append(DealKanbanItem(
+            id=deal.id,
+            title=deal.title,
+            amount=deal.amount,
+            probability=deal.probability,
+            pipeline_stage_id=deal.pipeline_stage_id,
+            stage_name=stage_name,
+            lead_id=deal.lead_id,
+            owner_id=deal.owner_id,
+            source=deal.source,
+            notes=deal.notes,
+            expected_close_date=deal.expected_close_date,
+            is_won=deal.is_won,
+            is_lost=deal.is_lost,
+            lost_reason=deal.lost_reason,
+            lost_comment=deal.lost_comment,
+            created_at=deal.created_at,
+            updated_at=deal.updated_at,
+            contact_last_activity_at=last_at,
+        ))
+    return result
+
+
+@router.get("/users", response_model=list[TenantUserItem])
+async def get_pipeline_users(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[User]:
+    """Usuarios activos del tenant para el selector de owner y filtro de vendedor."""
+    users = (
+        await db.execute(
+            select(User)
+            .where(
+                User.tenant_id == current_user.tenant_id,
+                User.is_active.is_(True),
+            )
+            .order_by(User.name)
+        )
+    ).scalars().all()
+    return list(users)

@@ -79,7 +79,7 @@ def sign(body: bytes, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
 
-def main() -> None:
+def main() -> int:
     message_id = f"wamid.TEST_{uuid.uuid4().hex[:16]}"
     payload = build_payload(MESSAGE_BODY, message_id)
     raw_body = json.dumps(payload).encode("utf-8")
@@ -111,7 +111,11 @@ def main() -> None:
         print("  • lead created (or reused) for", WA_PHONE)
         print("  • Claude latency_ms and tokens_used")
         print("  • WhatsApp send attempt (will 401 until Branch.wa_token is set)")
+        return 0
+    else:
+        print(f"\n✗ FAIL — se esperaba HTTP 200, got {response.status_code}")
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

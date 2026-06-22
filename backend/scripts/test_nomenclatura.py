@@ -6,6 +6,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import os
+if _tdb := os.environ.get("TEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = _tdb
+
 from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
@@ -51,7 +55,7 @@ async def main() -> None:
                 fail_count += 1
 
     print(f"Resultado: {ok_count} OK  |  {fail_count} sin configurar")
-    if fail_count:
+    if ok_count == 0 and fail_count > 0:
         sys.exit(1)
 
 

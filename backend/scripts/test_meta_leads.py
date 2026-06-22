@@ -24,6 +24,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import os
+if _tdb := os.environ.get("TEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = _tdb
+
 import httpx
 from sqlalchemy import select
 
@@ -181,7 +185,7 @@ async def _insert_meta_lead(branch_id: uuid.UUID, tenant_id: uuid.UUID) -> uuid.
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def main() -> None:
+async def main() -> None:
     print("=" * 62)
     print("Sprint 3 T-25 — test_meta_leads.py")
     print("=" * 62)
@@ -189,14 +193,14 @@ def main() -> None:
     # ── 0. Preparar MetaLeadConfig en BD ──────────────────────────────────────
     print("\n[0] Preparar MetaLeadConfig de prueba en BD")
     try:
-        branch_id, tenant_id = asyncio.run(_ensure_meta_config(TEST_PAGE_ID, TEST_FORM_ID))
+        branch_id, tenant_id = await _ensure_meta_config(TEST_PAGE_ID, TEST_FORM_ID)
         ok(f"MetaLeadConfig activo para page_id={TEST_PAGE_ID}")
         print(f"     branch_id={branch_id}")
     except Exception as exc:
         fail("Crear MetaLeadConfig", str(exc))
         return
 
-    with httpx.Client(timeout=15.0) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=15.0) as client:
 
         # ── 1. Firma inválida → 403 ───────────────────────────────────────────
         print("\n[1] Verificar rechazo de firma HMAC inválida")
@@ -204,8 +208,8 @@ def main() -> None:
         payload = _build_meta_leads_payload(TEST_PAGE_ID, TEST_FORM_ID, leadgen_id)
         raw = json.dumps(payload).encode()
 
-        r = client.post(
-            WEBHOOK_URL,
+        r = await client.post(
+            "/api/webhooks/meta-leads",
             content=raw,
             headers={
                 "Content-Type": "application/json",
@@ -227,8 +231,8 @@ def main() -> None:
         print(f"     leadgen_id: {leadgen_id}")
         print(f"     signature : sha256={sig[:32]}…")
 
-        r = client.post(
-            WEBHOOK_URL,
+        r = await client.post(
+            "/api/webhooks/meta-leads",
             content=raw,
             headers={
                 "Content-Type": "application/json",
@@ -244,7 +248,7 @@ def main() -> None:
         # ── 3. Lead directo en BD con source=meta_ads ─────────────────────────
         print("\n[3] Insertar lead con source=meta_ads directamente en BD")
         try:
-            meta_lead_id = asyncio.run(_insert_meta_lead(branch_id, tenant_id))
+            meta_lead_id = await _insert_meta_lead(branch_id, tenant_id)
             ok(f"Lead insertado: {meta_lead_id}")
         except Exception as exc:
             fail("Insertar lead meta_ads", str(exc))
@@ -252,8 +256,8 @@ def main() -> None:
 
         # ── 4. Verificar lead aparece en la API ───────────────────────────────
         print("\n[4] Verificar via API que el lead aparece con source='meta_ads'")
-        r = client.post("/api/auth/login",
-                        json={"email": ASISTENTE_EMAIL, "password": PASSWORD})
+        r = await client.post("/api/auth/login",
+                              json={"email": ASISTENTE_EMAIL, "password": PASSWORD})
         check("Login asistente 200", r.status_code == 200, f"HTTP {r.status_code}")
         if r.status_code != 200:
             return
@@ -261,7 +265,7 @@ def main() -> None:
         token = r.json()["access_token"]
         auth = {"Authorization": f"Bearer {token}"}
 
-        r = client.get("/api/leads", params={"all": "true"}, headers=auth)
+        r = await client.get("/api/leads", params={"all": "true"}, headers=auth)
         check("GET /leads 200", r.status_code == 200, f"HTTP {r.status_code}")
         if r.status_code == 200:
             items = r.json()["items"]
@@ -289,4 +293,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
+    sys.exit(1 if _fail else 0)

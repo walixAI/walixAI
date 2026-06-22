@@ -10,8 +10,10 @@ GET /api/dashboard returns a tailored response based on the caller's role:
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -21,7 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.core.redis import redis_client
-from app.models.activity import ActivityType, LeadActivity
+from app.models.activity import Activity, ActivityType, LeadActivity
+from app.models.deal import Deal
 from app.models.agent import AgentSuggestion
 from app.models.ai_log import AICommandLog
 from app.models.conversation import Conversation, Message
@@ -544,3 +547,218 @@ def _resolve_branch(branch_id: uuid.UUID | None, user: User) -> uuid.UUID:
             detail="branch_id is required for users without an assigned branch",
         )
     return resolved
+
+
+# ── Sprint 13B — Deal-based dashboard endpoints ───────────────────────────────
+
+_MX = ZoneInfo("America/Mexico_City")
+
+_ACTIVITY_TYPE_MAP: dict[str, str] = {
+    "note":    "note",
+    "task":    "task",
+    "call":    "note",
+    "meeting": "note",
+    "email":   "note",
+    "system":  "note",
+}
+
+
+@router.get("/kpis")
+async def get_kpis(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    ten_days_ago = datetime.now(timezone.utc) - timedelta(days=10)
+
+    # pipeline_value + active_deals
+    pipeline_row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(Deal.amount), 0).label("pipeline_value"),
+                func.count(Deal.id).label("active_count"),
+            ).where(
+                Deal.tenant_id == current_user.tenant_id,
+                Deal.is_won.is_(False),
+                Deal.is_lost.is_(False),
+            )
+        )
+    ).one()
+
+    # stale deals (active, not touched in 10 days)
+    stale_deals = (
+        await db.execute(
+            select(func.count(Deal.id)).where(
+                Deal.tenant_id == current_user.tenant_id,
+                Deal.is_won.is_(False),
+                Deal.is_lost.is_(False),
+                Deal.updated_at < ten_days_ago,
+            )
+        )
+    ).scalar_one()
+
+    # close rate: won / (won + lost)
+    won = (
+        await db.execute(
+            select(func.count(Deal.id)).where(
+                Deal.tenant_id == current_user.tenant_id,
+                Deal.is_won.is_(True),
+            )
+        )
+    ).scalar_one()
+    lost = (
+        await db.execute(
+            select(func.count(Deal.id)).where(
+                Deal.tenant_id == current_user.tenant_id,
+                Deal.is_lost.is_(True),
+            )
+        )
+    ).scalar_one()
+    total_closed = won + lost
+    close_rate = round(won / total_closed * 100) if total_closed else 0
+
+    # messages today — join Message → Conversation → Branch (no sent_at column; use created_at)
+    messages_today = 0
+    try:
+        from app.models.conversation import Conversation, Message
+        from app.models.tenant import Branch
+
+        day_start_utc = (
+            datetime.now(_MX)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .astimezone(timezone.utc)
+        )
+        messages_today = (
+            await db.execute(
+                select(func.count(Message.id))
+                .join(Conversation, Message.conversation_id == Conversation.id)
+                .join(Branch, Conversation.branch_id == Branch.id)
+                .where(
+                    Branch.tenant_id == current_user.tenant_id,
+                    Message.created_at >= day_start_utc,
+                )
+            )
+        ).scalar_one() or 0
+    except Exception:
+        pass  # TODO: handle schema drift gracefully
+
+    return {
+        "pipelineValue":    int(pipeline_row.pipeline_value),
+        "pipelineDeltaPct": 12,   # TODO: compare vs daily_metrics
+        "activeDeals":      pipeline_row.active_count,
+        "staleDeals":       stale_deals,
+        "messagesToday":    messages_today,
+        "messagesUnanswered": 0,  # TODO: add when unread_count lands on conversations
+        "closeRate":        close_rate,
+        "closeRateDelta":   3,    # TODO: compare vs daily_metrics
+    }
+
+
+@router.get("/activity")
+async def get_activity(
+    limit: int = Query(default=10, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    try:
+        rows = (
+            await db.execute(
+                select(Activity, Lead.name, Lead.last_name)
+                .outerjoin(Lead, Activity.lead_id == Lead.id)
+                .where(Activity.tenant_id == current_user.tenant_id)
+                .order_by(Activity.created_at.desc())
+                .limit(limit)
+            )
+        ).fetchall()
+    except Exception:
+        return []
+
+    result = []
+    for activity, name, last_name in rows:
+        contact_name = " ".join(p for p in [name, last_name] if p) or None
+        result.append({
+            "id":          str(activity.id),
+            "type":        _ACTIVITY_TYPE_MAP.get(activity.activity_type, "note"),
+            "description": activity.title or activity.body or "",
+            "occurredAt":  activity.created_at.isoformat(),
+            "contactId":   str(activity.lead_id) if activity.lead_id else None,
+            "contactName": contact_name,
+        })
+    return result
+
+
+@router.get("/pipeline-by-stage")
+async def get_pipeline_by_stage(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    stages = (
+        await db.execute(
+            select(PipelineStage)
+            .where(
+                PipelineStage.tenant_id == current_user.tenant_id,
+                PipelineStage.is_archived.is_(False),
+            )
+            .order_by(PipelineStage.order_index)
+        )
+    ).scalars().all()
+
+    if not stages:
+        return []
+
+    sums = dict(
+        (
+            await db.execute(
+                select(
+                    Deal.pipeline_stage_id,
+                    func.coalesce(func.sum(Deal.amount), 0),
+                ).where(
+                    Deal.tenant_id == current_user.tenant_id,
+                    Deal.is_won.is_(False),
+                    Deal.is_lost.is_(False),
+                    Deal.pipeline_stage_id.in_([s.id for s in stages]),
+                ).group_by(Deal.pipeline_stage_id)
+            )
+        ).fetchall()
+    )
+
+    return [{"stage": s.name, "value": int(sums.get(s.id, 0))} for s in stages]
+
+
+@router.get("/deals-closed-timeline")
+async def get_deals_closed_timeline(
+    days: int = Query(default=30, ge=1, le=365),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    today_mx = datetime.now(_MX).date()
+    range_start = today_mx - timedelta(days=days - 1)
+    range_start_utc = datetime(
+        range_start.year, range_start.month, range_start.day,
+        tzinfo=_MX,
+    ).astimezone(timezone.utc)
+
+    rows = (
+        await db.execute(
+            select(
+                func.date(func.timezone("America/Mexico_City", Deal.updated_at)).label("day_date"),
+                func.coalesce(func.sum(Deal.amount), 0).label("total"),
+            ).where(
+                Deal.tenant_id == current_user.tenant_id,
+                Deal.is_won.is_(True),
+                Deal.updated_at >= range_start_utc,
+            ).group_by("day_date")
+        )
+    ).fetchall()
+
+    buckets: dict[date, Decimal] = {
+        today_mx - timedelta(days=i): Decimal(0)
+        for i in range(days - 1, -1, -1)
+    }
+    for day_date, total in rows:
+        if day_date in buckets:
+            buckets[day_date] = Decimal(str(total))
+
+    return [
+        {"day": str(idx + 1), "date": d.isoformat(), "value": int(v)}
+        for idx, (d, v) in enumerate(sorted(buckets.items()))
+    ]

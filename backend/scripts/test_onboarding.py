@@ -23,6 +23,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import os
+if _tdb := os.environ.get("TEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = _tdb
+
 import httpx
 from sqlalchemy import delete, select
 
@@ -201,6 +205,12 @@ def _check(label: str, ok: bool, detail: str = "") -> bool:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    # En CI (APP_ENV=test o sin ANTHROPIC_API_KEY) este test no puede correr
+    import os as _os
+    if _os.environ.get("APP_ENV") == "test" or not _os.environ.get("ANTHROPIC_API_KEY"):
+        print("⏭  test_onboarding.py omitido en CI (requiere ANTHROPIC_API_KEY)")
+        sys.exit(0)
+
     passed = 0
     failed = 0
 
