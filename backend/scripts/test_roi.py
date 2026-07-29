@@ -46,7 +46,7 @@ def get_credentials() -> tuple[str, str]:
     """Parse --email / --password from argv or use defaults."""
     args = sys.argv[1:]
     email = "owner@clinica.com"
-    password = "walix2024"
+    password = "walix2026"
     for i, a in enumerate(args):
         if a == "--email" and i + 1 < len(args):
             email = args[i + 1]

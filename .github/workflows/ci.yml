@@ -70,7 +70,7 @@ jobs:
         run: alembic upgrade head
 
       - name: Run tests
-        run: pytest tests/sprint7/ -v --tb=short --timeout=60
+        run: pytest tests/ -v --tb=short --timeout=60
 
   # ── Backend integration scripts ─────────────────────────────────────────────
   script-tests:
@@ -120,18 +120,15 @@ jobs:
       FRONTEND_URL: http://localhost:3000
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY_TEST }}
       # Tests que necesitan servicios externos genuinamente ausentes en CI:
-      #   test_handoff:      asistente@clinica.com + flujo WA complejo con conversaciones
-      #   test_meta_leads:   Meta Graph API para recuperar leadgen (step 3)
-      #   test_qualification: PHONE_NUMBER_ID real + Claude para el bot conversacional
-      #   test_sprint5:      /api/ai/command llama directamente a Claude
-      #   test_sprint6:      follow-up agent llama directamente a Claude
-      #   test_billing:      Stripe API (checks b,c) + test3@mail.com no existe en seed
-      #   test_rag:          OPENAI_API_KEY + KB indexada con embeddings
-      #   test_roi:          usuario test3@mail.com no existe en seed_ci.py
+      #   test_handoff:       flujo WA completo — requiere conversación activa con asistente
+      #   test_meta_leads:    Meta Graph API — recupera leadgen con PHONE_NUMBER_ID real
+      #   test_qualification: bot conversacional — PHONE_NUMBER_ID real + Claude en vivo
+      #   test_sprint5:       /api/ai/command — llama directamente a Claude (sin mock)
+      #   test_sprint6:       follow-up agent — llama directamente a Claude (sin mock)
+      #   test_rag:           embeddings reales — requiere OPENAI_API_KEY + KB indexada
       SKIP_TESTS: >-
         test_handoff.py,test_meta_leads.py,test_qualification.py,
-        test_sprint5.py,test_sprint6.py,test_billing.py,test_rag.py,
-        test_roi.py
+        test_sprint5.py,test_sprint6.py,test_rag.py
 
     steps:
       - uses: actions/checkout@v4

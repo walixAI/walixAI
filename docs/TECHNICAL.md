@@ -1,6 +1,6 @@
 # Walix CRM — Documentación Técnica
 
-**Versión:** Sprint 11 · Junio 2026  
+**Versión:** Sprint 13A · Julio 2026  
 **Stack:** Python 3.13 · FastAPI · PostgreSQL 16 + pgvector · Redis · React 18 · Vite · Zustand · Anthropic SDK · Langfuse · Stripe
 
 ---

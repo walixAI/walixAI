@@ -25,7 +25,7 @@ import { KpiCardsSkeleton, ListRowsSkeleton } from "@/components/walix/Skeletons
 // import { DashboardAiSection } from "@/components/walix/DashboardAiSection";
 // import { TaskCards } from "@/components/dashboard/TaskCards";
 // import { MorningBriefing } from "@/components/walix/MorningBriefing";
-// import { ProactiveBriefing } from "@/components/walix/ProactiveBriefing";
+import { ProactiveBriefing } from "@/components/walix/ProactiveBriefing"; // Dashboard IA (fase 2)
 
 const activityIcon: Record<string, { icon: typeof MoveRight; color: string }> = {
   deal: { icon: MoveRight, color: "text-primary bg-primary/10" },
@@ -168,8 +168,9 @@ export default function Dashboard() {
       {/* FASE 2: <DashboardAiSection /> */}
       {/* FASE 2 (tareas): <TaskCards /> */}
 
-      {/* Actividad reciente (full-width: la columna IA 1/3 se reintegra en fase 2) */}
-      <div className="rounded-xl border border-border bg-card shadow-card">
+      {/* Row 2: Actividad (2/3) + Briefing IA (1/3) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 rounded-xl border border-border bg-card shadow-card">
         <div className="flex items-center justify-between p-5 border-b border-border">
           <div>
             <h3 className="font-semibold">Actividad Reciente</h3>
@@ -222,6 +223,10 @@ export default function Dashboard() {
             </>
           )}
         </div>
+        </div>
+
+        {/* Briefing proactivo de IA (agent_suggestions) */}
+        <ProactiveBriefing />
       </div>
 
       {/* Row: Charts */}
