@@ -83,6 +83,7 @@ export function KanbanBoard(props: Props) {
               contactLastActivityAt={props.contactLastActivityAt}
               onOpenDeal={props.onOpenDeal}
               onAddDeal={props.onAddDeal}
+              onRequestLost={props.onRequestLost}
             />
           ))}
         </div>

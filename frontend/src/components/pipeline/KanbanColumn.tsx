@@ -14,12 +14,13 @@ interface Props {
   contactLastActivityAt: (id: string | null) => string | null | undefined;
   onOpenDeal: (deal: PipelineDeal) => void;
   onAddDeal: (stage: PipelineStage) => void;
+  onRequestLost: (deal: PipelineDeal) => void;
   wipLimit?: number;
 }
 
 export function KanbanColumn({
   stage, allStages, deals, contactName, contactColor, contactLastActivityAt,
-  onOpenDeal, onAddDeal, wipLimit = 10,
+  onOpenDeal, onAddDeal, onRequestLost, wipLimit = 10,
 }: Props) {
   // La COLUMNA ENTERA es la zona droppable (no solo la lista de tarjetas).
   const { setNodeRef, isOver } = useDroppable({ id: stage.id, data: { stage } });
@@ -75,6 +76,7 @@ export function KanbanColumn({
             contactColor={contactColor(d.contactId)}
             contactLastActivityAt={contactLastActivityAt(d.contactId)}
             onOpen={onOpenDeal}
+            onRequestLost={onRequestLost}
           />
         ))}
         {/* El placeholder ocupa el resto del espacio para que el área vacía también sea droppable. */}

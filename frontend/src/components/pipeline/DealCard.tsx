@@ -8,6 +8,7 @@ import { formatMXN, type PipelineDeal, type PipelineStage } from "@/lib/queries/
 import { computeDealHealth } from "@/lib/dealHealth";
 import { HealthBadges } from "./HealthBadges";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { QuickActions } from "./QuickActions";
 
 interface Props {
   deal: PipelineDeal;
@@ -16,6 +17,7 @@ interface Props {
   contactColor?: string | null;
   contactLastActivityAt?: string | null;
   onOpen: (deal: PipelineDeal) => void;
+  onRequestLost?: (deal: PipelineDeal) => void;
   isOverlay?: boolean;
 }
 
@@ -32,7 +34,7 @@ function probabilityReason(p: number): string {
 }
 
 function DealCardImpl({
-  deal, contactName, contactColor, contactLastActivityAt, onOpen, isOverlay,
+  deal, stages, contactName, contactColor, contactLastActivityAt, onOpen, onRequestLost, isOverlay,
 }: Props) {
   const navigate = useNavigate();
   const health = computeDealHealth(deal, contactLastActivityAt);
@@ -63,6 +65,10 @@ function DealCardImpl({
         isOverlay && "shadow-glow rotate-1",
       )}
     >
+      {!isOverlay && onRequestLost && stages && (
+        <QuickActions deal={deal} stages={stages} onRequestLost={onRequestLost} />
+      )}
+
       <div className="flex items-start justify-between gap-2 mb-1">
         <div className="font-semibold text-sm leading-tight line-clamp-2">{deal.name}</div>
       </div>
