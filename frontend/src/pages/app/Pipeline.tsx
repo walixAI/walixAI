@@ -9,6 +9,7 @@ import { LostReasonDialog } from "@/components/pipeline/LostReasonDialog";
 import { DealDrawer } from "@/components/pipeline/DealDrawer";
 import { type PipelineFiltersValue } from "@/components/pipeline/PipelineFilters";
 import { AiAlertBanner } from "@/components/walix/AiAlertBanner";
+import { PipelineSuggestionsPanel } from "@/components/pipeline/PipelineSuggestionsPanel";
 import { usePipelinePrefs } from "@/lib/usePipelinePrefs";
 import {
   useStages, useDeals, useContactsLite,
@@ -164,6 +165,8 @@ export default function Pipeline() {
           description={`Suman ${new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 }).format(staleAmount)} en pipeline. Revísalos antes de que se enfríen.`}
         />
       )}
+
+      <PipelineSuggestionsPanel />
 
       {deals.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-card py-16 px-6 text-center">
