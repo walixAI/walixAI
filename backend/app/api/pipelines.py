@@ -18,7 +18,7 @@ from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.models.deal import Deal
 from app.models.pipeline import PipelineStage
-from app.models.pipeline_group import Pipeline
+from app.models.pipeline_group import Pipeline, resolve_default_pipeline_id
 from app.models.tenant import Branch
 from app.models.user import User
 
@@ -65,17 +65,33 @@ async def _get_pipeline_or_404(
 
 @router.get("", response_model=list[PipelineOut])
 async def list_pipelines(
-    branch_id: uuid.UUID = Query(...),
+    branch_id: uuid.UUID | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[Pipeline]:
-    branch = await db.get(Branch, branch_id)
-    if branch is None or branch.tenant_id != current_user.tenant_id:
-        raise HTTPException(status_code=404, detail="Branch no encontrada")
+    if branch_id is None:
+        # Prefer user's assigned branch; fall back to first active branch of tenant
+        if current_user.branch_id is not None:
+            resolved_branch_id = current_user.branch_id
+        else:
+            branch_result = await db.execute(
+                select(Branch.id)
+                .where(Branch.tenant_id == current_user.tenant_id, Branch.is_active.is_(True))
+                .order_by(Branch.created_at.asc())
+                .limit(1)
+            )
+            resolved_branch_id = branch_result.scalar_one_or_none()
+            if resolved_branch_id is None:
+                return []
+    else:
+        branch = await db.get(Branch, branch_id)
+        if branch is None or branch.tenant_id != current_user.tenant_id:
+            raise HTTPException(status_code=404, detail="Branch no encontrada")
+        resolved_branch_id = branch_id
 
     result = await db.execute(
         select(Pipeline)
-        .where(Pipeline.branch_id == branch_id, Pipeline.tenant_id == current_user.tenant_id)
+        .where(Pipeline.branch_id == resolved_branch_id, Pipeline.tenant_id == current_user.tenant_id)
         .order_by(Pipeline.position.asc(), Pipeline.created_at.asc())
     )
     return list(result.scalars().all())

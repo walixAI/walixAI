@@ -19,6 +19,7 @@ from app.models.activity import LeadActivity
 from app.models.deal import Deal
 from app.models.lead import Lead, LeadSentiment, LeadStatus
 from app.models.pipeline import PipelineStage
+from app.models.pipeline_group import Pipeline, resolve_default_pipeline_id
 from app.models.user import User, UserRole
 
 # ── Pydantic schema para listado de usuarios del tenant ───────────────────────
@@ -214,6 +215,7 @@ class StageRead(BaseModel):
     is_lost: bool
     order_index: int
     default_probability: int
+    pipeline_id: uuid.UUID
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -241,14 +243,29 @@ class DealKanbanItem(BaseModel):
 
 @router.get("/stages", response_model=list[StageRead])
 async def get_pipeline_stages(
+    pipeline_id: uuid.UUID | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict]:
+    if pipeline_id is not None:
+        p = await db.get(Pipeline, pipeline_id)
+        if p is None or p.tenant_id != current_user.tenant_id:
+            raise HTTPException(status_code=404, detail="Pipeline no encontrado")
+        resolved_id = pipeline_id
+    else:
+        resolved_id = await resolve_default_pipeline_id(
+            current_user.tenant_id, db, user_branch_id=current_user.branch_id
+        )
+
+    if resolved_id is None:
+        return []
+
     stages = (
         await db.execute(
             select(PipelineStage)
             .where(
                 PipelineStage.tenant_id == current_user.tenant_id,
+                PipelineStage.pipeline_id == resolved_id,
                 PipelineStage.is_archived.is_(False),
             )
             .order_by(PipelineStage.order_index)
@@ -263,6 +280,7 @@ async def get_pipeline_stages(
             "is_lost": s.is_lost,
             "order_index": s.order_index,
             "default_probability": s.probability_default,
+            "pipeline_id": s.pipeline_id,
         }
         for s in stages
     ]
@@ -270,9 +288,23 @@ async def get_pipeline_stages(
 
 @router.get("/deals", response_model=list[DealKanbanItem])
 async def get_pipeline_deals(
+    pipeline_id: uuid.UUID | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[DealKanbanItem]:
+    if pipeline_id is not None:
+        p = await db.get(Pipeline, pipeline_id)
+        if p is None or p.tenant_id != current_user.tenant_id:
+            raise HTTPException(status_code=404, detail="Pipeline no encontrado")
+        resolved_id = pipeline_id
+    else:
+        resolved_id = await resolve_default_pipeline_id(
+            current_user.tenant_id, db, user_branch_id=current_user.branch_id
+        )
+
+    if resolved_id is None:
+        return []
+
     # Subquery: MAX(created_at) de lead_activities por lead_id
     last_activity_sq = (
         select(
@@ -293,7 +325,10 @@ async def get_pipeline_deals(
             )
             .join(PipelineStage, Deal.pipeline_stage_id == PipelineStage.id)
             .outerjoin(last_activity_sq, Deal.lead_id == last_activity_sq.c.lead_id)
-            .where(Deal.tenant_id == current_user.tenant_id)
+            .where(
+                Deal.tenant_id == current_user.tenant_id,
+                PipelineStage.pipeline_id == resolved_id,
+            )
             .order_by(Deal.updated_at.desc())
         )
     ).fetchall()
