@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 export interface PipelinePrefs {
   view: "kanban" | "list";
   search: string;
+  pipelineId: string | null;
   filters: {
     ownerName: string;
     amountMin: string;
@@ -16,6 +17,7 @@ export interface PipelinePrefs {
 const DEFAULT_PREFS: PipelinePrefs = {
   view: "kanban",
   search: "",
+  pipelineId: null,
   filters: {
     ownerName: "all",
     amountMin: "",

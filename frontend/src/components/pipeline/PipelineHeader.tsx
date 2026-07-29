@@ -1,13 +1,20 @@
-import { KanbanSquare, List, Plus, Search, X } from "lucide-react";
+import { ChevronDown, Check, KanbanSquare, List, Plus, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useTenantLabels } from "@/hooks/useTenantLabels";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PipelineFilters, type PipelineFiltersValue } from "./PipelineFilters";
 import { ForecastKpis } from "./ForecastKpis";
+import type { PipelineItem } from "@/lib/queries/pipeline";
 
 interface Props {
-  title?: string;
   view: "kanban" | "list";
   onView: (v: "kanban" | "list") => void;
   filters: PipelineFiltersValue;
@@ -20,20 +27,42 @@ interface Props {
   closingThisMonth: number;
   closingDeltaPct: number | null;
   activeCount: number;
+  pipelines: PipelineItem[];
+  activePipelineId: string | null;
+  onSelectPipeline: (id: string) => void;
 }
 
 export function PipelineHeader({
-  title = "Pipeline Principal",
   view, onView, filters, onFilters, search, onSearch, onNew,
   totalAmount, weightedAmount, closingThisMonth, closingDeltaPct, activeCount,
+  pipelines, activePipelineId, onSelectPipeline,
 }: Props) {
   const { deal, deals } = useTenantLabels();
+  const activePipeline = pipelines.find((p) => p.id === activePipelineId);
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          {/* FASE 2: dropdown selector de pipelines (multi-pipeline). MVP = título estático. */}
-          <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="h-auto p-0 gap-1.5 hover:bg-transparent group">
+                <h1 className="text-2xl font-bold tracking-tight">
+                  {activePipeline?.name ?? "Pipeline Principal"}
+                </h1>
+                <ChevronDown className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-[200px]">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">Cambiar pipeline</DropdownMenuLabel>
+              {pipelines.map((p) => (
+                <DropdownMenuItem key={p.id} onClick={() => onSelectPipeline(p.id)}>
+                  <span className="flex-1">{p.name}</span>
+                  {p.id === activePipelineId && <Check className="h-3.5 w-3.5 text-primary" />}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div className="flex items-center gap-2">

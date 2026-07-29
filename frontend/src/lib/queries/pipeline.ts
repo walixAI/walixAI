@@ -81,12 +81,36 @@ function mapDeal(r: any, users?: any[]): PipelineDeal {
   };
 }
 
-// ── Etapas ──────────────────────────────────────────────────────────────────────
-export function useStages() {
+// ── Pipelines ───────────────────────────────────────────────────────────────────
+export interface PipelineItem {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  position: number;
+}
+
+export function usePipelines() {
   return useQuery({
-    queryKey: ["pipeline-stages"],
+    queryKey: ["pipelines"],
+    queryFn: async (): Promise<PipelineItem[]> => {
+      const rows = await apiRequest<any[]>("/api/pipelines");
+      return (rows ?? []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        isDefault: !!p.is_default,
+        position: p.position ?? 0,
+      }));
+    },
+  });
+}
+
+// ── Etapas ──────────────────────────────────────────────────────────────────────
+export function useStages(pipelineId?: string | null) {
+  return useQuery({
+    queryKey: ["pipeline-stages", pipelineId ?? null],
     queryFn: async (): Promise<PipelineStage[]> => {
-      const rows = await apiRequest<any[]>("/api/pipeline/stages");
+      const qs = pipelineId ? `?pipeline_id=${pipelineId}` : "";
+      const rows = await apiRequest<any[]>(`/api/pipeline/stages${qs}`);
       return (rows ?? []).map((s) => ({
         id: s.id,
         name: s.name,
@@ -94,29 +118,31 @@ export function useStages() {
         color: s.color ?? "#6B7280",
         isWon: !!s.is_won,
         isLost: !!s.is_lost,
-        defaultProbability: s.default_probability ?? 0, // el endpoint mapea probability_default → default_probability
-        pipelineId: null, // FASE 2: multi-pipeline
+        defaultProbability: s.default_probability ?? 0,
+        pipelineId: s.pipeline_id ?? null,
       }));
     },
   });
 }
 
 // ── Deals ───────────────────────────────────────────────────────────────────────
-export function useDeals() {
+export function useDeals(pipelineId?: string | null) {
   const { data: users } = useTenantUsers();
   return useQuery({
-    // Clave EXACTA ["pipeline-deals"] para que el optimistic update funcione.
-    queryKey: ["pipeline-deals"],
+    queryKey: ["pipeline-deals", pipelineId ?? null],
     queryFn: async (): Promise<PipelineDeal[]> => {
-      const rows = await apiRequest<any[]>("/api/pipeline/deals");
+      const qs = pipelineId ? `?pipeline_id=${pipelineId}` : "";
+      const rows = await apiRequest<any[]>(`/api/pipeline/deals${qs}`);
       return (rows ?? []).map((r) => mapDeal(r, users));
     },
   });
 }
 
 // ── Drag & drop: cambiar de etapa ─────────────────────────────────────────────────
-export function useUpdateDealStage() {
+// pipelineId se pasa para que el optimistic update pueda localizar la cache exacta.
+export function useUpdateDealStage(pipelineId?: string | null) {
   const qc = useQueryClient();
+  const dealKey = ["pipeline-deals", pipelineId ?? null] as const;
   return useMutation({
     mutationFn: async (args: { dealId: string; stage: PipelineStage }) => {
       await apiRequest(`/api/deals/${args.dealId}`, {
@@ -127,14 +153,14 @@ export function useUpdateDealStage() {
           is_lost: args.stage.isLost,
         }),
       });
-      // El backend (14A) registra deal_stage_history automáticamente al cambiar de etapa.
     },
     onMutate: async ({ dealId, stage }) => {
+      // Cancela cualquier variante activa de pipeline-deals (prefix match)
       await qc.cancelQueries({ queryKey: ["pipeline-deals"] });
-      const prev = qc.getQueryData<PipelineDeal[]>(["pipeline-deals"]);
+      const prev = qc.getQueryData<PipelineDeal[]>(dealKey);
       if (prev) {
         qc.setQueryData<PipelineDeal[]>(
-          ["pipeline-deals"],
+          dealKey,
           prev.map((d) =>
             d.id === dealId
               ? {
@@ -143,8 +169,6 @@ export function useUpdateDealStage() {
                   stageName: stage.name,
                   isWon: stage.isWon,
                   isLost: stage.isLost,
-                  // Espejo del backend (14C.1): al no enviar probability explícita,
-                  // el deal hereda la probabilidad por defecto de la etapa destino.
                   probability: stage.defaultProbability,
                   updatedAt: new Date().toISOString(),
                 }
@@ -155,8 +179,9 @@ export function useUpdateDealStage() {
       return { prev };
     },
     onError: (_e, _v, ctx) => {
-      if (ctx?.prev) qc.setQueryData(["pipeline-deals"], ctx.prev);
+      if (ctx?.prev) qc.setQueryData(dealKey, ctx.prev);
     },
+    // exact: false (default en v5) invalida todas las variantes ["pipeline-deals", *]
     onSettled: () => qc.invalidateQueries({ queryKey: ["pipeline-deals"] }),
   });
 }
@@ -171,6 +196,7 @@ export function useUpdateDeal() {
         body: JSON.stringify(args.patch),
       });
     },
+    // Invalida todas las variantes de pipeline-deals (prefix match)
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pipeline-deals"] }),
   });
 }
@@ -206,6 +232,7 @@ export function useCreateDeal() {
         }),
       });
     },
+    // Invalida todas las variantes de pipeline-deals (prefix match)
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pipeline-deals"] }),
   });
 }

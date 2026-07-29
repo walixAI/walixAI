@@ -13,16 +13,28 @@ import { PipelineSuggestionsPanel } from "@/components/pipeline/PipelineSuggesti
 import { BulkActionsBar } from "@/components/pipeline/BulkActionsBar";
 import { usePipelinePrefs } from "@/lib/usePipelinePrefs";
 import {
-  useStages, useDeals, useContactsLite,
+  usePipelines, useStages, useDeals, useContactsLite,
   type PipelineDeal, type PipelineStage,
 } from "@/lib/queries/pipeline";
 
 export default function Pipeline() {
-  const { deal, deals } = useTenantLabels();
+  const { deal, deals: dealsLabel } = useTenantLabels();
   const [prefs, setPrefs] = usePipelinePrefs();
 
-  const { data: stages = [], isLoading: stagesLoading } = useStages();
-  const { data: deals = [], isLoading: dealsLoading } = useDeals();
+  const { data: pipelines = [] } = usePipelines();
+
+  // Resolve active pipeline: prefs if still valid, else first is_default, else first
+  const activePipelineId = useMemo(() => {
+    if (prefs.pipelineId && pipelines.some((p) => p.id === prefs.pipelineId)) {
+      return prefs.pipelineId;
+    }
+    return pipelines.find((p) => p.isDefault)?.id ?? pipelines[0]?.id ?? null;
+  }, [prefs.pipelineId, pipelines]);
+
+  const handleSelectPipeline = (id: string) => setPrefs({ ...prefs, pipelineId: id });
+
+  const { data: stages = [], isLoading: stagesLoading } = useStages(activePipelineId);
+  const { data: deals = [], isLoading: dealsLoading } = useDeals(activePipelineId);
   const { data: contacts = [] } = useContactsLite();
 
   // Filtros desde prefs (Date serializado como ISO)
@@ -157,13 +169,16 @@ export default function Pipeline() {
         closingThisMonth={closingThisMonth}
         closingDeltaPct={closingDeltaPct}
         activeCount={activeDeals.length}
+        pipelines={pipelines}
+        activePipelineId={activePipelineId}
+        onSelectPipeline={handleSelectPipeline}
       />
 
       {staleDeals.length > 0 && (
         <AiAlertBanner
           variant="warning"
           icon={<Clock className="h-4 w-4" />}
-          title={`${staleDeals.length} ${staleDeals.length === 1 ? deal : deals} sin actividad hace más de 10 días`}
+          title={`${staleDeals.length} ${staleDeals.length === 1 ? deal : dealsLabel} sin actividad hace más de 10 días`}
           description={`Suman ${new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 }).format(staleAmount)} en pipeline. Revísalos antes de que se enfríen.`}
         />
       )}
@@ -174,7 +189,7 @@ export default function Pipeline() {
         <div className="rounded-xl border border-dashed border-border bg-card py-16 px-6 text-center">
           <h3 className="font-semibold text-lg">Crea tu primera {deal.toLowerCase()} y empieza a cerrar</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Organiza tus {deals.toLowerCase()} en etapas y arrástralas entre columnas.
+            Organiza tus {dealsLabel.toLowerCase()} en etapas y arrástralas entre columnas.
           </p>
           <button
             onClick={() => openNewDeal()}
