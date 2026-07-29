@@ -10,6 +10,7 @@ from app.models.conversation import (
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.onboarding_conversation import OnboardingConversation
 from app.models.pipeline import PipelineStage
+from app.models.pipeline_group import Pipeline
 from app.models.saved_view import SavedView
 from app.models.tag import Tag, lead_tags_table
 from app.models.tenant import AssignmentMode, Branch, Company, Tenant, TenantPlan
@@ -38,6 +39,7 @@ __all__ = [
     "ActivityType",
     "LeadActivity",
     "OnboardingConversation",
+    "Pipeline",
     "PipelineStage",
     "SavedView",
     "Tag",

@@ -49,6 +49,13 @@ class PipelineStage(Base):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
+    pipeline_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("pipelines.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
     # ── Pipeline (Oportunidades / Deals) ─────────────────────────────────────
     probability_default: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
