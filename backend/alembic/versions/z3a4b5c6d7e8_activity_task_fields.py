@@ -23,38 +23,36 @@ _CLOSED_VIA = ("whatsapp", "email", "call", "manual", "auto", "other")
 
 
 def upgrade() -> None:
+    # 1. Columns — bare types only, no inline ForeignKey
     op.add_column("activities", sa.Column("task_kind", sa.String(20), nullable=True))
-    op.add_column(
-        "activities",
-        sa.Column(
-            "assignee_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("users.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
-    )
-    op.add_column(
-        "activities",
-        sa.Column(
-            "deal_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("deals.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
-    )
+    op.add_column("activities", sa.Column("assignee_id", postgresql.UUID(as_uuid=True), nullable=True))
+    op.add_column("activities", sa.Column("deal_id", postgresql.UUID(as_uuid=True), nullable=True))
     op.add_column("activities", sa.Column("closed_via", sa.String(20), nullable=True))
     op.add_column("activities", sa.Column("closed_note", sa.Text(), nullable=True))
 
+    # 2. Foreign keys — named explicitly to avoid anonymous constraints
+    op.create_foreign_key(
+        "fk_activities_assignee_id_users",
+        "activities", "users", ["assignee_id"], ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "fk_activities_deal_id_deals",
+        "activities", "deals", ["deal_id"], ["id"],
+        ondelete="SET NULL",
+    )
+
+    # 3. Indexes
     op.create_index("ix_activities_assignee_id", "activities", ["assignee_id"])
     op.create_index("ix_activities_deal_id", "activities", ["deal_id"])
 
+    # 4. CHECK constraints
     kinds_list = ", ".join(f"'{k}'" for k in _TASK_KINDS)
     op.create_check_constraint(
         "ck_activities_task_kind",
         "activities",
         f"task_kind IS NULL OR task_kind IN ({kinds_list})",
     )
-
     via_list = ", ".join(f"'{v}'" for v in _CLOSED_VIA)
     op.create_check_constraint(
         "ck_activities_closed_via",
@@ -68,6 +66,8 @@ def downgrade() -> None:
     op.drop_constraint("ck_activities_task_kind", "activities", type_="check")
     op.drop_index("ix_activities_deal_id", table_name="activities")
     op.drop_index("ix_activities_assignee_id", table_name="activities")
+    op.drop_constraint("fk_activities_deal_id_deals", "activities", type_="foreignkey")
+    op.drop_constraint("fk_activities_assignee_id_users", "activities", type_="foreignkey")
     op.drop_column("activities", "closed_note")
     op.drop_column("activities", "closed_via")
     op.drop_column("activities", "deal_id")
