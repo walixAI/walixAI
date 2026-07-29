@@ -87,6 +87,7 @@ export interface PipelineItem {
   name: string;
   isDefault: boolean;
   position: number;
+  branchId: string;
 }
 
 export function usePipelines() {
@@ -99,8 +100,43 @@ export function usePipelines() {
         name: p.name,
         isDefault: !!p.is_default,
         position: p.position ?? 0,
+        branchId: p.branch_id,
       }));
     },
+  });
+}
+
+export function useCreatePipeline() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string; branch_id: string }) =>
+      apiRequest<{ id: string; name: string; is_default: boolean; position: number; branch_id: string }>(
+        "/api/pipelines",
+        { method: "POST", body: JSON.stringify(input) },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pipelines"] }),
+  });
+}
+
+export function useRenamePipeline() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      apiRequest(`/api/pipelines/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pipelines"] }),
+  });
+}
+
+export function useDeletePipeline() {
+  const qc = useQueryClient();
+  return useMutation({
+    // apiRequest propaga e.message con el detail exacto del 409 del backend
+    mutationFn: (id: string) =>
+      apiRequest(`/api/pipelines/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pipelines"] }),
   });
 }
 

@@ -11,6 +11,7 @@ import { type PipelineFiltersValue } from "@/components/pipeline/PipelineFilters
 import { AiAlertBanner } from "@/components/walix/AiAlertBanner";
 import { PipelineSuggestionsPanel } from "@/components/pipeline/PipelineSuggestionsPanel";
 import { BulkActionsBar } from "@/components/pipeline/BulkActionsBar";
+import { PipelineManagerDialog } from "@/components/pipeline/PipelineManagerDialog";
 import { usePipelinePrefs } from "@/lib/usePipelinePrefs";
 import {
   usePipelines, useStages, useDeals, useContactsLite,
@@ -65,6 +66,7 @@ export default function Pipeline() {
   const search = prefs.search;
   const setSearch = (v: string) => setPrefs({ ...prefs, search: v });
 
+  const [managerOpen, setManagerOpen] = useState(false);
   const [newDealOpen, setNewDealOpen] = useState(false);
   const [newDealStage, setNewDealStage] = useState<string | null>(null);
   const [lostDeal, setLostDeal] = useState<PipelineDeal | null>(null);
@@ -172,6 +174,7 @@ export default function Pipeline() {
         pipelines={pipelines}
         activePipelineId={activePipelineId}
         onSelectPipeline={handleSelectPipeline}
+        onManage={() => setManagerOpen(true)}
       />
 
       {staleDeals.length > 0 && (
@@ -245,6 +248,15 @@ export default function Pipeline() {
         selectedIds={[...selectedIds]}
         stages={stages}
         onClear={() => setSelectedIds(new Set())}
+      />
+
+      <PipelineManagerDialog
+        open={managerOpen}
+        onClose={() => setManagerOpen(false)}
+        onSelect={(id) => {
+          setPrefs({ ...prefs, pipelineId: id });
+          setManagerOpen(false);
+        }}
       />
     </div>
   );

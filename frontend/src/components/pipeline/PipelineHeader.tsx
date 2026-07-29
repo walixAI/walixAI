@@ -1,10 +1,11 @@
-import { ChevronDown, Check, KanbanSquare, List, Plus, Search, X } from "lucide-react";
+import { ChevronDown, Check, KanbanSquare, List, Plus, Search, Settings, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTenantLabels } from "@/hooks/useTenantLabels";
@@ -30,12 +31,13 @@ interface Props {
   pipelines: PipelineItem[];
   activePipelineId: string | null;
   onSelectPipeline: (id: string) => void;
+  onManage: () => void;
 }
 
 export function PipelineHeader({
   view, onView, filters, onFilters, search, onSearch, onNew,
   totalAmount, weightedAmount, closingThisMonth, closingDeltaPct, activeCount,
-  pipelines, activePipelineId, onSelectPipeline,
+  pipelines, activePipelineId, onSelectPipeline, onManage,
 }: Props) {
   const { deal, deals } = useTenantLabels();
   const activePipeline = pipelines.find((p) => p.id === activePipelineId);
@@ -61,6 +63,11 @@ export function PipelineHeader({
                   {p.id === activePipelineId && <Check className="h-3.5 w-3.5 text-primary" />}
                 </DropdownMenuItem>
               ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onManage} className="text-muted-foreground">
+                <Settings className="h-3.5 w-3.5 mr-1.5" />
+                Gestionar pipelines…
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
