@@ -9,9 +9,6 @@ from app.models.conversation import (
 )
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.onboarding_conversation import OnboardingConversation
-from app.models.opportunity import Opportunity
-from app.models.opportunity_activity import OPPORTUNITY_ACTIVITY_TYPES, OpportunityActivity
-from app.models.opportunity_stage_history import OpportunityStageHistory
 from app.models.pipeline import PipelineStage
 from app.models.saved_view import SavedView
 from app.models.tag import Tag, lead_tags_table
@@ -41,10 +38,6 @@ __all__ = [
     "ActivityType",
     "LeadActivity",
     "OnboardingConversation",
-    "Opportunity",
-    "OpportunityActivity",
-    "OPPORTUNITY_ACTIVITY_TYPES",
-    "OpportunityStageHistory",
     "PipelineStage",
     "SavedView",
     "Tag",
