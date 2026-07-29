@@ -33,7 +33,6 @@ const ContactDetailPage = lazy(() => import("@/pages/contacts/[id]"));
 const BillingPage = lazy(() => import("@/pages/billing/BillingPage"));
 const BillingSuccess = lazy(() => import("@/pages/billing/BillingSuccess"));
 const ROIDashboard = lazy(() => import("@/pages/roi/ROIDashboard"));
-const OpportunitiesPage = lazy(() => import("@/features/pipeline/PipelinePage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -114,7 +113,7 @@ const AppRoutes = () => {
             <Route path="/automations" element={<AutomationsPage />} />
             <Route path="/billing" element={<BillingPage />} />
             <Route path="/billing/success" element={<BillingSuccess />} />
-            <Route path="/opportunities" element={<OpportunitiesPage />} />
+
           </Route>
 
           {/* Onboarding flow — protected, no AppLayout */}

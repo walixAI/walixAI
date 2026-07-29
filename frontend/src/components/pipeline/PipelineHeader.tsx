@@ -1,5 +1,6 @@
 import { KanbanSquare, List, Plus, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PipelineFilters, type PipelineFiltersValue } from "./PipelineFilters";
@@ -26,6 +27,7 @@ export function PipelineHeader({
   view, onView, filters, onFilters, search, onSearch, onNew,
   totalAmount, weightedAmount, closingThisMonth, closingDeltaPct, activeCount,
 }: Props) {
+  const { deal, deals } = useTenantLabels();
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -40,7 +42,7 @@ export function PipelineHeader({
             <Input
               value={search}
               onChange={(e) => onSearch(e.target.value.slice(0, 100))}
-              placeholder="Buscar oportunidades…"
+              placeholder={`Buscar ${deals.toLowerCase()}…`}
               className="h-9 pl-7 pr-7 w-[200px]"
             />
             {search && (
@@ -69,7 +71,7 @@ export function PipelineHeader({
           {/* FASE 2: botón "Insights IA" (AiInsightsPanel) */}
 
           <Button size="sm" className="h-9 bg-primary hover:bg-primary/90" onClick={onNew}>
-            <Plus className="h-3.5 w-3.5" /> Nueva Oportunidad
+            <Plus className="h-3.5 w-3.5" /> Nueva {deal}
           </Button>
         </div>
       </div>

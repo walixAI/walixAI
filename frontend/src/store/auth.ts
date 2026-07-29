@@ -10,11 +10,17 @@ interface AuthState {
   entityName: string;
   entityPlural: string;
   contactStatuses: Array<{ key: string; label: string; color: string }>;
+  // TODO(backend): deal_name / deal_plural no existen aún en el modelo Tenant del backend.
+  // Añadirlos en un prompt de backend aparte (tabla tenants + TenantOut schema + /api/auth/me).
+  dealName: string;
+  dealPlural: string;
   setUser: (user: WalixUser | null) => void;
   setTenant: (tenant: TenantData | null) => void;
   setEntityName: (v: string) => void;
   setEntityPlural: (v: string) => void;
   setContactStatuses: (v: Array<{ key: string; label: string; color: string }>) => void;
+  setDealName: (v: string) => void;
+  setDealPlural: (v: string) => void;
   setLoading: (v: boolean) => void;
   logout: () => void;
 }
@@ -26,6 +32,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   entityName: "Contacto",
   entityPlural: "Contactos",
   contactStatuses: [],
+  dealName: "Oportunidad",
+  dealPlural: "Oportunidades",
 
   setUser: (user) => set({ user }),
 
@@ -35,11 +43,17 @@ export const useAuthStore = create<AuthState>((set) => ({
       entityName: tenant?.entity_name || "Contacto",
       entityPlural: tenant?.entity_plural || "Contactos",
       contactStatuses: tenant?.contact_statuses || [],
+      // TODO(backend): deal_name / deal_plural no existen en TenantData — siempre caen al default.
+      // Añadir en el backend y en la interfaz TenantData (src/lib/api.ts) en un prompt aparte.
+      dealName: (tenant as any)?.deal_name || "Oportunidad",
+      dealPlural: (tenant as any)?.deal_plural || "Oportunidades",
     }),
 
   setEntityName: (entityName) => set({ entityName }),
   setEntityPlural: (entityPlural) => set({ entityPlural }),
   setContactStatuses: (contactStatuses) => set({ contactStatuses }),
+  setDealName: (dealName) => set({ dealName }),
+  setDealPlural: (dealPlural) => set({ dealPlural }),
 
   setLoading: (loading) => set({ loading }),
 
@@ -51,6 +65,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       entityName: "Contacto",
       entityPlural: "Contactos",
       contactStatuses: [],
+      dealName: "Oportunidad",
+      dealPlural: "Oportunidades",
     });
   },
 }));

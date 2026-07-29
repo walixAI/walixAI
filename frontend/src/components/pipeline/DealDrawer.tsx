@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 import { ArrowRight, Pencil, Save, X } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -34,6 +35,7 @@ interface Props {
 }
 
 export function DealDrawer({ deal, stages, open, onClose, contactName }: Props) {
+  const { deal: dealLabel } = useTenantLabels();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<any>({});
   const update = useUpdateDeal();
@@ -85,7 +87,7 @@ export function DealDrawer({ deal, stages, open, onClose, contactName }: Props) 
           notes: draft.notes || null,
         },
       });
-      toast.success("Oportunidad actualizada");
+      toast.success(`${dealLabel} actualizada`);
       setEditing(false);
     } catch (e: any) {
       toast.error(e?.message ?? "Error al guardar");

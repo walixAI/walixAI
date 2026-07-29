@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Clock } from "lucide-react";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 import { PipelineHeader } from "@/components/pipeline/PipelineHeader";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
 import { DealsListView } from "@/components/pipeline/DealsListView";
@@ -15,6 +16,7 @@ import {
 } from "@/lib/queries/pipeline";
 
 export default function Pipeline() {
+  const { deal, deals } = useTenantLabels();
   const [prefs, setPrefs] = usePipelinePrefs();
 
   const { data: stages = [], isLoading: stagesLoading } = useStages();
@@ -158,22 +160,22 @@ export default function Pipeline() {
         <AiAlertBanner
           variant="warning"
           icon={<Clock className="h-4 w-4" />}
-          title={`${staleDeals.length} oportunidad${staleDeals.length === 1 ? "" : "es"} sin actividad hace más de 10 días`}
+          title={`${staleDeals.length} ${staleDeals.length === 1 ? deal : deals} sin actividad hace más de 10 días`}
           description={`Suman ${new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 }).format(staleAmount)} en pipeline. Revísalos antes de que se enfríen.`}
         />
       )}
 
       {deals.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-card py-16 px-6 text-center">
-          <h3 className="font-semibold text-lg">Crea tu primera oportunidad y empieza a cerrar</h3>
+          <h3 className="font-semibold text-lg">Crea tu primera {deal.toLowerCase()} y empieza a cerrar</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Organiza tus oportunidades en etapas y arrástralas entre columnas.
+            Organiza tus {deals.toLowerCase()} en etapas y arrástralas entre columnas.
           </p>
           <button
             onClick={() => openNewDeal()}
             className="mt-4 inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:bg-primary/90"
           >
-            + Nueva Oportunidad
+            + Nueva {deal}
           </button>
         </div>
       ) : view === "kanban" ? (

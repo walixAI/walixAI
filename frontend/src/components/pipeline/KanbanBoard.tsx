@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor,
   useSensor, useSensors, type DragEndEvent, type DragStartEvent,
@@ -24,6 +25,7 @@ interface Props {
 }
 
 export function KanbanBoard(props: Props) {
+  const { deal } = useTenantLabels();
   const { stages, deals } = props;
   const [active, setActive] = useState<PipelineDeal | null>(null);
   const update = useUpdateDealStage();
@@ -55,8 +57,8 @@ export function KanbanBoard(props: Props) {
     update.mutate(
       { dealId, stage },
       {
-        onSuccess: () => toast.success(`Oportunidad movida a "${stage.name}"`),
-        onError: () => toast.error("No se pudo mover la oportunidad"),
+        onSuccess: () => toast.success(`${deal} movida a "${stage.name}"`),
+        onError: () => toast.error(`No se pudo mover la ${deal.toLowerCase()}`),
       },
     );
   }

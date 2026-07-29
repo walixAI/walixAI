@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import {
   useContactsLite, useCreateDeal, type PipelineStage,
 } from "@/lib/queries/pipeline";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 
 interface Props {
   open: boolean;
@@ -31,6 +32,7 @@ interface Props {
 const sources = ["WhatsApp", "Formulario web", "Referido", "Manual"];
 
 export function NewDealDialog({ open, onOpenChange, stages, defaultStageId }: Props) {
+  const { deal } = useTenantLabels();
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [stageId, setStageId] = useState<string>("");
@@ -75,7 +77,7 @@ export function NewDealDialog({ open, onOpenChange, stages, defaultStageId }: Pr
         source,
         notes: notes.trim() || null,
       });
-      toast.success("Oportunidad creada");
+      toast.success(`${deal} creada`);
       onOpenChange(false);
     } catch (e: any) {
       toast.error(e?.message ?? "No se pudo crear la oportunidad");
@@ -86,8 +88,8 @@ export function NewDealDialog({ open, onOpenChange, stages, defaultStageId }: Pr
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Nueva Oportunidad</DialogTitle>
-          <DialogDescription>Agrega una nueva oportunidad al pipeline.</DialogDescription>
+          <DialogTitle>Nueva {deal}</DialogTitle>
+          <DialogDescription>Agrega una nueva {deal.toLowerCase()} al pipeline.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
@@ -187,7 +189,7 @@ export function NewDealDialog({ open, onOpenChange, stages, defaultStageId }: Pr
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
           <Button onClick={onSubmit} disabled={create.isPending}>
-            {create.isPending ? "Creando…" : "Crear Oportunidad"}
+            {create.isPending ? "Creando…" : `Crear ${deal}`}
           </Button>
         </DialogFooter>
       </DialogContent>

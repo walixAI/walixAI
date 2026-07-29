@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { z } from "zod";
+import { useTenantLabels } from "@/hooks/useTenantLabels";
 import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -31,6 +32,7 @@ interface Props {
 }
 
 export function LostReasonDialog({ open, deal, lostStage, onClose }: Props) {
+  const { deal: dealLabel } = useTenantLabels();
   const [reason, setReason] = useState<string>("price");
   const [comment, setComment] = useState("");
   const update = useUpdateDeal();
@@ -60,7 +62,7 @@ export function LostReasonDialog({ open, deal, lostStage, onClose }: Props) {
           lost_comment: parsed.data.comment ?? null,
         },
       });
-      toast.success("Oportunidad marcada como perdida");
+      toast.success(`${dealLabel} marcada como perdida`);
       onClose(true);
     } catch (e: any) {
       toast.error(e?.message ?? "No se pudo guardar");
@@ -71,7 +73,7 @@ export function LostReasonDialog({ open, deal, lostStage, onClose }: Props) {
     <Dialog open={open} onOpenChange={(o) => !o && onClose(false)}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>¿Por qué se pierde esta oportunidad?</DialogTitle>
+          <DialogTitle>¿Por qué se pierde esta {dealLabel.toLowerCase()}?</DialogTitle>
           <DialogDescription>
             Esta información nos ayuda a mejorar el pipeline y entender patrones de pérdida.
           </DialogDescription>
