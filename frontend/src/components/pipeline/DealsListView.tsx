@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowUpDown, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -14,12 +15,34 @@ interface Props {
   deals: PipelineDeal[];
   contactName: (id: string | null) => string | undefined;
   onOpenDeal: (deal: PipelineDeal) => void;
+  selectedIds: Set<string>;
+  onSelectionChange: (ids: Set<string>) => void;
 }
 
 type SortKey = "name" | "contact" | "amount" | "stage" | "probability" | "owner" | "days" | "close";
 
-export function DealsListView({ deals, contactName, onOpenDeal }: Props) {
+export function DealsListView({ deals, contactName, onOpenDeal, selectedIds, onSelectionChange }: Props) {
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "amount", dir: "desc" });
+
+  function toggleRow(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    const next = new Set(selectedIds);
+    if (next.has(id)) { next.delete(id); } else { next.add(id); }
+    onSelectionChange(next);
+  }
+
+  function toggleAll() {
+    if (sorted.every((d) => selectedIds.has(d.id))) {
+      const next = new Set(selectedIds);
+      sorted.forEach((d) => next.delete(d.id));
+      onSelectionChange(next);
+    } else {
+      onSelectionChange(new Set([...selectedIds, ...sorted.map((d) => d.id)]));
+    }
+  }
+
+  const allSelected = sorted.length > 0 && sorted.every((d) => selectedIds.has(d.id));
+  const someSelected = !allSelected && sorted.some((d) => selectedIds.has(d.id));
 
   const sorted = useMemo(() => {
     const arr = [...deals];
@@ -80,6 +103,14 @@ export function DealsListView({ deals, contactName, onOpenDeal }: Props) {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <Checkbox
+                  checked={allSelected}
+                  data-state={someSelected ? "indeterminate" : undefined}
+                  onCheckedChange={toggleAll}
+                  aria-label="Seleccionar todo"
+                />
+              </TableHead>
               <TableHead><SortBtn k="name" label="Deal" /></TableHead>
               <TableHead><SortBtn k="contact" label="Contacto" /></TableHead>
               <TableHead className="text-right"><SortBtn k="amount" label="Monto" /></TableHead>
@@ -92,7 +123,14 @@ export function DealsListView({ deals, contactName, onOpenDeal }: Props) {
           </TableHeader>
           <TableBody>
             {sorted.map((d) => (
-              <TableRow key={d.id} className="cursor-pointer" onClick={() => onOpenDeal(d)}>
+              <TableRow
+                key={d.id}
+                className={cn("cursor-pointer", selectedIds.has(d.id) && "bg-primary/5")}
+                onClick={() => onOpenDeal(d)}
+              >
+                <TableCell onClick={(e) => toggleRow(d.id, e)} className="w-10">
+                  <Checkbox checked={selectedIds.has(d.id)} aria-label={`Seleccionar ${d.name}`} />
+                </TableCell>
                 <TableCell className="font-medium">{d.name}</TableCell>
                 <TableCell className="text-sm text-muted-foreground">{contactName(d.contactId) ?? "—"}</TableCell>
                 <TableCell className="text-right font-semibold text-success">{formatMXN(d.amount)}</TableCell>
@@ -114,7 +152,7 @@ export function DealsListView({ deals, contactName, onOpenDeal }: Props) {
             ))}
             {sorted.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-sm text-muted-foreground py-10">Sin resultados</TableCell>
+                <TableCell colSpan={9} className="text-center text-sm text-muted-foreground py-10">Sin resultados</TableCell>
               </TableRow>
             )}
           </TableBody>

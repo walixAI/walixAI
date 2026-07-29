@@ -10,6 +10,7 @@ import { DealDrawer } from "@/components/pipeline/DealDrawer";
 import { type PipelineFiltersValue } from "@/components/pipeline/PipelineFilters";
 import { AiAlertBanner } from "@/components/walix/AiAlertBanner";
 import { PipelineSuggestionsPanel } from "@/components/pipeline/PipelineSuggestionsPanel";
+import { BulkActionsBar } from "@/components/pipeline/BulkActionsBar";
 import { usePipelinePrefs } from "@/lib/usePipelinePrefs";
 import {
   useStages, useDeals, useContactsLite,
@@ -56,6 +57,7 @@ export default function Pipeline() {
   const [newDealStage, setNewDealStage] = useState<string | null>(null);
   const [lostDeal, setLostDeal] = useState<PipelineDeal | null>(null);
   const [openDeal, setOpenDeal] = useState<PipelineDeal | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const lostStage = stages.find((s) => s.isLost) ?? null;
 
@@ -193,7 +195,13 @@ export default function Pipeline() {
           onRequestLost={setLostDeal}
         />
       ) : (
-        <DealsListView deals={filtered} contactName={contactName} onOpenDeal={onOpenDeal} />
+        <DealsListView
+          deals={filtered}
+          contactName={contactName}
+          onOpenDeal={onOpenDeal}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+        />
       )}
 
       <NewDealDialog
@@ -216,6 +224,12 @@ export default function Pipeline() {
         open={!!openDeal}
         onClose={() => setOpenDeal(null)}
         contactName={openDealFresh ? contactName(openDealFresh.contactId) : undefined}
+      />
+
+      <BulkActionsBar
+        selectedIds={[...selectedIds]}
+        stages={stages}
+        onClear={() => setSelectedIds(new Set())}
       />
     </div>
   );
