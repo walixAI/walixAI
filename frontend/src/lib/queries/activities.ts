@@ -10,6 +10,12 @@ export type ActivityType =
   | "email"
   | "system";
 
+export type TaskKind =
+  | "cobro" | "cotizacion" | "servicio" | "seguimiento"
+  | "queja" | "refaccion" | "facturacion" | "devolucion" | "otro";
+
+export type ClosedVia = "whatsapp" | "email" | "call" | "manual" | "auto" | "other";
+
 export interface ActivityRow {
   id: string;
   leadId: string;
@@ -22,6 +28,12 @@ export interface ActivityRow {
   createdBy: string | null;
   createdByName: string | null;
   createdAt: string;
+  // ── Etapa 5 task extensions ──
+  taskKind?: TaskKind | null;
+  assigneeId?: string | null;
+  dealId?: string | null;
+  closedVia?: ClosedVia | null;
+  closedNote?: string | null;
 }
 
 export interface ActivityCreate {
@@ -31,6 +43,12 @@ export interface ActivityCreate {
   metadata?: Record<string, unknown> | null;
   dueDate?: string | null;
   completedAt?: string | null;
+  // ── Etapa 5 task extensions ──
+  taskKind?: TaskKind | null;
+  assigneeId?: string | null;
+  dealId?: string | null;
+  closedVia?: ClosedVia | null;
+  closedNote?: string | null;
 }
 
 export interface ActivityUpdate {
@@ -39,6 +57,12 @@ export interface ActivityUpdate {
   dueDate?: string | null;
   completedAt?: string | null;
   metadata?: Record<string, unknown> | null;
+  // ── Etapa 5 task extensions ──
+  taskKind?: TaskKind | null;
+  assigneeId?: string | null;
+  dealId?: string | null;
+  closedVia?: ClosedVia | null;
+  closedNote?: string | null;
 }
 
 export interface ActivityFilters {
@@ -59,6 +83,12 @@ interface _RawActivity {
   created_by: string | null;
   created_by_name: string | null;
   created_at: string;
+  // Etapa 5
+  task_kind?: string | null;
+  assignee_id?: string | null;
+  deal_id?: string | null;
+  closed_via?: string | null;
+  closed_note?: string | null;
 }
 
 interface _RawActivityListResponse {
@@ -83,6 +113,11 @@ function _mapActivity(raw: _RawActivity): ActivityRow {
     createdBy: raw.created_by,
     createdByName: raw.created_by_name,
     createdAt: raw.created_at,
+    taskKind: (raw.task_kind ?? null) as TaskKind | null,
+    assigneeId: raw.assignee_id ?? null,
+    dealId: raw.deal_id ?? null,
+    closedVia: (raw.closed_via ?? null) as ClosedVia | null,
+    closedNote: raw.closed_note ?? null,
   };
 }
 
@@ -110,7 +145,7 @@ export async function createActivity(
   leadId: string,
   data: ActivityCreate
 ): Promise<ActivityRow> {
-  const body = {
+  const body: Record<string, unknown> = {
     activity_type: data.activityType,
     title: data.title ?? null,
     body: data.body ?? null,
@@ -118,6 +153,12 @@ export async function createActivity(
     due_date: data.dueDate ?? null,
     completed_at: data.completedAt ?? null,
   };
+  // Only include task extension fields when explicitly provided
+  if ("taskKind" in data) body.task_kind = data.taskKind ?? null;
+  if ("assigneeId" in data) body.assignee_id = data.assigneeId ?? null;
+  if ("dealId" in data) body.deal_id = data.dealId ?? null;
+  if ("closedVia" in data) body.closed_via = data.closedVia ?? null;
+  if ("closedNote" in data) body.closed_note = data.closedNote ?? null;
   const raw = await apiRequest<_RawActivity>(
     `/api/v1/contacts/${leadId}/activities`,
     { method: "POST", body: JSON.stringify(body) }
@@ -136,6 +177,11 @@ export async function updateActivity(
   if ("dueDate" in data) body.due_date = data.dueDate;
   if ("completedAt" in data) body.completed_at = data.completedAt;
   if ("metadata" in data) body.extra_data = data.metadata;
+  if ("taskKind" in data) body.task_kind = data.taskKind ?? null;
+  if ("assigneeId" in data) body.assignee_id = data.assigneeId ?? null;
+  if ("dealId" in data) body.deal_id = data.dealId ?? null;
+  if ("closedVia" in data) body.closed_via = data.closedVia ?? null;
+  if ("closedNote" in data) body.closed_note = data.closedNote ?? null;
   const raw = await apiRequest<_RawActivity>(
     `/api/v1/contacts/${leadId}/activities/${activityId}`,
     { method: "PATCH", body: JSON.stringify(body) }

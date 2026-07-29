@@ -63,6 +63,12 @@ class LeadActivity(Base):
 # Valid activity_type values enforced by DB CHECK ck_activities_activity_type.
 ACTIVITY_TYPES = ("note", "task", "call", "meeting", "email", "system")
 
+TASK_KINDS = (
+    "cobro", "cotizacion", "servicio", "seguimiento",
+    "queja", "refaccion", "facturacion", "devolucion", "otro",
+)
+CLOSED_VIA_VALUES = ("whatsapp", "email", "call", "manual", "auto", "other")
+
 
 class Activity(Base):
     __tablename__ = "activities"
@@ -98,5 +104,22 @@ class Activity(Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+
+    # ── Etapa 5 — task extensions ──────────────────────────────────────────────
+    task_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    deal_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("deals.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    closed_via: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    closed_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     lead: Mapped[Lead] = relationship("Lead", back_populates="activities")

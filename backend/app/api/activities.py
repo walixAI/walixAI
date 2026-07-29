@@ -33,6 +33,12 @@ class ActivityUpdate(BaseModel):
     due_date: datetime | None = None
     completed_at: datetime | None = None
     extra_data: dict | None = None
+    # ── Etapa 5 task extensions ──────────────────────────────────────────────
+    task_kind: str | None = None
+    assignee_id: uuid.UUID | None = None
+    deal_id: uuid.UUID | None = None
+    closed_via: str | None = None
+    closed_note: str | None = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -135,6 +141,11 @@ async def create_activity(
         due_date=body.due_date,
         completed_at=body.completed_at,
         created_by=current_user.id,
+        task_kind=body.task_kind,
+        assignee_id=body.assignee_id,
+        deal_id=body.deal_id,
+        closed_via=body.closed_via,
+        closed_note=body.closed_note,
     )
     db.add(activity)
     await db.flush()
