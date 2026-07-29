@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import activities, agents, ai, auth, automations, billing, billing_webhook, branches, contacts, dashboard, deals, health, kb, leads, metrics, onboarding, opportunities, opportunities_ai, pipeline, platform, saved_views, support, tags, tenant, webhooks
+from app.api import activities, agents, ai, auth, automations, billing, billing_webhook, branches, contacts, dashboard, deals, health, kb, leads, metrics, onboarding, pipeline, platform, saved_views, support, tags, tenant, webhooks
 from app.api.industry_onboarding import onboarding_router as industry_onboarding_router
 from app.api.industry_onboarding import settings_router as industry_settings_router
 from app.api.users import team_router, users_router
@@ -65,8 +65,6 @@ app.include_router(users_router, prefix="/api")
 app.include_router(kb.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")
 app.include_router(pipeline.router, prefix="/api")
-app.include_router(opportunities.router, prefix="/api")
-app.include_router(opportunities_ai.router, prefix="/api")
 app.include_router(platform.router, prefix="/api")
 app.include_router(support.router, prefix="/api")
 app.include_router(leads.tasks_router, prefix="/api")

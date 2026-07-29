@@ -1,3 +1,6 @@
+"""DEPRECADO (ver Etapa 3 del plan de migración) — sin consumidor activo desde 2026-07-28.
+No se elimina la tabla sin aprobación explícita, dado que aún existen datos históricos.
+"""
 from __future__ import annotations
 
 import uuid

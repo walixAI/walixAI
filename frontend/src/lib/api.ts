@@ -463,13 +463,6 @@ export interface OppListFilters {
   offset?: number;
 }
 
-export interface OppListResponse {
-  items: OppRead[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
 export interface OppActivityOut {
   id: string;
   type: string;
@@ -1426,15 +1419,6 @@ export const api = {
     return request(`/api/opportunities/board${q}`);
   },
 
-  async listOpportunities(filters: OppListFilters = {}): Promise<OppListResponse> {
-    const qs = new URLSearchParams();
-    (Object.entries(filters) as [string, string | number | undefined][]).forEach(([k, v]) => {
-      if (v !== undefined && v !== null) qs.set(k, String(v));
-    });
-    const q = qs.toString() ? `?${qs}` : "";
-    return request(`/api/opportunities${q}`);
-  },
-
   async createOpportunity(body: OppCreateBody): Promise<OppRead> {
     return request("/api/opportunities", {
       method: "POST",
@@ -1467,10 +1451,6 @@ export const api = {
     });
   },
 
-  async markOpportunityWon(id: string): Promise<OppRead> {
-    return request(`/api/opportunities/${id}/won`, { method: "POST" });
-  },
-
   async bulkMoveOpportunities(ids: string[], stageId: string): Promise<OppRead[]> {
     return request("/api/opportunities/bulk/stage", {
       method: "POST",
@@ -1483,10 +1463,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ids }),
     });
-  },
-
-  async deleteOpportunity(id: string): Promise<void> {
-    return request(`/api/opportunities/${id}`, { method: "DELETE" });
   },
 
   async getOpportunityForecast(branchId?: string): Promise<OppForecastRead> {

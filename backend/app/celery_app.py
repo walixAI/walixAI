@@ -50,7 +50,6 @@ celery_app = Celery(
         "app.tasks.metrics_tasks",
         "app.tasks.alerts_tasks",
         "app.tasks.dlq_handler",
-        "app.tasks.opp_ai_tasks",
     ],
 )
 
