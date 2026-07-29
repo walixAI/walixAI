@@ -832,6 +832,25 @@ export interface ROIOut {
   assumptions: Record<string, string>;
 }
 
+// ── Deal types (contact panel) ────────────────────────────────────────────────
+
+export interface DealSummary {
+  id: string;
+  title: string;
+  amount: number;
+  probability: number;
+  is_won: boolean;
+  is_lost: boolean;
+  expected_close_date: string | null;
+}
+
+export interface DealListResponse {
+  items: DealSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 // ── Agent suggestion types ────────────────────────────────────────────────────
 
 export interface AgentSuggestion {
@@ -1520,5 +1539,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ branch_id: branchId }),
     });
+  },
+
+  // Deals (contact panel — active only)
+  async getDealsByLead(leadId: string): Promise<DealListResponse> {
+    return request(`/api/deals?lead_id=${leadId}&is_won=false&is_lost=false`);
   },
 };
