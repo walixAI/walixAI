@@ -31,8 +31,8 @@ function AssistantBadge({ isHuman }: { isHuman: boolean }) {
       className={cn(
         "inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full mb-1",
         isHuman
-          ? "bg-blue-100 text-blue-700"
-          : "bg-emerald-100 text-emerald-700"
+          ? "bg-accent/15 text-accent"
+          : "bg-primary/15 text-primary"
       )}
     >
       {isHuman ? "👤 Asistente" : "🤖 Wali"}
@@ -71,8 +71,8 @@ function MessageBubble({ m }: { m: MessageOut | PendingMsg }) {
         className={cn(
           "max-w-[75%] rounded-2xl px-3 py-2 shadow-sm",
           isUser && "bg-card border border-border rounded-bl-sm",
-          isBotAssistant && "bg-emerald-100/80 text-foreground rounded-br-sm",
-          isHumanAssistant && "bg-blue-100/80 text-foreground rounded-br-sm",
+          isBotAssistant && "bg-primary/10 text-foreground rounded-br-sm",
+          isHumanAssistant && "bg-accent/10 text-foreground rounded-br-sm",
           isError && "opacity-70"
         )}
       >
@@ -89,7 +89,7 @@ function MessageBubble({ m }: { m: MessageOut | PendingMsg }) {
           {isSending && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
           {!isPending && !isUser && <CheckCheck className="h-2.5 w-2.5" />}
           {isError && (
-            <span className="text-red-500 flex items-center gap-0.5">
+            <span className="text-danger flex items-center gap-0.5">
               <AlertCircle className="h-2.5 w-2.5" />
               {pending._errorText ?? "Error al enviar"}
             </span>

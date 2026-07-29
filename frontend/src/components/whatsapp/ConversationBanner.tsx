@@ -24,8 +24,8 @@ export function ConversationBanner({
       className={cn(
         "flex items-center gap-2 px-4 py-2 text-sm border-b border-border",
         isHuman
-          ? "bg-blue-50 text-blue-800"
-          : "bg-emerald-50 text-emerald-800"
+          ? "bg-accent/10 text-accent"
+          : "bg-primary/10 text-primary"
       )}
     >
       {isHuman ? (
@@ -44,7 +44,7 @@ export function ConversationBanner({
         <Button
           variant="outline"
           size="sm"
-          className="h-6 text-[11px] px-2 border-blue-300 text-blue-700 hover:bg-blue-100"
+          className="h-6 text-[11px] px-2 border-accent/40 text-accent hover:bg-accent/10"
           onClick={onReturnToBot}
           disabled={loading}
         >
@@ -53,7 +53,7 @@ export function ConversationBanner({
       ) : (
         <Button
           size="sm"
-          className="h-6 text-[11px] px-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+          className="h-6 text-[11px] px-2 bg-success hover:bg-success/90 text-success-foreground"
           onClick={onHandoff}
           disabled={loading}
         >

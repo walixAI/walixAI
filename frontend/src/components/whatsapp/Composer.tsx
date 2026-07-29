@@ -38,7 +38,7 @@ export function Composer({ value, onChange, onSend, sending, sendError, placehol
   return (
     <div className="border-t border-border bg-card">
       {sendError && (
-        <div className="px-3 pt-2 text-xs text-red-600 flex items-center gap-1">
+        <div className="px-3 pt-2 text-xs text-danger flex items-center gap-1">
           <span className="font-medium">Error:</span> {sendError}
         </div>
       )}

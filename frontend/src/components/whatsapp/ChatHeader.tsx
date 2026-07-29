@@ -57,7 +57,7 @@ export function ChatHeader({
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-purple-500 hover:text-purple-600 hover:bg-purple-50"
+            className="h-8 w-8 text-primary hover:text-primary/80 hover:bg-primary/10"
             onClick={() => setSummaryOpen(true)}
             title="Resumen IA"
           >
@@ -70,7 +70,7 @@ export function ChatHeader({
           <Button
             variant="outline"
             size="sm"
-            className="h-8 text-xs gap-1.5 border-amber-400/50 text-amber-600 hover:bg-amber-50"
+            className="h-8 text-xs gap-1.5 border-warning/50 text-warning hover:bg-warning/10"
             onClick={onHandoff}
             disabled={loadingAction}
           >
@@ -85,7 +85,7 @@ export function ChatHeader({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 text-xs gap-1.5 border-indigo-400/50 text-indigo-600 hover:bg-indigo-50"
+                  className="h-8 text-xs gap-1.5 border-info/50 text-info hover:bg-info/10"
                   disabled={loadingAction}
                 >
                   <User className="h-3.5 w-3.5" />
