@@ -94,8 +94,9 @@ export function TopBar() {
 
   const buildCtx = (extra?: Record<string, unknown>): Record<string, unknown> => ({
     ...currentContext,
-    screen: pathname.replace(/^\//, ""),
-    ...(contactIdFromUrl ? { contact_id: contactIdFromUrl } : {}),
+    // Normalize: contact detail pages use screen="lead" so enrich_context() activates _enrich_lead()
+    screen: contactIdFromUrl ? "lead" : pathname.replace(/^\//, ""),
+    ...(contactIdFromUrl ? { lead_id: contactIdFromUrl } : {}),
     ...extra,
   });
 

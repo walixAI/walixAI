@@ -17,6 +17,7 @@ import { ContactLeftPanel } from "@/components/contacts/detail/ContactLeftPanel"
 import { ContactRightPanel } from "@/components/contacts/detail/ContactRightPanel";
 import { ContactTabs } from "@/components/contacts/detail/ContactTabs";
 import { ContactDetailSkeleton } from "@/components/ui/ContactDetailSkeleton";
+import { FirstContactAIBanner } from "@/components/contacts/detail/FirstContactAIBanner";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ContactAvatar } from "@/components/ui/ContactAvatar";
@@ -164,15 +165,23 @@ export default function ContactDetailPage() {
             />
           }
           center={
-            <ContactTabs
-              contact={contact}
-              recentActivities={activitiesData?.items ?? []}
-              activitiesTotal={activitiesData?.total ?? 0}
-              activitiesLoading={activitiesLoading}
-              activitiesQueryKey={activitiesQueryKey}
-              activeTab={activeTab}
-              onTabChange={setActiveTab}
-            />
+            <>
+              {!activitiesLoading && (
+                <FirstContactAIBanner
+                  contactId={contactId}
+                  activitiesTotal={activitiesData?.total ?? 0}
+                />
+              )}
+              <ContactTabs
+                contact={contact}
+                recentActivities={activitiesData?.items ?? []}
+                activitiesTotal={activitiesData?.total ?? 0}
+                activitiesLoading={activitiesLoading}
+                activitiesQueryKey={activitiesQueryKey}
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
+              />
+            </>
           }
           rightPanel={<ContactRightPanel contactId={contactId} />}
         />

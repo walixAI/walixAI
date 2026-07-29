@@ -217,6 +217,7 @@ async def interpret_command(
 async def get_context_insight(
     screen: str = Query(..., description="pipeline|lead|dashboard"),
     branch_id: uuid.UUID | None = Query(default=None),
+    lead_id: uuid.UUID | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ContextInsightResponse:
@@ -224,6 +225,8 @@ async def get_context_insight(
     context: dict[str, Any] = {"screen": screen}
     if branch_id:
         context["branch_id"] = str(branch_id)
+    if lead_id:
+        context["lead_id"] = str(lead_id)
 
     enriched = await enrich_context(context, current_user, db)
 

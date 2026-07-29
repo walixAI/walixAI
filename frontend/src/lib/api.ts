@@ -1240,9 +1240,11 @@ export const api = {
   async getContextInsight(
     screen: string,
     branch_id?: string,
+    lead_id?: string,
   ): Promise<ContextInsightResponse> {
     const qs = new URLSearchParams({ screen });
     if (branch_id) qs.set("branch_id", branch_id);
+    if (lead_id) qs.set("lead_id", lead_id);
     return request(`/api/ai/context-insight?${qs}`);
   },
 
