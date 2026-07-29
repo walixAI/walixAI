@@ -1383,6 +1383,11 @@ export const api = {
     });
   },
 
+  // AI conversation summary
+  async getConversationSummary(conversationId: string): Promise<{ summary: string }> {
+    return request(`/api/ai/conversation-summary?conversation_id=${conversationId}`);
+  },
+
   // Automations
   async getAutomations(params: {
     page?: number;

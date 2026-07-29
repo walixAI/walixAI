@@ -1,4 +1,5 @@
-import { ChevronRight, Bot, UserCheck, UserMinus, User } from "lucide-react";
+import { useState } from "react";
+import { ChevronRight, Bot, UserCheck, UserMinus, User, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -9,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusBadge } from "./StatusBadge";
+import { AiSummaryDialog } from "./AiSummaryDialog";
 import type { LeadDetail, ConversationOut, UserBrief } from "@/lib/api";
 
 interface Props {
@@ -34,8 +36,10 @@ export function ChatHeader({
   assignees,
   loadingAction,
 }: Props) {
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const displayName = lead.name ?? lead.wa_phone;
   const isHandedOff = conversation?.current_handler === "human";
+  const conversationId = conversation?.conversation_id ?? null;
 
   return (
     <div className="border-b border-border bg-card px-4 py-3 flex items-center gap-3">
@@ -48,6 +52,19 @@ export function ChatHeader({
       </div>
 
       <div className="ml-auto flex items-center gap-1.5">
+        {/* AI summary */}
+        {conversationId && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-purple-500 hover:text-purple-600 hover:bg-purple-50"
+            onClick={() => setSummaryOpen(true)}
+            title="Resumen IA"
+          >
+            <Sparkles className="h-4 w-4" />
+          </Button>
+        )}
+
         {/* Handoff controls */}
         {!isHandedOff ? (
           <Button
@@ -121,6 +138,15 @@ export function ChatHeader({
           <ChevronRight className={`h-4 w-4 transition ${panelOpen ? "rotate-180" : ""}`} />
         </Button>
       </div>
+
+      {conversationId && (
+        <AiSummaryDialog
+          open={summaryOpen}
+          onOpenChange={setSummaryOpen}
+          conversationId={conversationId}
+          contactId={lead.id}
+        />
+      )}
     </div>
   );
 }

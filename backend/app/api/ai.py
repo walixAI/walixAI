@@ -25,6 +25,8 @@ from app.api.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.ai_log import AICommandLog
+from app.models.conversation import Conversation, Message
+from app.models.tenant import Branch
 from app.models.user import User, UserRole
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,10 @@ class ContextInsightResponse(BaseModel):
     insight: str
     urgency: str  # "low" | "medium" | "high"
     suggested_actions: list[str]
+
+
+class SummaryResponse(BaseModel):
+    summary: str
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -253,3 +259,67 @@ async def get_context_insight(
         urgency=str(parsed.get("urgency", "low")),
         suggested_actions=list(parsed.get("suggested_actions") or []),
     )
+
+
+@router.get("/conversation-summary", response_model=SummaryResponse)
+async def get_conversation_summary(
+    conversation_id: uuid.UUID = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SummaryResponse:
+    """Returns an AI-generated summary of the last 50 messages in a conversation."""
+    from sqlalchemy import select
+
+    conv = await db.get(Conversation, conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    branch = await db.get(Branch, conv.branch_id)
+    if branch is None or branch.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Sin acceso a esta conversación")
+
+    stmt = (
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc())
+        .limit(50)
+    )
+    result = await db.execute(stmt)
+    messages = list(reversed(result.scalars().all()))
+
+    if not messages:
+        return SummaryResponse(summary="No hay mensajes en esta conversación.")
+
+    transcript = "\n".join(
+        f"{'Cliente' if m.role == 'user' else 'Agente'}: {m.content}"
+        for m in messages
+        if m.role in ("user", "assistant")
+    )
+
+    prompt = (
+        "Eres un asistente de CRM para PyMEs mexicanas. Resume la siguiente conversación de WhatsApp "
+        "en un párrafo conciso (máx 3 oraciones). Destaca: temas principales, necesidades del cliente "
+        "y próximos pasos acordados.\n\n"
+        f"CONVERSACIÓN:\n{transcript}\n\n"
+        "Responde ÚNICAMENTE con este JSON:\n"
+        '{"summary": "Resumen aquí"}'
+    )
+
+    try:
+        response = await _anthropic.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        parsed = _extract_json(response.content[0].text)
+        summary = str(parsed.get("summary", "No se pudo generar el resumen."))
+    except Exception:
+        logger.exception(
+            "ai/conversation-summary: failed for conversation=%s", conversation_id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="No se pudo generar el resumen. Intenta de nuevo.",
+        )
+
+    return SummaryResponse(summary=summary)
