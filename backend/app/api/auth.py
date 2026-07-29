@@ -56,6 +56,8 @@ class TenantOut(BaseModel):
     industry_label: str | None = None
     entity_name: str = "Contacto"
     entity_plural: str = "Contactos"
+    deal_name: str = "Oportunidad"
+    deal_plural: str = "Oportunidades"
     contact_statuses: list = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -206,6 +208,8 @@ async def me(
         industry_label=tenant.industry_label if tenant else None,
         entity_name=(tenant.entity_name or "Contacto") if tenant else "Contacto",
         entity_plural=(tenant.entity_plural or "Contactos") if tenant else "Contactos",
+        deal_name=(tenant.deal_name or "Oportunidad") if tenant else "Oportunidad",
+        deal_plural=(tenant.deal_plural or "Oportunidades") if tenant else "Oportunidades",
         contact_statuses=tenant.contact_statuses_config or [] if tenant else [],
     )
     return MeResponse(

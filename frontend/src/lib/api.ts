@@ -229,10 +229,9 @@ export interface TenantData {
   industry_label: string | null;
   entity_name: string;
   entity_plural: string;
+  deal_name: string;
+  deal_plural: string;
   contact_statuses: Array<{ key: string; label: string; color: string }>;
-  // TODO(backend): añadir deal_name / deal_plural al modelo Tenant (tabla tenants,
-  // schema TenantOut, endpoint /api/auth/me). Por ahora no existen — el store
-  // los lee con `(tenant as any)?.deal_name` y cae al default "Oportunidad"/"Oportunidades".
 }
 
 export interface MeResponse {

@@ -64,6 +64,12 @@ class Tenant(Base):
     entity_plural: Mapped[str] = mapped_column(
         String(50), nullable=False, server_default="Contactos"
     )
+    deal_name: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="Oportunidad"
+    )
+    deal_plural: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="Oportunidades"
+    )
     contact_statuses_config: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, server_default="[]"
     )
@@ -108,6 +114,10 @@ class Tenant(Base):
     def get_entity_display(self, plural: bool = False) -> str:
         """Retorna el nombre de la entidad (singular o plural) para este tenant."""
         return self.entity_plural if plural else self.entity_name
+
+    def get_deal_display(self, plural: bool = False) -> str:
+        """Retorna el nombre del deal (singular o plural) para este tenant."""
+        return self.deal_plural if plural else self.deal_name
 
 
 class Company(Base):

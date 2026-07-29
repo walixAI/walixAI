@@ -10,8 +10,6 @@ interface AuthState {
   entityName: string;
   entityPlural: string;
   contactStatuses: Array<{ key: string; label: string; color: string }>;
-  // TODO(backend): deal_name / deal_plural no existen aún en el modelo Tenant del backend.
-  // Añadirlos en un prompt de backend aparte (tabla tenants + TenantOut schema + /api/auth/me).
   dealName: string;
   dealPlural: string;
   setUser: (user: WalixUser | null) => void;
@@ -43,10 +41,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       entityName: tenant?.entity_name || "Contacto",
       entityPlural: tenant?.entity_plural || "Contactos",
       contactStatuses: tenant?.contact_statuses || [],
-      // TODO(backend): deal_name / deal_plural no existen en TenantData — siempre caen al default.
-      // Añadir en el backend y en la interfaz TenantData (src/lib/api.ts) en un prompt aparte.
-      dealName: (tenant as any)?.deal_name || "Oportunidad",
-      dealPlural: (tenant as any)?.deal_plural || "Oportunidades",
+      dealName: tenant?.deal_name || "Oportunidad",
+      dealPlural: tenant?.deal_plural || "Oportunidades",
     }),
 
   setEntityName: (entityName) => set({ entityName }),
