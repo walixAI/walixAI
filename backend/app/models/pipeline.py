@@ -77,6 +77,7 @@ class PipelineStage(Base):
         Si branch_id es None, usa la primera branch activa del tenant.
         Retorna el número de stages creadas.
         """
+        from app.models.pipeline_group import Pipeline
         from app.models.tenant import Branch
 
         if branch_id is None:
@@ -90,11 +91,31 @@ class PipelineStage(Base):
             if branch_id is None:
                 return 0
 
+        # Resolve or create the default Pipeline for this branch.
+        pipeline_result = await db.execute(
+            select(Pipeline).where(
+                Pipeline.branch_id == branch_id,
+                Pipeline.is_default.is_(True),
+            ).limit(1)
+        )
+        pipeline = pipeline_result.scalar_one_or_none()
+        if pipeline is None:
+            pipeline = Pipeline(
+                tenant_id=tenant_id,
+                branch_id=branch_id,
+                name="Pipeline Principal",
+                is_default=True,
+                position=0,
+            )
+            db.add(pipeline)
+            await db.flush()
+
         created = 0
         for stage in stages:
             db.add(cls(
                 tenant_id=tenant_id,
                 branch_id=branch_id,
+                pipeline_id=pipeline.id,
                 name=stage["label"],
                 slug=stage["key"],
                 stage_key=stage["key"],

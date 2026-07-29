@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.models.lead import Lead, LeadStatus
 from app.models.meta_ads import MetaLeadConfig
 from app.models.pipeline import PipelineStage
+from app.models.pipeline_group import Pipeline
 from app.models.tenant import Branch
 from app.models.user import User, UserRole
 
@@ -399,20 +400,47 @@ class PipelineStageOut(BaseModel):
     color: str | None
     is_won: bool
     is_lost: bool
+    pipeline_id: uuid.UUID
 
 
 @router.get("/{branch_id}/pipeline", response_model=list[PipelineStageOut])
 async def get_branch_pipeline(
     branch_id: uuid.UUID,
+    pipeline_id: uuid.UUID | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[PipelineStageOut]:
-    """Returns active pipeline stages for a branch ordered by order_index."""
+    """Returns active pipeline stages for a branch ordered by order_index.
+
+    If pipeline_id is provided, returns stages for that specific pipeline
+    (must belong to the branch). If omitted, uses the branch's default pipeline.
+    Returns empty list if no default pipeline exists.
+    """
     await _require_branch_access(current_user, branch_id, db)
+
+    if pipeline_id is not None:
+        # Validate the requested pipeline belongs to this branch
+        pipeline = await db.get(Pipeline, pipeline_id)
+        if pipeline is None or pipeline.branch_id != branch_id:
+            raise HTTPException(status_code=404, detail="Pipeline no encontrado en esta branch")
+        resolved_pipeline_id = pipeline_id
+    else:
+        # Fall back to the branch's default pipeline
+        default_result = await db.execute(
+            select(Pipeline.id).where(
+                Pipeline.branch_id == branch_id,
+                Pipeline.is_default.is_(True),
+            ).limit(1)
+        )
+        resolved_pipeline_id = default_result.scalar_one_or_none()
+        if resolved_pipeline_id is None:
+            return []
+
     rows = await db.execute(
         select(PipelineStage)
         .where(
             PipelineStage.branch_id == branch_id,
+            PipelineStage.pipeline_id == resolved_pipeline_id,
             PipelineStage.is_active.is_(True),
         )
         .order_by(PipelineStage.order_index)
@@ -426,6 +454,7 @@ async def get_branch_pipeline(
             color=s.color,
             is_won=s.is_won,
             is_lost=s.is_lost,
+            pipeline_id=s.pipeline_id,
         )
         for s in rows.scalars().all()
     ]
