@@ -1,11 +1,27 @@
-"""Test suite for /api/opportunities endpoints.
+"""Test suite for /api/deals + /api/pipeline endpoints.
 
-Crea datos de prueba en la DB real (tenant de la clínica seed), corre cada caso,
-y limpia al final. Requiere que el servidor esté corriendo en localhost:8000.
+Adaptado de la suite original de /api/opportunities (eliminada en Etapa 3).
+Crea datos de prueba en la DB real (tenant de la clínica seed), corre cada
+caso y limpia al final. Requiere que el servidor esté corriendo en
+localhost:8000.
 
 Uso:
     cd backend
     .venv/bin/python scripts/test_pipeline_api.py
+
+Cobertura:
+  TEST 1  GET  /pipeline/board — agrupa leads por etapa
+  TEST 2  POST /deals — crear deal con lead
+  TEST 3  POST /deals con lead soft-deleted → 422
+  TEST 4  GET  /deals — lista con filtros is_won/is_lost
+  TEST 5  GET  /deals/{id} + GET /deals/{id}/stage-history
+  TEST 6  PATCH /deals/{id} — lost_reason inválido → 422
+  TEST 7  PATCH /deals/{id} — marcar perdido con lost_reason
+  TEST 8  OMITIDO — /deals/forecast sin equivalente en el API actual
+  TEST 9  OMITIDO — /deals/bulk/stage sin equivalente en el API actual
+  TEST 10 OMITIDO — /deals/export.csv sin equivalente en el API actual
+  TEST 11 DELETE /deals/{id} → 204
+  TEST 12 OMITIDO — /deals/stale sin equivalente en el API actual
 """
 from __future__ import annotations
 
@@ -26,9 +42,8 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.models.deal import Deal
 from app.models.lead import Lead, LeadStatus
-from app.models.opportunity import Opportunity
-from app.models.opportunity_activity import OpportunityActivity
 from app.models.pipeline import PipelineStage
 from app.models.tenant import Branch, Tenant
 from app.models.user import User
@@ -82,12 +97,11 @@ async def load_seed_context() -> dict:
             ).order_by(PipelineStage.order_index)
         )).scalars().all()
 
-        # Encontrar o crear etapas de prueba
         regular_stage = next((s for s in stages if not s.is_won and not s.is_lost), None)
         won_stage = next((s for s in stages if s.is_won), None)
         lost_stage = next((s for s in stages if s.is_lost), None)
 
-        # Crear un lead activo de prueba
+        # Lead activo de prueba
         lead = Lead(
             branch_id=branch.id,
             tenant_id=tenant.id,
@@ -97,7 +111,7 @@ async def load_seed_context() -> dict:
         )
         db.add(lead)
 
-        # Crear un lead soft-deleted de prueba
+        # Lead soft-deleted de prueba
         deleted_lead = Lead(
             branch_id=branch.id,
             tenant_id=tenant.id,
@@ -111,11 +125,6 @@ async def load_seed_context() -> dict:
         await db.flush()
         lead_id = lead.id
         deleted_lead_id = deleted_lead.id
-
-        # Set probability_default on regular_stage for inherit test
-        if regular_stage:
-            regular_stage.probability_default = 30
-
         await db.commit()
 
         return {
@@ -131,16 +140,16 @@ async def load_seed_context() -> dict:
 
 # ── Cleanup ────────────────────────────────────────────────────────────────────
 
-_created_opp_ids: list[str] = []
+_created_deal_ids: list[str] = []
 _created_lead_ids: list[str] = []
 
 
 async def cleanup(ctx: dict) -> None:
     async with AsyncSessionLocal() as db:
-        for opp_id in _created_opp_ids:
-            opp = await db.get(Opportunity, uuid.UUID(opp_id))
-            if opp:
-                await db.delete(opp)
+        for deal_id in _created_deal_ids:
+            deal = await db.get(Deal, uuid.UUID(deal_id))
+            if deal:
+                await db.delete(deal)
         for lead_id in _created_lead_ids:
             lead = await db.get(Lead, uuid.UUID(lead_id))
             if lead:
@@ -150,8 +159,8 @@ async def cleanup(ctx: dict) -> None:
             rows = (await db.execute(
                 select(Lead).where(Lead.name == name, Lead.tenant_id == uuid.UUID(ctx["tenant_id"]))
             )).scalars().all()
-            for l in rows:
-                await db.delete(l)
+            for lead in rows:
+                await db.delete(lead)
         await db.commit()
 
 
@@ -165,197 +174,119 @@ async def run_tests() -> None:
         token = await get_token(client)
         h = {"Authorization": f"Bearer {token}"}
 
-        print("\n── TEST 1: GET /board agrupa por etapa ──")
-        r = await client.get(f"{BASE}/opportunities/board", headers=h,
+        print("\n── TEST 1: GET /pipeline/board agrupa leads por etapa ──")
+        r = await client.get(f"{BASE}/pipeline/board", headers=h,
                              params={"branch_id": ctx["branch_id"]})
         check("board HTTP 200", r.status_code == 200, str(r.status_code))
         if r.status_code == 200:
             data = r.json()
             check("board tiene 'stages'", "stages" in data)
-            check("board tiene 'currency'", "currency" in data)
             if data["stages"]:
                 s = data["stages"][0]
-                check("stage tiene 'opportunities'", "opportunities" in s)
-                check("stage tiene 'total_amount'", "total_amount" in s)
+                check("stage tiene 'leads'", "leads" in s)
                 check("stage tiene 'total'", "total" in s)
-                check("stage tiene 'probability_default'", "probability_default" in s)
+                check("stage tiene 'is_won'", "is_won" in s)
+                check("stage tiene 'is_lost'", "is_lost" in s)
 
-        print("\n── TEST 2: POST / crear oportunidad con lead ──")
-        r = await client.post(f"{BASE}/opportunities", headers=h, json={
-            "title": "Oportunidad Test A",
+        print("\n── TEST 2: POST /deals — crear deal con lead ──")
+        r = await client.post(f"{BASE}/deals", headers=h, json={
+            "title": "Deal Test A",
             "lead_id": ctx["lead_id"],
-            "stage_id": ctx["regular_stage_id"],
-            "branch_id": ctx["branch_id"],
+            "pipeline_stage_id": ctx["regular_stage_id"],
             "amount": "15000.00",
-            "currency": "MXN",
-            "close_date": str(date.today()),
+            "expected_close_date": str(date.today()),
         })
-        check("crear oportunidad HTTP 201", r.status_code == 201, str(r.status_code))
-        opp_a_id: str | None = None
+        check("crear deal HTTP 201", r.status_code == 201, str(r.status_code))
+        deal_a_id: str | None = None
         if r.status_code == 201:
-            opp_a = r.json()
-            opp_a_id = opp_a["id"]
-            _created_opp_ids.append(opp_a_id)
-            check("opp tiene title", opp_a.get("title") == "Oportunidad Test A")
-            check("probability heredada de etapa (30)", opp_a.get("probability") == 30)
-            check("status=open", opp_a.get("status") == "open")
-            check("currency en mayúsculas", opp_a.get("currency") == "MXN")
+            deal_a = r.json()
+            deal_a_id = deal_a["id"]
+            _created_deal_ids.append(deal_a_id)
+            check("deal tiene title", deal_a.get("title") == "Deal Test A")
+            check("is_won=False", deal_a.get("is_won") is False)
+            check("is_lost=False", deal_a.get("is_lost") is False)
+            check("amount=15000", float(deal_a.get("amount", 0)) == 15000.0)
 
-        print("\n── TEST 3: POST / con lead soft-deleted → 409 ──")
-        r = await client.post(f"{BASE}/opportunities", headers=h, json={
-            "title": "Oportunidad Lead Eliminado",
+        print("\n── TEST 3: POST /deals con lead soft-deleted → 422 ──")
+        r = await client.post(f"{BASE}/deals", headers=h, json={
+            "title": "Deal Lead Eliminado",
             "lead_id": ctx["deleted_lead_id"],
-            "stage_id": ctx["regular_stage_id"],
-            "branch_id": ctx["branch_id"],
+            "pipeline_stage_id": ctx["regular_stage_id"],
         })
-        check("lead soft-deleted → 409", r.status_code == 409, str(r.status_code))
-        if r.status_code == 409:
-            check("mensaje de error en español", "eliminado" in r.json().get("detail", "").lower())
+        check("lead soft-deleted → 422", r.status_code == 422, str(r.status_code))
 
-        print("\n── TEST 4: GET / lista con filtros ──")
-        r = await client.get(f"{BASE}/opportunities", headers=h,
-                             params={"branch_id": ctx["branch_id"], "status": "open"})
+        print("\n── TEST 4: GET /deals — lista con filtros ──")
+        r = await client.get(f"{BASE}/deals", headers=h,
+                             params={"is_won": "false", "is_lost": "false"})
         check("lista HTTP 200", r.status_code == 200, str(r.status_code))
         if r.status_code == 200:
             data = r.json()
             check("lista tiene 'items' y 'total'", "items" in data and "total" in data)
+            if deal_a_id:
+                ids = [item["id"] for item in data.get("items", [])]
+                check("deal_a aparece en la lista", deal_a_id in ids)
 
-        print("\n── TEST 5: GET /{id} detalle con historial ──")
-        if opp_a_id:
-            r = await client.get(f"{BASE}/opportunities/{opp_a_id}", headers=h)
-            check("detalle HTTP 200", r.status_code == 200, str(r.status_code))
+        print("\n── TEST 5: GET /deals/{id} + stage-history ──")
+        if deal_a_id:
+            r = await client.get(f"{BASE}/deals/{deal_a_id}", headers=h)
+            check("detalle deal HTTP 200", r.status_code == 200, str(r.status_code))
             if r.status_code == 200:
                 detail = r.json()
-                check("detalle tiene 'activities'", "activities" in detail)
-                check("detalle tiene 'history'", "history" in detail)
-                check("actividad 'created' registrada",
-                      any(a["type"] == "created" for a in detail.get("activities", [])))
+                check("detalle tiene 'id'", "id" in detail)
+                check("detalle tiene 'pipeline_stage_id'", "pipeline_stage_id" in detail)
+                check("detalle tiene 'is_won'", "is_won" in detail)
 
-        print("\n── TEST 6: PATCH /{id}/stage → etapa lost → 422 requires_reason ──")
-        if opp_a_id and ctx["lost_stage_id"]:
-            r = await client.patch(
-                f"{BASE}/opportunities/{opp_a_id}/stage",
-                headers=h,
-                json={"stage_id": ctx["lost_stage_id"]},
-            )
-            check("stage a lost → 422", r.status_code == 422, str(r.status_code))
-            if r.status_code == 422:
-                detail = r.json().get("detail", {})
-                check("requires_reason=true en detail",
-                      (isinstance(detail, dict) and detail.get("requires_reason") is True)
-                      or (isinstance(detail, list) and any(
-                          isinstance(e, dict) and e.get("requires_reason") for e in detail
-                      )),
-                      str(detail))
-        elif not ctx["lost_stage_id"]:
-            print("  [SKIP] Sin etapa is_lost configurada")
+            r2 = await client.get(f"{BASE}/deals/{deal_a_id}/stage-history", headers=h)
+            check("stage-history HTTP 200", r2.status_code == 200, str(r2.status_code))
+            if r2.status_code == 200:
+                check("stage-history es lista", isinstance(r2.json(), list))
 
-        print("\n── TEST 7: POST /{id}/lost completa ──")
-        if opp_a_id and ctx["lost_stage_id"]:
-            r = await client.post(
-                f"{BASE}/opportunities/{opp_a_id}/lost",
-                headers=h,
-                json={"lost_reason": "Precio muy alto", "reason_code": "price"},
-            )
-            check("mark_lost HTTP 200", r.status_code == 200, str(r.status_code))
+        print("\n── TEST 6: PATCH /deals/{id} — lost_reason inválido → 422 ──")
+        if deal_a_id:
+            r = await client.patch(f"{BASE}/deals/{deal_a_id}", headers=h,
+                                   json={"lost_reason": "razon_no_valida"})
+            check("lost_reason inválido → 422", r.status_code == 422, str(r.status_code))
+
+        print("\n── TEST 7: PATCH /deals/{id} — marcar perdido ──")
+        if deal_a_id and ctx["lost_stage_id"]:
+            r = await client.patch(f"{BASE}/deals/{deal_a_id}", headers=h, json={
+                "is_lost": True,
+                "lost_reason": "price",
+                "pipeline_stage_id": ctx["lost_stage_id"],
+            })
+            check("marcar perdido HTTP 200", r.status_code == 200, str(r.status_code))
             if r.status_code == 200:
                 data = r.json()
-                check("status=lost", data.get("status") == "lost")
-                check("lost_reason guardado", data.get("lost_reason") == "Precio muy alto")
-                check("lost_at tiene valor", data.get("lost_at") is not None)
+                check("is_lost=True", data.get("is_lost") is True)
+                check("lost_reason=price", data.get("lost_reason") == "price")
         elif not ctx["lost_stage_id"]:
             print("  [SKIP] Sin etapa is_lost configurada")
 
-        print("\n── TEST 8: weighted_total correcto ──")
-        # Crear oportunidad con monto y probabilidad conocidos
-        r = await client.post(f"{BASE}/opportunities", headers=h, json={
-            "title": "Opp Forecast Test",
-            "stage_id": ctx["regular_stage_id"],
-            "branch_id": ctx["branch_id"],
-            "amount": "10000.00",
-            "probability": 50,
+        # TEST 8: forecast — OMITIDO (sin equivalente en /api/deals actual)
+        # TEST 9: bulk/stage — OMITIDO (sin equivalente en /api/deals actual)
+        # TEST 10: export.csv — OMITIDO (sin equivalente en /api/deals actual)
+
+        print("\n── TEST 11: DELETE /deals/{id} → 204 ──")
+        # Crear un deal fresco para borrar (deal_a puede estar ya marcado perdido)
+        r = await client.post(f"{BASE}/deals", headers=h, json={
+            "title": "Deal Para Borrar",
+            "lead_id": ctx["lead_id"],
+            "pipeline_stage_id": ctx["regular_stage_id"],
         })
-        opp_b_id: str | None = None
+        deal_del_id: str | None = None
         if r.status_code == 201:
-            opp_b_id = r.json()["id"]
-            _created_opp_ids.append(opp_b_id)
+            deal_del_id = r.json()["id"]
+            _created_deal_ids.append(deal_del_id)
 
-        r = await client.get(f"{BASE}/opportunities/forecast", headers=h,
-                             params={"branch_id": ctx["branch_id"]})
-        check("forecast HTTP 200", r.status_code == 200, str(r.status_code))
-        if r.status_code == 200:
-            fc = r.json()
-            check("forecast tiene pipeline_total", "pipeline_total" in fc)
-            check("forecast tiene weighted_total", "weighted_total" in fc)
-            check("forecast tiene active_count", "active_count" in fc)
-            check("forecast tiene trend", fc.get("trend") in ("up", "down", "flat"))
-            if opp_b_id:
-                wt = float(fc.get("weighted_total", 0))
-                check("weighted_total >= 5000 (10000 * 0.5)", wt >= 5000, f"wt={wt}")
-
-        print("\n── TEST 9: bulk/stage ──")
-        # Crear dos oportunidades nuevas para mover en bulk
-        opp_bulk_ids: list[str] = []
-        for title in ["Bulk A", "Bulk B"]:
-            r = await client.post(f"{BASE}/opportunities", headers=h, json={
-                "title": title,
-                "stage_id": ctx["regular_stage_id"],
-                "branch_id": ctx["branch_id"],
-                "amount": "1000.00",
-            })
-            if r.status_code == 201:
-                bid = r.json()["id"]
-                opp_bulk_ids.append(bid)
-                _created_opp_ids.append(bid)
-
-        if opp_bulk_ids and ctx["regular_stage_id"]:
-            r = await client.post(f"{BASE}/opportunities/bulk/stage", headers=h, json={
-                "ids": opp_bulk_ids,
-                "stage_id": ctx["regular_stage_id"],
-            })
-            check("bulk/stage HTTP 200", r.status_code == 200, str(r.status_code))
-            if r.status_code == 200:
-                items = r.json()
-                check(f"bulk/stage retorna {len(opp_bulk_ids)} items",
-                      len(items) == len(opp_bulk_ids), str(len(items)))
-
-        print("\n── TEST 10: export.csv 200 utf-8-sig ──")
-        r = await client.get(
-            f"{BASE}/opportunities/export.csv",
-            headers=h,
-            params={"branch_id": ctx["branch_id"]},
-        )
-        check("export.csv HTTP 200", r.status_code == 200, str(r.status_code))
-        if r.status_code == 200:
-            content_type = r.headers.get("content-type", "")
-            check("content-type es text/csv", "text/csv" in content_type, content_type)
-            content = r.content
-            check("empieza con BOM utf-8-sig (\\xef\\xbb\\xbf)",
-                  content[:3] == b"\xef\xbb\xbf", repr(content[:3]))
-            # Decodificar y verificar encabezado
-            text = content.decode("utf-8-sig")
-            first_line = text.splitlines()[0] if text.strip() else ""
-            check("encabezado CSV correcto",
-                  "Oportunidad" in first_line and "Contacto" in first_line,
-                  repr(first_line[:80]))
-
-        print("\n── TEST 11: DELETE /{id} soft-delete ──")
-        if opp_b_id:
-            r = await client.delete(f"{BASE}/opportunities/{opp_b_id}", headers=h)
+        if deal_del_id:
+            r = await client.delete(f"{BASE}/deals/{deal_del_id}", headers=h)
             check("delete HTTP 204", r.status_code == 204, str(r.status_code))
-            # Verificar que no aparece en lista
-            r2 = await client.get(f"{BASE}/opportunities/{opp_b_id}", headers=h)
-            check("opp eliminada → 404", r2.status_code == 404, str(r2.status_code))
-            opp_b_id = None  # ya eliminada, no limpiar de nuevo
+            r2 = await client.get(f"{BASE}/deals/{deal_del_id}", headers=h)
+            check("deal eliminado → 404", r2.status_code == 404, str(r2.status_code))
+            if deal_del_id in _created_deal_ids:
+                _created_deal_ids.remove(deal_del_id)  # ya borrado vía API
 
-        print("\n── TEST 12: GET /stale ──")
-        r = await client.get(f"{BASE}/opportunities/stale", headers=h,
-                             params={"branch_id": ctx["branch_id"], "days": "10"})
-        check("stale HTTP 200", r.status_code == 200, str(r.status_code))
-        if r.status_code == 200:
-            data = r.json()
-            check("stale tiene count, total_amount, items",
-                  "count" in data and "total_amount" in data and "items" in data)
+        # TEST 12: stale — OMITIDO (sin equivalente en /api/deals actual)
 
     await cleanup(ctx)
 
@@ -364,7 +295,7 @@ async def run_tests() -> None:
 
 async def main() -> None:
     print("=" * 60)
-    print("  test_pipeline_api.py — Módulo Oportunidades")
+    print("  test_pipeline_api.py — Deals + Pipeline board")
     print("=" * 60)
 
     try:
