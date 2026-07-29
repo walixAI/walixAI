@@ -17,6 +17,7 @@ from app.models.activity import ActivityType, LeadActivity
 from app.models.agent import AgentSuggestion
 from app.models.lead import Lead, LeadStatus
 from app.models.pipeline import PipelineStage
+from app.models.pipeline_group import Pipeline
 from app.models.tenant import Branch
 from app.models.user import User, UserRole
 from app.services.whatsapp import WhatsAppService
@@ -55,10 +56,22 @@ async def _run_pipeline(branch_id: uuid.UUID, db: AsyncSession) -> bool:
     week_ago = datetime.now(timezone.utc) - timedelta(days=7)
     prev_week_start = week_ago - timedelta(days=7)
 
-    # Active pipeline stages for the branch
+    # Resolve the default pipeline for this branch
+    default_pipeline_result = await db.execute(
+        select(Pipeline.id).where(
+            Pipeline.branch_id == branch_id,
+            Pipeline.is_default.is_(True),
+        ).limit(1)
+    )
+    default_pipeline_id = default_pipeline_result.scalar_one_or_none()
+    if default_pipeline_id is None:
+        return False
+
+    # Active pipeline stages for the branch's default pipeline
     stages_result = await db.execute(
         select(PipelineStage).where(
             PipelineStage.branch_id == branch_id,
+            PipelineStage.pipeline_id == default_pipeline_id,
             PipelineStage.is_active.is_(True),
         ).order_by(PipelineStage.order_index)
     )

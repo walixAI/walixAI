@@ -20,6 +20,7 @@ from app.models.conversation import Conversation, ConversationHandler, Message, 
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.metrics import DailyMetric, SentimentSnapshot
 from app.models.pipeline import PipelineStage
+from app.models.pipeline_group import resolve_default_pipeline_id
 from app.models.scoring import LeadScore
 from app.models.tenant import Branch, Tenant
 from app.models.user import User, UserRole
@@ -537,26 +538,34 @@ async def get_roi(
                 avg_messages_to_qualify = round(sum(msg_counts.values()) / len(msg_counts), 1)
 
     # ── Conversión ────────────────────────────────────────────────────────────
-    # Get winning stages for tenant branches
-    won_stages_result = await db.execute(
-        select(PipelineStage.id).where(
-            PipelineStage.tenant_id == current_user.tenant_id,
-            PipelineStage.is_won.is_(True),
-            PipelineStage.is_active.is_(True),
-        )
+    # Resolve default pipeline once for both won_stages and all_stages queries
+    roi_pipeline_id = await resolve_default_pipeline_id(
+        current_user.tenant_id, db, user_branch_id=current_user.branch_id
     )
-    won_stage_ids = set(won_stages_result.scalars().all())
+
+    if roi_pipeline_id is None:
+        won_stage_ids: set = set()
+        all_stages = []
+    else:
+        won_stages_result = await db.execute(
+            select(PipelineStage.id).where(
+                PipelineStage.pipeline_id == roi_pipeline_id,
+                PipelineStage.is_won.is_(True),
+                PipelineStage.is_active.is_(True),
+            )
+        )
+        won_stage_ids = set(won_stages_result.scalars().all())
+
+        all_stages_result = await db.execute(
+            select(PipelineStage).where(
+                PipelineStage.pipeline_id == roi_pipeline_id,
+                PipelineStage.is_active.is_(True),
+            ).order_by(PipelineStage.order_index)
+        )
+        all_stages = all_stages_result.scalars().all()
+
     converted = sum(1 for l in leads if l.pipeline_stage_id in won_stage_ids)
     conversion_rate = round(converted / leads_total * 100, 1) if leads_total else 0.0
-
-    # Pipeline breakdown per stage (for tenant, not just period leads)
-    all_stages_result = await db.execute(
-        select(PipelineStage).where(
-            PipelineStage.tenant_id == current_user.tenant_id,
-            PipelineStage.is_active.is_(True),
-        ).order_by(PipelineStage.order_index)
-    )
-    all_stages = all_stages_result.scalars().all()
 
     pipeline_by_stage: list[PipelineStageROI] = []
     for stage in all_stages:

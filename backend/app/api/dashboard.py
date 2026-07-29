@@ -31,6 +31,7 @@ from app.models.conversation import Conversation, Message
 from app.models.lead import Lead, LeadStatus
 from app.models.metrics import SentimentSnapshot
 from app.models.pipeline import PipelineStage
+from app.models.pipeline_group import resolve_default_pipeline_id
 from app.models.scoring import LeadScore
 from app.models.tenant import Branch, Tenant
 from app.models.user import User, UserRole
@@ -691,11 +692,17 @@ async def get_pipeline_by_stage(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
+    resolved_pipeline_id = await resolve_default_pipeline_id(
+        current_user.tenant_id, db, user_branch_id=current_user.branch_id
+    )
+    if resolved_pipeline_id is None:
+        return []
+
     stages = (
         await db.execute(
             select(PipelineStage)
             .where(
-                PipelineStage.tenant_id == current_user.tenant_id,
+                PipelineStage.pipeline_id == resolved_pipeline_id,
                 PipelineStage.is_archived.is_(False),
             )
             .order_by(PipelineStage.order_index)
