@@ -1,3 +1,6 @@
+// Archivado en Etapa 3 — huérfano desde que ListView.tsx dejó de usarse.
+// Contiene UI de score/sentiment/asignación de lead que DealDrawer.tsx no tiene hoy
+// — útil como referencia si se decide enriquecer DealDrawer con esos datos.
 import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
