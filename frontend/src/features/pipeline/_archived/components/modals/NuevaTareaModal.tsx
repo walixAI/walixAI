@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { api, type TeamMemberOut } from "@/lib/api";
-import { useOpportunityStore } from "@/stores/opportunityStore";
+import { useOpportunityStore } from "../../opportunityStore";
 import {
   Dialog,
   DialogContent,

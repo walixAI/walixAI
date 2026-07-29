@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { OppCard } from "@/lib/api";
-import { useOpportunityStore } from "@/stores/opportunityStore";
+import { useOpportunityStore } from "../opportunityStore";
 import { useOpportunityHealth } from "../hooks/useOpportunityHealth";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

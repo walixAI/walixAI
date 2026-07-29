@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Loader2, Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api, type LeadListItem } from "@/lib/api";
-import { useOpportunityStore, oppReadToCard } from "@/stores/opportunityStore";
+import { useOpportunityStore, oppReadToCard } from "../../opportunityStore";
 import {
   Dialog,
   DialogContent,

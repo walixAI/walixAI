@@ -7,7 +7,7 @@ import {
   type PipelineInsightRisk,
   type PipelineInsightRecommendation,
 } from "@/lib/api";
-import { useOpportunityStore } from "@/stores/opportunityStore";
+import { useOpportunityStore } from "../opportunityStore";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";

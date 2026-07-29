@@ -2,7 +2,7 @@ import { useState } from "react";
 import { X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import { useOpportunityStore } from "@/stores/opportunityStore";
+import { useOpportunityStore } from "../opportunityStore";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,

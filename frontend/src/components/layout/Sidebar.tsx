@@ -151,6 +151,7 @@ function NavItem({
       end={end}
       title={collapsed ? label : undefined}
       aria-label={label}
+      data-tour={`nav-${to.replace(/^\//, "")}`}
       className={({ isActive }) =>
         cn(
           "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",

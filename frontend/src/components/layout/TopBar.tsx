@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { ArrowRight, LogOut, User as UserIcon, Loader2 } from "lucide-react";
+import { ArrowRight, LogOut, User as UserIcon, Loader2, MapPin } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -134,6 +134,7 @@ export function TopBar() {
 
       {/* Walix AI input — fills the flex-1 space */}
       <div
+        data-tour="ai-prompt"
         className={cn(
           "flex-1 flex items-center gap-2 h-9 rounded-lg border px-3 transition-colors",
           "bg-muted/50 border-border/60",
@@ -205,6 +206,11 @@ export function TopBar() {
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => navigate("/profile")}>
             <UserIcon className="h-4 w-4 mr-2" /> Perfil
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => window.dispatchEvent(new CustomEvent("walix:restart-tour"))}
+          >
+            <MapPin className="h-4 w-4 mr-2" /> Ver tour de bienvenida
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={signOut} className="text-danger focus:text-danger">

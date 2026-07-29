@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { ArrowUp, ArrowDown, ArrowUpDown, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useOpportunityStore } from "@/stores/opportunityStore";
+import { useOpportunityStore } from "../opportunityStore";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";

@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { useOpportunityStore } from "@/stores/opportunityStore";
+import { useOpportunityStore } from "../opportunityStore";
 
 function formatMXN(n: number): string {
   return new Intl.NumberFormat("es-MX", {

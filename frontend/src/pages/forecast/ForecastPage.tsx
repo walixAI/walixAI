@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { TrendingUp, AlertTriangle, CheckCircle2, Activity } from "lucide-react";
 import { api } from "@/lib/api";
-import { useAuthStore } from "@/store/auth";
+import { useAuthStore } from "@/stores/auth";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { KpiCardsSkeleton } from "@/components/walix/Skeletons";
 import { LeadScoreBadge } from "@/components/leads/LeadScoreBadge";

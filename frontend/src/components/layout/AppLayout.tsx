@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -5,13 +6,28 @@ import { BottomNav } from "./BottomNav";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { TrialBanner } from "./TrialBanner";
 import { CommandPalette } from "./CommandPalette";
+import { OnboardingTour, useAutoOnboardingTour, resetTour } from "@/components/walix/OnboardingTour";
+import { useAuth } from "@/hooks/useAuth";
 
 export function AppLayout() {
+  const tour = useAutoOnboardingTour();
+  const { user } = useAuth();
+
+  useEffect(() => {
+    const handler = () => {
+      if (user?.id) resetTour(user.id);
+      tour.start();
+    };
+    window.addEventListener("walix:restart-tour", handler as EventListener);
+    return () => window.removeEventListener("walix:restart-tour", handler as EventListener);
+  }, [user?.id, tour.start]);
+
   return (
     <div className="min-h-screen w-full flex flex-col bg-background">
       <ImpersonationBanner />
       <TrialBanner />
       <CommandPalette />
+      <OnboardingTour open={tour.open} onClose={tour.close} />
       <div className="flex flex-1 min-h-0">
         <Sidebar />
         <div className="flex-1 flex flex-col min-w-0">

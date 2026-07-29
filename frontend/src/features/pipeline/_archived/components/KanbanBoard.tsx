@@ -12,7 +12,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { api, type OppCard } from "@/lib/api";
-import { useOpportunityStore } from "@/stores/opportunityStore";
+import { useOpportunityStore } from "../opportunityStore";
 import { KanbanColumn } from "./KanbanColumn";
 import { OpportunityCardContent } from "./OpportunityCard";
 import { Skeleton } from "@/components/ui/skeleton";

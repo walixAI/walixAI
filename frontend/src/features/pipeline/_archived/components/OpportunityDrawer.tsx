@@ -10,7 +10,7 @@ import {
   type OppNextStepOut,
   type OppProbabilityOut,
 } from "@/lib/api";
-import { useOpportunityStore, oppReadToCard } from "@/stores/opportunityStore";
+import { useOpportunityStore, oppReadToCard } from "../opportunityStore";
 import {
   Sheet,
   SheetContent,

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useAuthStore } from "@/store/auth";
+import { useAuthStore } from "@/stores/auth";
 import { api, getToken } from "@/lib/api";
 
 export function useInitAuth() {

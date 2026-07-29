@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { useOpportunityStore } from "@/stores/opportunityStore";
+import { useOpportunityStore } from "./opportunityStore";
 import { PipelineHeader } from "./components/PipelineHeader";
 import { ForecastBar } from "./components/ForecastBar";
 import { StaleBanner } from "./components/StaleBanner";

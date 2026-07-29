@@ -3,7 +3,7 @@ import { Plus } from "lucide-react";
 import { useDroppable } from "@dnd-kit/core";
 import { cn } from "@/lib/utils";
 import type { OppBoardStage, OppCard } from "@/lib/api";
-import { useOpportunityStore } from "@/stores/opportunityStore";
+import { useOpportunityStore } from "../opportunityStore";
 import { DraggableOppCard } from "./OpportunityCard";
 
 function formatMXN(n: string | number | null | undefined): string {
