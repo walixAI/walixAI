@@ -239,6 +239,37 @@ def run_profile_enrichment_all_tenants(self) -> dict:
         raise self.retry(exc=exc)
 
 
+@celery_app.task(
+    bind=True,
+    name="app.tasks.agent_tasks.run_aprendiz_all_tenants",
+    max_retries=3,
+    default_retry_delay=120,
+)
+def run_aprendiz_all_tenants(self) -> dict:
+    """Run the Aprendiz pattern-mining agent for every active tenant (weekly)."""
+    from app.agents.aprendiz_agent import run_aprendiz_agent
+
+    async def _run() -> dict:
+        tenant_ids = await get_active_tenant_ids()
+        results = {"tenants": len(tenant_ids), "patterns_upserted": 0, "errors": 0}
+        logger.info("[aprendiz] running for %d tenants", len(tenant_ids))
+        for tid in tenant_ids:
+            try:
+                async with AsyncSessionLocal() as db:
+                    count = await run_aprendiz_agent(tid, db)
+                    await db.commit()
+                    results["patterns_upserted"] += count or 0
+            except Exception:
+                logger.exception("[aprendiz] tenant %s failed", tid)
+                results["errors"] += 1
+        return results
+
+    try:
+        return run_async(_run())
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+
 # ── On-demand execution ───────────────────────────────────────────────────────
 
 @celery_app.task(

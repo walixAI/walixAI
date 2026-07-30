@@ -122,6 +122,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.alerts_tasks.run_monthly_summaries",
         "schedule": crontab(day_of_month=1, hour=9, minute=0),
     },
+    "aprendiz-agent-weekly": {
+        "task": "app.tasks.agent_tasks.run_aprendiz_all_tenants",
+        "schedule": crontab(hour=3, minute=0, day_of_week=0),
+    },
 }
 
 
