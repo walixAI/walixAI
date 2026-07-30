@@ -19,6 +19,9 @@ from app.models import alert, ai_log, support  # noqa: F401  # Sprint 5
 from app.models import agent, scoring, metrics  # noqa: F401  # Sprint 6
 from app.models import tag, failed_task  # noqa: F401  # Sprint 7 + Celery DLQ
 from app.models import saved_view  # noqa: F401  # Sprint 8A
+from app.models import deal, deal_stage_history, pipeline_group, subscription  # noqa: F401
+from app.models import contact_activity  # noqa: F401
+from app.models import ai_memory  # noqa: F401  # Etapa 6: AI entity memory
 
 config = context.config
 
