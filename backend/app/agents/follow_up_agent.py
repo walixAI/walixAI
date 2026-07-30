@@ -181,6 +181,8 @@ async def _process_lead(
         trigger_description=trigger_description,
         suggestion_text=suggestion_text,
         action_payload={"lead_id": str(lead.id), "message": message},
+        entity_type="contact",
+        entity_id=lead.id,
         target_role="asesor",
         target_user_id=target_user.id if target_user else None,
         expires_at=datetime.now(timezone.utc) + timedelta(hours=48),
