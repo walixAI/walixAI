@@ -25,6 +25,7 @@ from app.core.redis import redis_client
 from app.services.activity_service import create_field_change_activity, create_system_activity
 from app.models.activity import Activity
 from app.models.agent import AgentSuggestion
+from app.models.ai_memory import AIEntityContext
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.pipeline import PipelineStage
 from app.models.tag import Tag, lead_tags_table
@@ -1064,3 +1065,39 @@ async def update_contact(
             await db.rollback()
 
     return response
+
+
+# ── GET /{lead_id}/ai-context ─────────────────────────────────────────────────
+
+class AIContextOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    context_summary: str
+    key_facts: list[Any]
+    last_interaction: datetime | None
+
+
+@router.get("/{lead_id}/ai-context", response_model=AIContextOut)
+async def get_contact_ai_context(
+    lead_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AIContextOut:
+    await _get_active_contact(db, lead_id, current_user.tenant_id)
+
+    ctx = (await db.execute(
+        select(AIEntityContext).where(
+            AIEntityContext.tenant_id == current_user.tenant_id,
+            AIEntityContext.entity_type == "contact",
+            AIEntityContext.entity_id == lead_id,
+        )
+    )).scalar_one_or_none()
+
+    if ctx is None:
+        return AIContextOut(context_summary="", key_facts=[], last_interaction=None)
+
+    return AIContextOut(
+        context_summary=ctx.context_summary,
+        key_facts=ctx.key_facts,
+        last_interaction=ctx.last_interaction,
+    )
