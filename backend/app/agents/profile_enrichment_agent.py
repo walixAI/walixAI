@@ -157,6 +157,8 @@ async def _process_lead(lead: Lead, db: AsyncSession) -> bool:
                 f"¿Actualizo el perfil?"
             ),
             action_payload={"lead_id": str(lead.id), "company": company},
+            entity_type="contact",
+            entity_id=lead.id,
             target_role="asesor",
             target_user_id=target_user.id if target_user else None,
             expires_at=datetime.now(timezone.utc) + timedelta(hours=48),
