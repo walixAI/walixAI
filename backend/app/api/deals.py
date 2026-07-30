@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.api.auth import get_current_user
+from app.services.expense_generation import generate_deal_expense_drafts
 from app.core.database import get_db
 from app.models.agent import AgentSuggestion
 from app.models.ai_memory import AIMemoryEvent, AIOutcomeFeedback
@@ -373,6 +374,15 @@ async def update_deal(
         except Exception:
             logging.getLogger(__name__).exception(
                 "[ai_outcome] failed to create outcome feedback for deal %s", deal.id
+            )
+
+    if outcome == "deal_closed":
+        try:
+            await generate_deal_expense_drafts(deal, db)
+            await db.commit()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "[expense_gen] failed to generate expense drafts for deal %s", deal.id
             )
 
     return deal

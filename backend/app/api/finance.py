@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.models.finance import Expense, ExpenseCategory, ExpenseRule, FinancePermission, RecurringExpense
+from app.services.expense_generation import generate_recurring_expenses
 from app.models.tenant import Branch
 from app.models.user import User, UserRole
 
@@ -537,6 +538,16 @@ async def create_recurring_expense(
     await db.commit()
     await db.refresh(rec)
     return RecurringExpenseOut.model_validate(rec)
+
+
+@router.post("/recurring-expenses/generate")
+async def trigger_recurring_expense_generation(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    _require_owner(current_user)
+    generated = await generate_recurring_expenses(current_user.tenant_id, db)
+    return {"generated": generated}
 
 
 @router.patch("/recurring-expenses/{recurring_id}", response_model=RecurringExpenseOut)
