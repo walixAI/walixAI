@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import uuid
+from calendar import monthrange
+from datetime import date
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, field_validator
-from sqlalchemy import or_, select
+from pydantic import BaseModel, Field
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
-from app.models.finance import ExpenseCategory, FinancePermission
+from app.models.finance import Expense, ExpenseCategory, FinancePermission
 from app.models.tenant import Branch
 from app.models.user import User, UserRole
 
@@ -20,7 +23,7 @@ router = APIRouter(prefix="/finance", tags=["finance"])
 _OWNER_ROLES = (UserRole.OWNER, UserRole.PLATFORM_OWNER)
 
 
-# ── Access helper ─────────────────────────────────────────────────────────────
+# ── Access helpers ────────────────────────────────────────────────────────────
 
 async def _require_finance_access(
     current_user: User,
@@ -46,6 +49,15 @@ async def _require_finance_access(
 def _require_owner(current_user: User) -> None:
     if current_user.role not in _OWNER_ROLES:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el propietario puede gestionar permisos de finanzas")
+
+
+async def _get_expense_or_404(expense_id: uuid.UUID, tenant_id: uuid.UUID, db: AsyncSession) -> Expense:
+    exp = (await db.execute(
+        select(Expense).where(Expense.id == expense_id, Expense.tenant_id == tenant_id)
+    )).scalar_one_or_none()
+    if exp is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gasto no encontrado")
+    return exp
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -89,7 +101,56 @@ class ExpenseCategoryUpdate(BaseModel):
     is_active: bool | None = None
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+class ExpenseOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    branch_id: uuid.UUID | None
+    category_id: uuid.UUID | None
+    owner_id: uuid.UUID | None
+    amount: Decimal
+    kind: str
+    currency: str
+    incurred_at: date
+    status: str
+    source: str
+    deal_id: uuid.UUID | None
+    rule_id: uuid.UUID | None
+    recurring_id: uuid.UUID | None
+    receipt_url: str | None
+    description: str | None
+    model_config = {"from_attributes": True}
+
+
+class ExpenseCreate(BaseModel):
+    branch_id: uuid.UUID | None = None
+    category_id: uuid.UUID | None = None
+    amount: Decimal = Field(gt=0)
+    kind: Literal["fijo", "variable"]
+    currency: str = "MXN"
+    incurred_at: date | None = None
+    deal_id: uuid.UUID | None = None
+    receipt_url: str | None = None
+    description: str | None = None
+
+
+class ExpenseUpdate(BaseModel):
+    branch_id: uuid.UUID | None = None
+    category_id: uuid.UUID | None = None
+    amount: Decimal | None = Field(default=None, gt=0)
+    kind: Literal["fijo", "variable"] | None = None
+    currency: str | None = None
+    incurred_at: date | None = None
+    status: Literal["draft", "confirmed"] | None = None
+    deal_id: uuid.UUID | None = None
+    receipt_url: str | None = None
+    description: str | None = None
+
+
+class ExpenseConfirmBody(BaseModel):
+    amount: Decimal | None = Field(default=None, gt=0)
+
+
+# ── Finance permissions endpoints ─────────────────────────────────────────────
 
 @router.get("/permissions", response_model=list[FinancePermissionOut])
 async def list_finance_permissions(
@@ -163,6 +224,27 @@ async def create_finance_permission(
     )
 
 
+@router.delete("/permissions/{permission_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_finance_permission(
+    permission_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    _require_owner(current_user)
+    perm = (await db.execute(
+        select(FinancePermission).where(
+            FinancePermission.id == permission_id,
+            FinancePermission.tenant_id == current_user.tenant_id,
+        )
+    )).scalar_one_or_none()
+    if perm is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Permiso no encontrado")
+    await db.delete(perm)
+    await db.commit()
+
+
+# ── Expense categories endpoints ──────────────────────────────────────────────
+
 @router.get("/expense-categories", response_model=list[ExpenseCategoryOut])
 async def list_expense_categories(
     include_inactive: bool = Query(False),
@@ -226,20 +308,138 @@ async def update_expense_category(
     return ExpenseCategoryOut.model_validate(cat)
 
 
-@router.delete("/permissions/{permission_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_finance_permission(
-    permission_id: uuid.UUID,
+# ── Expenses endpoints ────────────────────────────────────────────────────────
+
+@router.get("/expenses", response_model=list[ExpenseOut])
+async def list_expenses(
+    month: date | None = Query(None),
+    kind: Literal["fijo", "variable"] | None = Query(None),
+    category_id: uuid.UUID | None = Query(None),
+    status_filter: Literal["draft", "confirmed"] | None = Query(None, alias="status"),
+    branch_id: uuid.UUID | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ExpenseOut]:
+    await _require_finance_access(current_user, branch_id=branch_id, db=db)
+    q = select(Expense).where(Expense.tenant_id == current_user.tenant_id)
+    if branch_id is not None:
+        q = q.where(Expense.branch_id == branch_id)
+    if month is not None:
+        first_day = month.replace(day=1)
+        last_day = month.replace(day=monthrange(month.year, month.month)[1])
+        q = q.where(Expense.incurred_at.between(first_day, last_day))
+    if kind is not None:
+        q = q.where(Expense.kind == kind)
+    if category_id is not None:
+        q = q.where(Expense.category_id == category_id)
+    if status_filter is not None:
+        q = q.where(Expense.status == status_filter)
+    q = q.order_by(Expense.incurred_at.desc())
+    rows = (await db.execute(q)).scalars().all()
+    return [ExpenseOut.model_validate(r) for r in rows]
+
+
+@router.post("/expenses/confirm-all", status_code=status.HTTP_200_OK)
+async def confirm_all_draft_expenses(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    result = await db.execute(
+        update(Expense)
+        .where(Expense.tenant_id == current_user.tenant_id, Expense.status == "draft")
+        .values(status="confirmed")
+    )
+    await db.commit()
+    return {"updated": result.rowcount}
+
+
+@router.post("/expenses", response_model=ExpenseOut, status_code=status.HTTP_201_CREATED)
+async def create_expense(
+    body: ExpenseCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExpenseOut:
+    await _require_finance_access(current_user, branch_id=body.branch_id, db=db)
+    exp = Expense(
+        tenant_id=current_user.tenant_id,
+        branch_id=body.branch_id,
+        category_id=body.category_id,
+        owner_id=current_user.id,
+        amount=body.amount,
+        kind=body.kind,
+        currency=body.currency,
+        incurred_at=body.incurred_at or date.today(),
+        status="confirmed",
+        source="manual",
+        deal_id=body.deal_id,
+        receipt_url=body.receipt_url,
+        description=body.description,
+    )
+    db.add(exp)
+    await db.commit()
+    await db.refresh(exp)
+    return ExpenseOut.model_validate(exp)
+
+
+@router.patch("/expenses/{expense_id}", response_model=ExpenseOut)
+async def update_expense(
+    expense_id: uuid.UUID,
+    body: ExpenseUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExpenseOut:
+    exp = await _get_expense_or_404(expense_id, current_user.tenant_id, db)
+    await _require_finance_access(current_user, branch_id=exp.branch_id, db=db)
+    if body.branch_id is not None:
+        exp.branch_id = body.branch_id
+    if body.category_id is not None:
+        exp.category_id = body.category_id
+    if body.amount is not None:
+        exp.amount = body.amount
+    if body.kind is not None:
+        exp.kind = body.kind
+    if body.currency is not None:
+        exp.currency = body.currency
+    if body.incurred_at is not None:
+        exp.incurred_at = body.incurred_at
+    if body.status is not None:
+        exp.status = body.status
+    if body.deal_id is not None:
+        exp.deal_id = body.deal_id
+    if body.receipt_url is not None:
+        exp.receipt_url = body.receipt_url
+    if body.description is not None:
+        exp.description = body.description
+    await db.commit()
+    await db.refresh(exp)
+    return ExpenseOut.model_validate(exp)
+
+
+@router.post("/expenses/{expense_id}/confirm", response_model=ExpenseOut)
+async def confirm_expense(
+    expense_id: uuid.UUID,
+    body: ExpenseConfirmBody | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExpenseOut:
+    exp = await _get_expense_or_404(expense_id, current_user.tenant_id, db)
+    await _require_finance_access(current_user, branch_id=exp.branch_id, db=db)
+    exp.status = "confirmed"
+    if body and body.amount is not None:
+        exp.amount = body.amount
+    await db.commit()
+    await db.refresh(exp)
+    return ExpenseOut.model_validate(exp)
+
+
+@router.delete("/expenses/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_expense(
+    expense_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    _require_owner(current_user)
-    perm = (await db.execute(
-        select(FinancePermission).where(
-            FinancePermission.id == permission_id,
-            FinancePermission.tenant_id == current_user.tenant_id,
-        )
-    )).scalar_one_or_none()
-    if perm is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Permiso no encontrado")
-    await db.delete(perm)
+    exp = await _get_expense_or_404(expense_id, current_user.tenant_id, db)
+    await _require_finance_access(current_user, branch_id=exp.branch_id, db=db)
+    await db.delete(exp)
     await db.commit()
