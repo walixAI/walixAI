@@ -160,3 +160,47 @@ class AIUserProfile(Base):
     best_close_day: Mapped[str | None] = mapped_column(String(20), nullable=True)
     best_close_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
     top_performing_stage: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+
+class AIDraftEdit(Base):
+    """Records AI-suggested draft vs. what the user actually sent (Etapa 7.2).
+
+    Used by aprendiz_agent.py (7.5) to learn per-tenant editing patterns.
+    """
+
+    __tablename__ = "ai_draft_edits"
+
+    __table_args__ = (
+        Index("ix_ai_draft_edits_tenant_user_created", "tenant_id", "user_id", "created_at"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("leads.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    original: Mapped[str] = mapped_column(Text, nullable=False)
+    edited: Mapped[str] = mapped_column(Text, nullable=False)
+    char_delta: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
