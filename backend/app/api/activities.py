@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.models.activity import Activity
+from app.models.ai_memory import AIMemoryEvent
 from app.models.lead import Lead
 from app.models.user import User
 from app.schemas.activity import ActivityCreate, ActivityRow
@@ -156,6 +158,39 @@ async def create_activity(
 
     await db.commit()
     await db.refresh(activity)
+
+    _ACTIVITY_EVENT_MAP = {
+        "note": "note_added",
+        "call": "call_logged",
+        "meeting": "meeting_logged",
+        "email": "email_logged",
+    }
+    _mem_event_type = _ACTIVITY_EVENT_MAP.get(activity.activity_type)
+    if _mem_event_type:
+        try:
+            memory_event = AIMemoryEvent(
+                tenant_id=current_user.tenant_id,
+                entity_type="contact",
+                entity_id=lead_id,
+                event_type=_mem_event_type,
+                event_data={
+                    "title": activity.title,
+                    "body": activity.body,
+                    **(activity.extra_data if isinstance(activity.extra_data, dict) else {}),
+                },
+                actor_id=current_user.id,
+            )
+            db.add(memory_event)
+            await db.flush()
+            event_id = str(memory_event.id)
+            await db.commit()
+
+            from app.tasks.ai_memory_tasks import update_entity_context_task
+            update_entity_context_task.delay(event_id)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "[ai_memory] failed to create memory event for activity %s", activity.id
+            )
 
     return ActivityRowOut(
         **ActivityRow.model_validate(activity).model_dump(),
