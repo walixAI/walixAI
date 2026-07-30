@@ -1,11 +1,11 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { ClipboardList, CheckCircle2 } from "lucide-react";
-import { useMyTasksToday, useCloseTask, type TaskTodayItem } from "@/lib/queries/tasks";
+import { useMyTasksToday, type TaskTodayItem } from "@/lib/queries/tasks";
 import { formatMXN } from "@/lib/queries/pipeline";
 import { WBadge } from "@/components/walix/Badge";
 import { KpiCardsSkeleton, ListRowsSkeleton } from "@/components/walix/Skeletons";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
+import { CloseTaskDialog } from "@/components/miDia/CloseTaskDialog";
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -37,18 +37,13 @@ function SummaryChip({
       className={[
         "flex flex-col items-start rounded-xl border px-4 py-3 text-left transition-colors",
         onClick ? "cursor-pointer hover:bg-accent" : "cursor-default",
-        danger
-          ? "border-danger/20 bg-danger/5"
-          : "border-border bg-card",
+        danger ? "border-danger/20 bg-danger/5" : "border-border bg-card",
       ].join(" ")}
     >
       <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
-      <span className={[
-        "mt-0.5 text-lg font-semibold",
-        danger ? "text-danger" : "text-foreground",
-      ].join(" ")}>
+      <span className={["mt-0.5 text-lg font-semibold", danger ? "text-danger" : "text-foreground"].join(" ")}>
         {value}
       </span>
     </button>
@@ -57,12 +52,10 @@ function SummaryChip({
 
 function TaskCard({
   item,
-  onComplete,
-  completing,
+  onOpen,
 }: {
   item: TaskTodayItem;
-  onComplete: () => void;
-  completing: boolean;
+  onOpen: () => void;
 }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4 shadow-card space-y-2">
@@ -75,29 +68,19 @@ function TaskCard({
             <p className="truncate text-xs text-muted-foreground">{item.leadName}</p>
           )}
         </div>
-        {item.overdue && (
-          <WBadge variant="danger" className="shrink-0">Vencida</WBadge>
-        )}
+        {item.overdue && <WBadge variant="danger" className="shrink-0">Vencida</WBadge>}
       </div>
 
       {(item.dealTitle || item.dealAmount !== null) && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {item.dealTitle && <span className="truncate">{item.dealTitle}</span>}
           {item.dealAmount !== null && (
-            <span className="shrink-0 font-medium text-foreground">
-              {formatMXN(item.dealAmount)}
-            </span>
+            <span className="shrink-0 font-medium text-foreground">{formatMXN(item.dealAmount)}</span>
           )}
         </div>
       )}
 
-      <Button
-        size="sm"
-        variant="outline"
-        className="w-full mt-1"
-        onClick={onComplete}
-        disabled={completing}
-      >
+      <Button size="sm" variant="outline" className="w-full mt-1" onClick={onOpen}>
         <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
         Completar
       </Button>
@@ -109,14 +92,12 @@ function ColumnGroup({
   label,
   items,
   colRef,
-  onComplete,
-  completingIds,
+  onOpen,
 }: {
   label: string;
   items: TaskTodayItem[];
   colRef?: React.RefObject<HTMLDivElement>;
-  onComplete: (item: TaskTodayItem) => void;
-  completingIds: Set<string>;
+  onOpen: (item: TaskTodayItem) => void;
 }) {
   return (
     <div ref={colRef} className="space-y-3 scroll-mt-4">
@@ -134,12 +115,7 @@ function ColumnGroup({
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {items.map((item) => (
-            <TaskCard
-              key={item.id}
-              item={item}
-              onComplete={() => onComplete(item)}
-              completing={completingIds.has(item.id)}
-            />
+            <TaskCard key={item.id} item={item} onOpen={() => onOpen(item)} />
           ))}
         </div>
       )}
@@ -151,11 +127,11 @@ function ColumnGroup({
 
 export default function MiDia() {
   const { data, isPending } = useMyTasksToday();
-  const { mutate: closeTask, isPending: isClosing, variables: closingVars } = useCloseTask();
+  const [selectedTask, setSelectedTask] = useState<TaskTodayItem | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   const cobrarRef = useRef<HTMLDivElement>(null);
   const cotizarRef = useRef<HTMLDivElement>(null);
-
   const colScrollRefs: Record<string, React.RefObject<HTMLDivElement>> = {
     cobrar: cobrarRef,
     cotizar: cotizarRef,
@@ -163,6 +139,11 @@ export default function MiDia() {
 
   function scrollToCol(ref: React.RefObject<HTMLDivElement>) {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function openDialog(item: TaskTodayItem) {
+    setSelectedTask(item);
+    setDialogOpen(true);
   }
 
   if (isPending) {
@@ -176,17 +157,6 @@ export default function MiDia() {
 
   const totals = data?.totals;
   const items = data?.items ?? [];
-
-  const completingIds = new Set(
-    isClosing && closingVars ? [closingVars.activityId] : []
-  );
-
-  function handleComplete(item: TaskTodayItem) {
-    closeTask(
-      { leadId: item.leadId, activityId: item.id, closedVia: "manual" },
-      { onError: (e) => toast.error((e as Error).message ?? "Error al completar") },
-    );
-  }
 
   function getItems(kinds: string[]) {
     return items.filter((t) => t.taskKind !== null && kinds.includes(t.taskKind!));
@@ -232,11 +202,26 @@ export default function MiDia() {
             label={col.label}
             items={getItems(col.kinds)}
             colRef={colScrollRefs[col.id]}
-            onComplete={handleComplete}
-            completingIds={completingIds}
+            onOpen={openDialog}
           />
         ))}
       </div>
+
+      {/* CloseTaskDialog — mounted once, driven by selectedTask */}
+      {selectedTask && (
+        <CloseTaskDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          contactId={selectedTask.leadId}
+          task={{
+            id: selectedTask.id,
+            title: selectedTask.title,
+            taskKind: selectedTask.taskKind,
+            dueDate: selectedTask.dueDate,
+          }}
+          leadName={selectedTask.leadName}
+        />
+      )}
     </div>
   );
 }
