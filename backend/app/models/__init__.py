@@ -1,5 +1,5 @@
 from app.models.activity import ACTIVITY_TYPES, Activity, ActivityType, LeadActivity
-from app.models.ai_memory import AIEntityContext, AIMemoryEvent
+from app.models.ai_memory import AIEntityContext, AIMemoryEvent, AIOutcomeFeedback
 from app.models.base import Base
 from app.models.conversation import (
     Conversation,
@@ -47,4 +47,5 @@ __all__ = [
     "lead_tags_table",
     "AIEntityContext",
     "AIMemoryEvent",
+    "AIOutcomeFeedback",
 ]

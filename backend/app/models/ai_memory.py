@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -67,4 +67,40 @@ class AIMemoryEvent(Base):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+    )
+
+
+class AIOutcomeFeedback(Base):
+    """Records the measured outcome of an AI agent suggestion for feedback loops (Etapa 6.3)."""
+
+    __tablename__ = "ai_outcome_feedback"
+
+    __table_args__ = (
+        Index("ix_ai_outcome_feedback_tenant_created", "tenant_id", "created_at"),
+        Index("ix_ai_outcome_feedback_tenant_outcome", "tenant_id", "outcome"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    suggestion_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_suggestions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    action_taken: Mapped[str] = mapped_column(String(50), nullable=False)
+    # No FK — entity may live in different tables depending on entity_type
+    entity_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    outcome: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    outcome_value: Mapped[float] = mapped_column(
+        Numeric, nullable=False, default=0, server_default="0"
+    )
+    days_to_outcome: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    context_at_action: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
     )
