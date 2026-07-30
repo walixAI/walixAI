@@ -3,6 +3,7 @@ import json
 import logging
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from anthropic import AsyncAnthropic
@@ -23,7 +24,8 @@ from app.models.conversation import (
     Message,
     MessageRole,
 )
-from app.models.ai_memory import AIMemoryEvent
+from app.models.agent import AgentSuggestion
+from app.models.ai_memory import AIMemoryEvent, AIOutcomeFeedback
 from app.models.lead import Lead, LeadStatus
 from app.models.tenant import Branch
 from app.services.whatsapp import WhatsAppService
@@ -213,6 +215,54 @@ async def _process_message_inner(
         except Exception:
             logger.exception(
                 "[ai_memory] failed to create memory event for inbound msg from lead %s", lead.id
+            )
+
+        # 4b. Outcome feedback — detect contact_responded when lead replies after outbound message.
+        try:
+            now = datetime.now(timezone.utc)
+            last_outbound = (await db.execute(
+                select(Message)
+                .where(
+                    Message.conversation_id == conversation.id,
+                    Message.role == MessageRole.ASSISTANT,
+                    Message.created_at >= now - timedelta(hours=24),
+                )
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+
+            if last_outbound is not None:
+                sug = (await db.execute(
+                    select(AgentSuggestion)
+                    .where(
+                        AgentSuggestion.tenant_id == tenant_id,
+                        AgentSuggestion.entity_type == "contact",
+                        AgentSuggestion.entity_id == lead.id,
+                        AgentSuggestion.status.in_(["confirmed", "executed"]),
+                        AgentSuggestion.created_at >= now - timedelta(days=7),
+                    )
+                    .order_by(AgentSuggestion.created_at.desc())
+                    .limit(1)
+                )).scalar_one_or_none()
+
+                if sug is not None:
+                    hours_elapsed = (now - last_outbound.created_at).total_seconds() / 3600
+                    days_to_outcome = max(0, int(hours_elapsed / 24))
+                    db.add(AIOutcomeFeedback(
+                        tenant_id=tenant_id,
+                        suggestion_id=sug.id,
+                        action_taken="whatsapp_reply",
+                        entity_type="contact",
+                        entity_id=lead.id,
+                        outcome="contact_responded",
+                        outcome_value=0,
+                        days_to_outcome=days_to_outcome,
+                        context_at_action={"conversation_id": str(conversation.id)},
+                    ))
+                    await db.commit()
+        except Exception:
+            logger.exception(
+                "[ai_outcome] failed to create outcome feedback for contact response from lead %s", lead.id
             )
 
         # 5. Human in control — save the message but let bot stay silent.
