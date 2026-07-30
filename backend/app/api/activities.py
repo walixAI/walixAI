@@ -189,11 +189,26 @@ async def update_activity(
             detail="Las actividades del sistema son inmutables",
         )
 
-    if activity.created_by != current_user.id:
+    # Creador O asignado pueden editar
+    if activity.created_by != current_user.id and activity.assignee_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo el creador puede editar esta actividad",
+            detail="Solo el creador o el asignado puede editar esta actividad",
         )
+
+    # Cerrar una tarea requiere indicar cómo se cerró
+    closing_now = (
+        activity.activity_type == "task"
+        and activity.completed_at is None
+        and body.completed_at is not None
+    )
+    if closing_now:
+        closed_via_provided = body.model_fields_set & {"closed_via"} and body.closed_via is not None
+        if not closed_via_provided and not activity.closed_via:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Debes indicar cómo se cerró la tarea (closed_via).",
+            )
 
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(activity, field, value)
