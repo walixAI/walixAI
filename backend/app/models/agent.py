@@ -29,6 +29,9 @@ class AgentSuggestion(Base):
     trigger_description: Mapped[str] = mapped_column(Text, nullable=False)
     suggestion_text: Mapped[str] = mapped_column(Text, nullable=False)
     action_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Links the suggestion to a concrete entity (contact/deal) for outcome feedback (Etapa 6.3).
+    entity_type: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     target_role: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     target_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
