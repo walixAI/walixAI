@@ -15,8 +15,10 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.ai_memory import AIOutcomeFeedback, AITenantPattern
+from app.models.ai_memory import AIOutcomeFeedback, AITenantPattern, AIUserProfile
 from app.models.deal import Deal
+from app.models.pipeline import PipelineStage
+from app.models.user import User
 
 import logging
 
@@ -193,3 +195,103 @@ async def run_aprendiz_agent(tenant_id: uuid.UUID, db: AsyncSession) -> int:
         tenant_id, patterns_upserted, total_responded, total_closed, total_lost,
     )
     return patterns_upserted
+
+
+async def update_user_profiles(tenant_id: uuid.UUID, db: AsyncSession) -> int:
+    """Compute per-user closing statistics and upsert AIUserProfile rows.
+
+    Operates over the full historical record (no time window) — same
+    criterion as Lovable for seller performance metrics.
+    Returns the number of profiles upserted.
+    """
+    now = datetime.now(timezone.utc)
+
+    users = (await db.execute(
+        select(User).where(
+            User.tenant_id == tenant_id,
+            User.is_active.is_(True),
+        )
+    )).scalars().all()
+
+    profiles_upserted = 0
+
+    for user in users:
+        deals = (await db.execute(
+            select(Deal).where(
+                Deal.owner_id == user.id,
+                Deal.tenant_id == tenant_id,
+            )
+        )).scalars().all()
+
+        if not deals:
+            continue
+
+        won_deals = [d for d in deals if d.is_won]
+        lost_deals = [d for d in deals if d.is_lost]
+        total_won = len(won_deals)
+        total_lost = len(lost_deals)
+        denom = total_won + total_lost
+        close_rate = total_won / denom if denom > 0 else 0.0
+
+        # best_close_day and best_close_hour — only when enough signal
+        best_close_day: str | None = None
+        best_close_hour: int | None = None
+
+        if total_won >= 3:
+            dow_counts: Counter[int] = Counter()
+            hour_counts_u: Counter[int] = Counter()
+            for d in won_deals:
+                local = d.updated_at.astimezone(MX_TZ)
+                isoday = local.isoweekday()  # 1=Mon … 7=Sun
+                dow_counts[0 if isoday == 7 else isoday] += 1  # 0=Sun, 1=Mon … 6=Sat
+                hour_counts_u[local.hour] += 1
+            best_dow = dow_counts.most_common(1)[0][0]
+            best_close_day = _DOW_NAMES.get(best_dow, str(best_dow))
+            best_close_hour = hour_counts_u.most_common(1)[0][0]
+
+        # top_performing_stage — stage name with most won deals
+        top_performing_stage: str | None = None
+        if won_deals:
+            stage_counts: Counter[uuid.UUID] = Counter(
+                d.pipeline_stage_id for d in won_deals if d.pipeline_stage_id
+            )
+            if stage_counts:
+                top_stage_id = stage_counts.most_common(1)[0][0]
+                stage = await db.get(PipelineStage, top_stage_id)
+                if stage:
+                    top_performing_stage = stage.name
+
+        values: dict[str, Any] = {
+            "id": uuid.uuid4(),
+            "user_id": user.id,
+            "tenant_id": tenant_id,
+            "total_deals_closed": total_won,
+            "total_deals_lost": total_lost,
+            "close_rate": close_rate,
+            "best_close_day": best_close_day,
+            "best_close_hour": best_close_hour,
+            "top_performing_stage": top_performing_stage,
+            "created_at": now,
+            "updated_at": now,
+        }
+        stmt = (
+            pg_insert(AIUserProfile)
+            .values(**values)
+            .on_conflict_do_update(
+                constraint="uq_ai_user_profiles_user_id",
+                set_={
+                    "total_deals_closed": values["total_deals_closed"],
+                    "total_deals_lost": values["total_deals_lost"],
+                    "close_rate": values["close_rate"],
+                    "best_close_day": values["best_close_day"],
+                    "best_close_hour": values["best_close_hour"],
+                    "top_performing_stage": values["top_performing_stage"],
+                    "updated_at": values["updated_at"],
+                },
+            )
+        )
+        await db.execute(stmt)
+        profiles_upserted += 1
+
+    logger.info("[aprendiz] tenant=%s profiles_upserted=%d", tenant_id, profiles_upserted)
+    return profiles_upserted

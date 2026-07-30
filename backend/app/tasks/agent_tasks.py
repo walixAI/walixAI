@@ -247,18 +247,20 @@ def run_profile_enrichment_all_tenants(self) -> dict:
 )
 def run_aprendiz_all_tenants(self) -> dict:
     """Run the Aprendiz pattern-mining agent for every active tenant (weekly)."""
-    from app.agents.aprendiz_agent import run_aprendiz_agent
+    from app.agents.aprendiz_agent import run_aprendiz_agent, update_user_profiles
 
     async def _run() -> dict:
         tenant_ids = await get_active_tenant_ids()
-        results = {"tenants": len(tenant_ids), "patterns_upserted": 0, "errors": 0}
+        results = {"tenants": len(tenant_ids), "patterns_upserted": 0, "profiles_updated": 0, "errors": 0}
         logger.info("[aprendiz] running for %d tenants", len(tenant_ids))
         for tid in tenant_ids:
             try:
                 async with AsyncSessionLocal() as db:
                     count = await run_aprendiz_agent(tid, db)
+                    profiles_updated = await update_user_profiles(tid, db)
                     await db.commit()
                     results["patterns_upserted"] += count or 0
+                    results["profiles_updated"] += profiles_updated or 0
             except Exception:
                 logger.exception("[aprendiz] tenant %s failed", tid)
                 results["errors"] += 1
