@@ -251,4 +251,32 @@ async def update_activity(
     await db.commit()
     await db.refresh(activity)
 
+    if closing_now:
+        _mem_entity_type = "deal" if activity.deal_id is not None else "contact"
+        _mem_entity_id = activity.deal_id if activity.deal_id is not None else lead_id
+        try:
+            memory_event = AIMemoryEvent(
+                tenant_id=current_user.tenant_id,
+                entity_type=_mem_entity_type,
+                entity_id=_mem_entity_id,
+                event_type="task_completed",
+                event_data={
+                    "task_id": str(activity.id),
+                    "title": activity.title,
+                    "via": activity.closed_via,
+                },
+                actor_id=current_user.id,
+            )
+            db.add(memory_event)
+            await db.flush()
+            event_id = str(memory_event.id)
+            await db.commit()
+
+            from app.tasks.ai_memory_tasks import update_entity_context_task
+            update_entity_context_task.delay(event_id)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "[ai_memory] failed to create memory event for task close %s", activity.id
+            )
+
     return await _enrich_with_name(activity, db)
