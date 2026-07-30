@@ -18,6 +18,7 @@ import { ContactRightPanel } from "@/components/contacts/detail/ContactRightPane
 import { ContactTabs } from "@/components/contacts/detail/ContactTabs";
 import { ContactDetailSkeleton } from "@/components/ui/ContactDetailSkeleton";
 import { FirstContactAIBanner } from "@/components/contacts/detail/FirstContactAIBanner";
+import { AIMemoryCard } from "@/components/contacts/detail/AIMemoryCard";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ContactAvatar } from "@/components/ui/ContactAvatar";
@@ -172,6 +173,7 @@ export default function ContactDetailPage() {
                   activitiesTotal={activitiesData?.total ?? 0}
                 />
               )}
+              <AIMemoryCard contactId={contactId} />
               <ContactTabs
                 contact={contact}
                 recentActivities={activitiesData?.items ?? []}

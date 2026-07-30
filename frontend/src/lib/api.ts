@@ -1260,6 +1260,14 @@ export const api = {
     return request(`/api/ai/context-insight?${qs}`);
   },
 
+  async getContactAiContext(leadId: string): Promise<{
+    context_summary: string;
+    key_facts: unknown[];
+    last_interaction: string | null;
+  }> {
+    return request(`/api/v1/contacts/${leadId}/ai-context`);
+  },
+
   // Lead scoring
   async getLeadScore(leadId: string): Promise<LeadScoreOut> {
     return request(`/api/leads/${leadId}/score`);
