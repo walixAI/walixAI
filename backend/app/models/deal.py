@@ -56,6 +56,7 @@ class Deal(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     lost_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
     lost_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deal_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     owner_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),

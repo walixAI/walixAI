@@ -3,6 +3,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Numeric, String, Text
@@ -100,6 +101,20 @@ class Tenant(Base):
         JSONB, nullable=True
     )
 
+    # ── Metas / Finanzas ──────────────────────────────────────────────────────
+    deal_type_options: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default='["Venta", "Servicio"]'
+    )
+    finance_scope: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="branch", server_default="branch"
+    )
+    monthly_goal_total: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0, server_default="0"
+    )
+    monthly_goal_by_type: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+
     companies: Mapped[list["Company"]] = relationship(
         back_populates="tenant", cascade="all, delete-orphan"
     )
@@ -190,6 +205,14 @@ class Branch(Base):
     )
     bot_config_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+    # ── Metas / Finanzas ──────────────────────────────────────────────────────
+    monthly_goal_total: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0, server_default="0"
+    )
+    monthly_goal_by_type: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
     )
 
     company: Mapped["Company"] = relationship(back_populates="branches")

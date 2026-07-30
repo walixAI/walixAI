@@ -22,6 +22,7 @@ from app.models import saved_view  # noqa: F401  # Sprint 8A
 from app.models import deal, deal_stage_history, pipeline_group, subscription  # noqa: F401
 from app.models import contact_activity  # noqa: F401
 from app.models import ai_memory  # noqa: F401  # Etapa 6: AI entity memory
+from app.models import finance  # noqa: F401  # Metas/Finanzas
 
 config = context.config
 
