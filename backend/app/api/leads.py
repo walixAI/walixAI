@@ -18,7 +18,7 @@ from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.core.redis import redis_client
 from app.models.activity import ActivityType, LeadActivity
-from app.models.ai_memory import AIMemoryEvent
+from app.models.ai_memory import AIDraftEdit, AIMemoryEvent
 from app.models.pipeline import PipelineStage
 from app.models.conversation import (
     Conversation,
@@ -130,6 +130,7 @@ class SendMessageBody(BaseModel):
 
 class ReplyBody(BaseModel):
     message: str
+    suggested_draft: str | None = None
 
     @field_validator("message")
     @classmethod
@@ -662,6 +663,24 @@ async def reply_to_lead(
         update_entity_context_task.delay(event_id)
     except Exception:
         logger.exception("[ai_memory] failed to create memory event for reply to lead %s", lead_id)
+
+    # 8b. AIDraftEdit — record AI draft vs actual sent text for learning
+    try:
+        draft = body.suggested_draft
+        if draft is not None and draft.strip() and draft.strip() != text.strip():
+            db.add(AIDraftEdit(
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                contact_id=lead_id,
+                conversation_id=conversation.id,
+                message_id=msg_id,
+                original=draft,
+                edited=text,
+                char_delta=abs(len(text) - len(draft)),
+            ))
+            await db.commit()
+    except Exception:
+        logger.exception("[ai_draft] failed to record draft edit for lead %s", lead_id)
 
     # 8. Agregar al historial de Redis para continuidad del bot
     history_key = f"conv:{conversation.id}"

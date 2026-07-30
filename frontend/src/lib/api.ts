@@ -1048,10 +1048,13 @@ export const api = {
     });
   },
 
-  async reply(leadId: string, message: string): Promise<ReplyResponse> {
+  async reply(leadId: string, message: string, suggestedDraft?: string): Promise<ReplyResponse> {
     return request(`/api/leads/${leadId}/reply`, {
       method: "POST",
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({
+        message,
+        ...(suggestedDraft !== undefined ? { suggested_draft: suggestedDraft } : {}),
+      }),
     });
   },
 

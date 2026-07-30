@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle, ChevronLeft } from "lucide-react";
@@ -29,6 +29,8 @@ export default function Whatsapp() {
   const [replyError, setReplyError] = useState<string | null>(null);
   const [pendingMessages, setPendingMessages] = useState<PendingMsg[]>([]);
   const [aiDraftActive, setAiDraftActive] = useState(false);
+  const lastSuggestedDraft = useRef<string | null>(null);
+  const pendingSuggestedDraft = useRef<string | undefined>(undefined);
 
   // Reset composer state when switching leads
   useEffect(() => {
@@ -36,6 +38,7 @@ export default function Whatsapp() {
     setReplyError(null);
     setPendingMessages([]);
     setAiDraftActive(false);
+    lastSuggestedDraft.current = null;
   }, [activeLeadId]);
 
   // Fetch all leads — 5 s refresh for real-time inbox
@@ -136,7 +139,7 @@ export default function Whatsapp() {
   });
 
   const replyMutation = useMutation({
-    mutationFn: (text: string) => api.reply(activeLeadId!, text),
+    mutationFn: (text: string) => api.reply(activeLeadId!, text, pendingSuggestedDraft.current),
     onMutate: (text) => {
       // Optimistic message — temp id prefixed so we can identify it
       const tempId = `pending-${Date.now()}`;
@@ -176,6 +179,7 @@ export default function Whatsapp() {
   const handleSend = () => {
     const text = draft.trim();
     if (!text || replyMutation.isPending) return;
+    pendingSuggestedDraft.current = aiDraftActive ? (lastSuggestedDraft.current ?? undefined) : undefined;
     replyMutation.mutate(text);
   };
 
@@ -190,6 +194,7 @@ export default function Whatsapp() {
       if (result.draft) {
         setDraft(result.draft);
         setAiDraftActive(true);
+        lastSuggestedDraft.current = result.draft;
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Error al generar el borrador";
