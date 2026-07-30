@@ -20,12 +20,12 @@ import {
 import { cn } from "@/lib/utils";
 import { KpiCardsSkeleton, ListRowsSkeleton } from "@/components/walix/Skeletons";
 
-// ── FASE 2 (IA + tareas) — reintroducir cuando portemos esas piezas ──────────
+// ── FASE 2 (IA) — reintroducir cuando portemos esas piezas ──────────────────
 // import { useCopilot } from "@/store/copilot";
 // import { DashboardAiSection } from "@/components/walix/DashboardAiSection";
-// import { TaskCards } from "@/components/dashboard/TaskCards";
 // import { MorningBriefing } from "@/components/walix/MorningBriefing";
-import { ProactiveBriefing } from "@/components/walix/ProactiveBriefing"; // Dashboard IA (fase 2)
+import { ProactiveBriefing } from "@/components/walix/ProactiveBriefing";
+import { TaskCards } from "@/components/dashboard/TaskCards";
 
 const activityIcon: Record<string, { icon: typeof MoveRight; color: string }> = {
   deal: { icon: MoveRight, color: "text-primary bg-primary/10" },
@@ -165,8 +165,8 @@ export default function Dashboard() {
       </div>
       )}
 
-      {/* FASE 2: <DashboardAiSection /> */}
-      {/* FASE 2 (tareas): <TaskCards /> */}
+      {/* Row: Mis Tareas */}
+      <TaskCards />
 
       {/* Row 2: Actividad (2/3) + Briefing IA (1/3) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

@@ -2,6 +2,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ContactTabResumen } from "./ContactTabResumen";
 import { ContactTabConversaciones } from "./ContactTabConversaciones";
 import { ContactTabActividades } from "./ContactTabActividades";
+import { TasksTab } from "./TasksTab";
 import type { ContactRow } from "@/lib/queries/contacts";
 import type { ActivityRow } from "@/lib/queries/activities";
 
@@ -37,6 +38,7 @@ export function ContactTabs({
             </span>
           )}
         </TabsTrigger>
+        <TabsTrigger data-testid="tab-tareas" value="tareas">Tareas</TabsTrigger>
       </TabsList>
 
       <TabsContent value="resumen" className="mt-0">
@@ -57,6 +59,13 @@ export function ContactTabs({
 
       <TabsContent value="actividades" className="mt-0">
         <ContactTabActividades contactId={contact.id} />
+      </TabsContent>
+
+      <TabsContent value="tareas" className="mt-0">
+        <TasksTab
+          contactId={contact.id}
+          contactName={`${contact.name ?? ""} ${(contact as any).lastName ?? ""}`.trim() || null}
+        />
       </TabsContent>
     </Tabs>
   );

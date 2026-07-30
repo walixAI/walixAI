@@ -34,6 +34,7 @@ const BillingPage = lazy(() => import("@/pages/billing/BillingPage"));
 const BillingSuccess = lazy(() => import("@/pages/billing/BillingSuccess"));
 const ROIDashboard = lazy(() => import("@/pages/roi/ROIDashboard"));
 const MiDiaPage = lazy(() => import("@/pages/app/MiDia"));
+const TasksPage = lazy(() => import("@/pages/app/Tasks"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -115,6 +116,7 @@ const AppRoutes = () => {
             <Route path="/billing" element={<BillingPage />} />
             <Route path="/billing/success" element={<BillingSuccess />} />
             <Route path="/mi-dia" element={<MiDiaPage />} />
+            <Route path="/tasks" element={<TasksPage />} />
 
           </Route>
 
