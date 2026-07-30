@@ -1268,6 +1268,16 @@ export const api = {
     return request(`/api/v1/contacts/${leadId}/ai-context`);
   },
 
+  async getAiPatterns(): Promise<Array<{
+    pattern_type: string;
+    pattern_data: Record<string, unknown>;
+    confidence_score: number;
+    sample_size: number;
+    updated_at: string;
+  }>> {
+    return request(`/api/dashboard/ai-patterns`);
+  },
+
   // Lead scoring
   async getLeadScore(leadId: string): Promise<LeadScoreOut> {
     return request(`/api/leads/${leadId}/score`);

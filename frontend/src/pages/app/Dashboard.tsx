@@ -26,6 +26,7 @@ import { KpiCardsSkeleton, ListRowsSkeleton } from "@/components/walix/Skeletons
 // import { MorningBriefing } from "@/components/walix/MorningBriefing";
 import { ProactiveBriefing } from "@/components/walix/ProactiveBriefing";
 import { TaskCards } from "@/components/dashboard/TaskCards";
+import { AIPatternsCard } from "@/components/walix/AIPatternsCard";
 
 const activityIcon: Record<string, { icon: typeof MoveRight; color: string }> = {
   deal: { icon: MoveRight, color: "text-primary bg-primary/10" },
@@ -228,6 +229,9 @@ export default function Dashboard() {
         {/* Briefing proactivo de IA (agent_suggestions) */}
         <ProactiveBriefing />
       </div>
+
+      {/* Row: AI Patterns (Etapa 6.6.5) */}
+      <AIPatternsCard />
 
       {/* Row: Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
