@@ -1,5 +1,5 @@
 from app.models.activity import ACTIVITY_TYPES, Activity, ActivityType, LeadActivity
-from app.models.ai_memory import AIEntityContext, AIMemoryEvent, AIOutcomeFeedback, AITenantPattern
+from app.models.ai_memory import AIEntityContext, AIMemoryEvent, AIOutcomeFeedback, AITenantPattern, AIUserProfile
 from app.models.base import Base
 from app.models.conversation import (
     Conversation,
@@ -49,4 +49,5 @@ __all__ = [
     "AIMemoryEvent",
     "AIOutcomeFeedback",
     "AITenantPattern",
+    "AIUserProfile",
 ]

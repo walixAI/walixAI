@@ -130,3 +130,33 @@ class AITenantPattern(Base):
         Float, nullable=False, default=0.0, server_default="0"
     )
     sample_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+
+class AIUserProfile(Base):
+    """Per-user closing statistics derived from Deal data (Etapa 6.5).
+
+    Fields requiring AI-drafted message data (communication_style,
+    preferred_message_length) are intentionally omitted — that feature
+    is not yet available in Walix.
+    """
+
+    __tablename__ = "ai_user_profiles"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    total_deals_closed: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    total_deals_lost: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    close_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
+    best_close_day: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    best_close_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    top_performing_stage: Mapped[str | None] = mapped_column(String(100), nullable=True)
