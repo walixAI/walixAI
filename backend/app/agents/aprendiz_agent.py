@@ -5,6 +5,7 @@ here and introduces numeric error risk.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -15,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.ai_memory import AIOutcomeFeedback, AITenantPattern, AIUserProfile
+from app.models.ai_memory import AIDraftEdit, AIOutcomeFeedback, AITenantPattern, AIUserProfile
 from app.models.deal import Deal
 from app.models.pipeline import PipelineStage
 from app.models.user import User
@@ -261,6 +262,37 @@ async def update_user_profiles(tenant_id: uuid.UUID, db: AsyncSession) -> int:
                 if stage:
                     top_performing_stage = stage.name
 
+        # communication_style + preferred_message_length — from AIDraftEdit (>= 5 edits)
+        communication_style: str | None = None
+        preferred_message_length: str | None = None
+
+        draft_edits = (await db.execute(
+            select(AIDraftEdit).where(
+                AIDraftEdit.user_id == user.id,
+                AIDraftEdit.tenant_id == tenant_id,
+            )
+        )).scalars().all()
+
+        if len(draft_edits) >= 5:
+            avg_len = sum(len(d.edited) for d in draft_edits) / len(draft_edits)
+            if avg_len < 120:
+                preferred_message_length = "short"
+            elif avg_len < 300:
+                preferred_message_length = "medium"
+            else:
+                preferred_message_length = "long"
+
+            corpus = " ".join(d.edited for d in draft_edits).lower()
+            has_emoji = bool(re.search("[\U0001F300-\U0001FAFF☀-➿]", corpus))
+            has_tuteo = bool(re.search(r"\btu\b|\btú\b|\btuyo\b|\bte\b", corpus))
+            has_usted = bool(re.search(r"\busted\b|\bsuyo\b|\ble\b", corpus))
+            if has_emoji:
+                communication_style = "muy_casual"
+            elif has_tuteo and not has_usted:
+                communication_style = "casual"
+            else:
+                communication_style = "formal"
+
         values: dict[str, Any] = {
             "id": uuid.uuid4(),
             "user_id": user.id,
@@ -274,20 +306,28 @@ async def update_user_profiles(tenant_id: uuid.UUID, db: AsyncSession) -> int:
             "created_at": now,
             "updated_at": now,
         }
+        set_update: dict[str, Any] = {
+            "total_deals_closed": values["total_deals_closed"],
+            "total_deals_lost": values["total_deals_lost"],
+            "close_rate": values["close_rate"],
+            "best_close_day": values["best_close_day"],
+            "best_close_hour": values["best_close_hour"],
+            "top_performing_stage": values["top_performing_stage"],
+            "updated_at": values["updated_at"],
+        }
+        if communication_style is not None:
+            values["communication_style"] = communication_style
+            set_update["communication_style"] = communication_style
+        if preferred_message_length is not None:
+            values["preferred_message_length"] = preferred_message_length
+            set_update["preferred_message_length"] = preferred_message_length
+
         stmt = (
             pg_insert(AIUserProfile)
             .values(**values)
             .on_conflict_do_update(
                 constraint="uq_ai_user_profiles_user_id",
-                set_={
-                    "total_deals_closed": values["total_deals_closed"],
-                    "total_deals_lost": values["total_deals_lost"],
-                    "close_rate": values["close_rate"],
-                    "best_close_day": values["best_close_day"],
-                    "best_close_hour": values["best_close_hour"],
-                    "top_performing_stage": values["top_performing_stage"],
-                    "updated_at": values["updated_at"],
-                },
+                set_=set_update,
             )
         )
         await db.execute(stmt)
