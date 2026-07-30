@@ -160,6 +160,8 @@ class AIUserProfile(Base):
     best_close_day: Mapped[str | None] = mapped_column(String(20), nullable=True)
     best_close_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
     top_performing_stage: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    communication_style: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    preferred_message_length: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
 class AIDraftEdit(Base):
