@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
-from app.models.finance import Expense, ExpenseCategory, FinancePermission
+from app.models.finance import Expense, ExpenseCategory, ExpenseRule, FinancePermission, RecurringExpense
 from app.models.tenant import Branch
 from app.models.user import User, UserRole
 
@@ -148,6 +148,64 @@ class ExpenseUpdate(BaseModel):
 
 class ExpenseConfirmBody(BaseModel):
     amount: Decimal | None = Field(default=None, gt=0)
+
+
+class RecurringExpenseOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    category_id: uuid.UUID | None
+    amount: Decimal
+    day_of_month: int
+    description: str | None
+    is_active: bool
+    model_config = {"from_attributes": True}
+
+
+class RecurringExpenseCreate(BaseModel):
+    category_id: uuid.UUID | None = None
+    amount: Decimal = Field(gt=0)
+    day_of_month: int = Field(default=1, ge=1, le=28)
+    description: str | None = None
+
+
+class RecurringExpenseUpdate(BaseModel):
+    category_id: uuid.UUID | None = None
+    amount: Decimal | None = Field(default=None, gt=0)
+    day_of_month: int | None = Field(default=None, ge=1, le=28)
+    description: str | None = None
+    is_active: bool | None = None
+
+
+class ExpenseRuleOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    category_id: uuid.UUID | None
+    name: str
+    rule_type: str
+    value: Decimal
+    deal_type_filter: str | None  # free string — validated against tenant.deal_type_options in prompt 5
+    auto_confirm: bool
+    is_active: bool
+    model_config = {"from_attributes": True}
+
+
+class ExpenseRuleCreate(BaseModel):
+    category_id: uuid.UUID | None = None
+    name: str
+    rule_type: Literal["percent_of_deal", "fixed_per_deal", "percent_of_cost"]
+    value: Decimal = Field(gt=0)
+    deal_type_filter: str | None = None
+    auto_confirm: bool = False
+
+
+class ExpenseRuleUpdate(BaseModel):
+    category_id: uuid.UUID | None = None
+    name: str | None = None
+    rule_type: Literal["percent_of_deal", "fixed_per_deal", "percent_of_cost"] | None = None
+    value: Decimal | None = Field(default=None, gt=0)
+    deal_type_filter: str | None = None
+    auto_confirm: bool | None = None
+    is_active: bool | None = None
 
 
 # ── Finance permissions endpoints ─────────────────────────────────────────────
@@ -442,4 +500,182 @@ async def delete_expense(
     exp = await _get_expense_or_404(expense_id, current_user.tenant_id, db)
     await _require_finance_access(current_user, branch_id=exp.branch_id, db=db)
     await db.delete(exp)
+    await db.commit()
+
+
+# ── Recurring expenses endpoints ──────────────────────────────────────────────
+
+@router.get("/recurring-expenses", response_model=list[RecurringExpenseOut])
+async def list_recurring_expenses(
+    include_inactive: bool = Query(False),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[RecurringExpenseOut]:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    q = select(RecurringExpense).where(RecurringExpense.tenant_id == current_user.tenant_id)
+    if not include_inactive:
+        q = q.where(RecurringExpense.is_active.is_(True))
+    rows = (await db.execute(q)).scalars().all()
+    return [RecurringExpenseOut.model_validate(r) for r in rows]
+
+
+@router.post("/recurring-expenses", response_model=RecurringExpenseOut, status_code=status.HTTP_201_CREATED)
+async def create_recurring_expense(
+    body: RecurringExpenseCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RecurringExpenseOut:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    rec = RecurringExpense(
+        tenant_id=current_user.tenant_id,
+        category_id=body.category_id,
+        amount=body.amount,
+        day_of_month=body.day_of_month,
+        description=body.description,
+    )
+    db.add(rec)
+    await db.commit()
+    await db.refresh(rec)
+    return RecurringExpenseOut.model_validate(rec)
+
+
+@router.patch("/recurring-expenses/{recurring_id}", response_model=RecurringExpenseOut)
+async def update_recurring_expense(
+    recurring_id: uuid.UUID,
+    body: RecurringExpenseUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RecurringExpenseOut:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    rec = (await db.execute(
+        select(RecurringExpense).where(
+            RecurringExpense.id == recurring_id,
+            RecurringExpense.tenant_id == current_user.tenant_id,
+        )
+    )).scalar_one_or_none()
+    if rec is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gasto recurrente no encontrado")
+    if body.category_id is not None:
+        rec.category_id = body.category_id
+    if body.amount is not None:
+        rec.amount = body.amount
+    if body.day_of_month is not None:
+        rec.day_of_month = body.day_of_month
+    if body.description is not None:
+        rec.description = body.description
+    if body.is_active is not None:
+        rec.is_active = body.is_active
+    await db.commit()
+    await db.refresh(rec)
+    return RecurringExpenseOut.model_validate(rec)
+
+
+@router.delete("/recurring-expenses/{recurring_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_recurring_expense(
+    recurring_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    rec = (await db.execute(
+        select(RecurringExpense).where(
+            RecurringExpense.id == recurring_id,
+            RecurringExpense.tenant_id == current_user.tenant_id,
+        )
+    )).scalar_one_or_none()
+    if rec is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gasto recurrente no encontrado")
+    await db.delete(rec)
+    await db.commit()
+
+
+# ── Expense rules endpoints ───────────────────────────────────────────────────
+
+@router.get("/expense-rules", response_model=list[ExpenseRuleOut])
+async def list_expense_rules(
+    include_inactive: bool = Query(False),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ExpenseRuleOut]:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    q = select(ExpenseRule).where(ExpenseRule.tenant_id == current_user.tenant_id)
+    if not include_inactive:
+        q = q.where(ExpenseRule.is_active.is_(True))
+    rows = (await db.execute(q)).scalars().all()
+    return [ExpenseRuleOut.model_validate(r) for r in rows]
+
+
+@router.post("/expense-rules", response_model=ExpenseRuleOut, status_code=status.HTTP_201_CREATED)
+async def create_expense_rule(
+    body: ExpenseRuleCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExpenseRuleOut:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    rule = ExpenseRule(
+        tenant_id=current_user.tenant_id,
+        category_id=body.category_id,
+        name=body.name.strip(),
+        rule_type=body.rule_type,
+        value=body.value,
+        deal_type_filter=body.deal_type_filter,
+        auto_confirm=body.auto_confirm,
+    )
+    db.add(rule)
+    await db.commit()
+    await db.refresh(rule)
+    return ExpenseRuleOut.model_validate(rule)
+
+
+@router.patch("/expense-rules/{rule_id}", response_model=ExpenseRuleOut)
+async def update_expense_rule(
+    rule_id: uuid.UUID,
+    body: ExpenseRuleUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExpenseRuleOut:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    rule = (await db.execute(
+        select(ExpenseRule).where(
+            ExpenseRule.id == rule_id,
+            ExpenseRule.tenant_id == current_user.tenant_id,
+        )
+    )).scalar_one_or_none()
+    if rule is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Regla de gasto no encontrada")
+    if body.category_id is not None:
+        rule.category_id = body.category_id
+    if body.name is not None:
+        rule.name = body.name.strip()
+    if body.rule_type is not None:
+        rule.rule_type = body.rule_type
+    if body.value is not None:
+        rule.value = body.value
+    if body.deal_type_filter is not None:
+        rule.deal_type_filter = body.deal_type_filter
+    if body.auto_confirm is not None:
+        rule.auto_confirm = body.auto_confirm
+    if body.is_active is not None:
+        rule.is_active = body.is_active
+    await db.commit()
+    await db.refresh(rule)
+    return ExpenseRuleOut.model_validate(rule)
+
+
+@router.delete("/expense-rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_expense_rule(
+    rule_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    rule = (await db.execute(
+        select(ExpenseRule).where(
+            ExpenseRule.id == rule_id,
+            ExpenseRule.tenant_id == current_user.tenant_id,
+        )
+    )).scalar_one_or_none()
+    if rule is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Regla de gasto no encontrada")
+    await db.delete(rule)
     await db.commit()
