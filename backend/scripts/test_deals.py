@@ -66,7 +66,7 @@ async def main() -> None:
         tenant_id_a = me["user"]["tenant_id"]
 
         # Obtener una etapa y lead del tenant A
-        board = (await c.get(f"{BASE}/opportunities/board", headers=ha)).json()
+        board = (await c.get(f"{BASE}/pipeline/board", headers=ha)).json()
         stages = sorted(board["stages"], key=lambda s: s["order_index"])
         open_stages = [s for s in stages if not s["is_won"] and not s["is_lost"]]
         stage_1_id = open_stages[0]["id"]

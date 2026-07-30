@@ -7,6 +7,7 @@ Reglas:
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 
@@ -18,6 +19,7 @@ from sqlalchemy.orm import aliased
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
+from app.models.ai_memory import AIMemoryEvent
 from app.models.deal import Deal
 from app.models.deal_stage_history import DealStageHistory
 from app.models.lead import Lead
@@ -261,6 +263,32 @@ async def update_deal(
 
     await db.commit()
     await db.refresh(deal)
+
+    if stage_changed:
+        try:
+            memory_event = AIMemoryEvent(
+                tenant_id=current_user.tenant_id,
+                entity_type="deal",
+                entity_id=deal.id,
+                event_type="deal_stage_changed",
+                event_data={
+                    "from_stage_id": str(prev_stage_id) if prev_stage_id else None,
+                    "to_stage_id": str(deal.pipeline_stage_id),
+                },
+                actor_id=current_user.id,
+            )
+            db.add(memory_event)
+            await db.flush()
+            event_id = str(memory_event.id)
+            await db.commit()
+
+            from app.tasks.ai_memory_tasks import update_entity_context_task
+            update_entity_context_task.delay(event_id)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "[ai_memory] failed to create memory event for deal %s", deal.id
+            )
+
     return deal
 
 
