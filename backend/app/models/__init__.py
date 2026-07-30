@@ -1,6 +1,6 @@
 from app.models.activity import ACTIVITY_TYPES, Activity, ActivityType, LeadActivity
 from app.models.ai_memory import AIEntityContext, AIMemoryEvent, AIOutcomeFeedback, AITenantPattern, AIUserProfile
-from app.models.finance import ExpenseCategory, Expense, FinancePermission
+from app.models.finance import ExpenseCategory, Expense, ExpenseRule, FinancePermission, RecurringExpense
 from app.models.base import Base
 from app.models.conversation import (
     Conversation,
@@ -54,4 +54,6 @@ __all__ = [
     "FinancePermission",
     "ExpenseCategory",
     "Expense",
+    "ExpenseRule",
+    "RecurringExpense",
 ]
