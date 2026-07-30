@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +25,7 @@ from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.core.redis import redis_client
 from app.models.activity import Activity, ActivityType, LeadActivity
+from app.models.ai_memory import AITenantPattern
 from app.models.deal import Deal
 from app.models.agent import AgentSuggestion
 from app.models.ai_log import AICommandLog
@@ -769,3 +771,30 @@ async def get_deals_closed_timeline(
         {"day": str(idx + 1), "date": d.isoformat(), "value": int(v)}
         for idx, (d, v) in enumerate(sorted(buckets.items()))
     ]
+
+
+# ── AI patterns (Etapa 6.6.3) ─────────────────────────────────────────────────
+
+class AITenantPatternOut(BaseModel):
+    pattern_type: str
+    pattern_data: dict[str, Any]
+    confidence_score: float
+    sample_size: int
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/ai-patterns", response_model=list[AITenantPatternOut])
+async def get_ai_patterns(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[AITenantPatternOut]:
+    rows = (
+        await db.execute(
+            select(AITenantPattern)
+            .where(AITenantPattern.tenant_id == current_user.tenant_id)
+            .order_by(AITenantPattern.confidence_score.desc())
+        )
+    ).scalars().all()
+    return [AITenantPatternOut.model_validate(r) for r in rows]
