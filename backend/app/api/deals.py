@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
@@ -19,7 +19,8 @@ from sqlalchemy.orm import aliased
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
-from app.models.ai_memory import AIMemoryEvent
+from app.models.agent import AgentSuggestion
+from app.models.ai_memory import AIMemoryEvent, AIOutcomeFeedback
 from app.models.deal import Deal
 from app.models.deal_stage_history import DealStageHistory
 from app.models.lead import Lead
@@ -247,6 +248,8 @@ async def update_deal(
     deal = await _get_deal_or_404(deal_id, current_user.tenant_id, db)
 
     prev_stage_id = deal.pipeline_stage_id
+    prev_is_won = deal.is_won
+    prev_is_lost = deal.is_lost
     stage_changed = False
 
     if body.pipeline_stage_id is not None and body.pipeline_stage_id != prev_stage_id:
@@ -288,6 +291,17 @@ async def update_deal(
             to_stage_id=deal.pipeline_stage_id,
         ))
 
+    new_stage_name: str | None = new_stage.name if stage_changed else None
+
+    if deal.is_won is True and prev_is_won is False:
+        outcome: str | None = "deal_closed"
+    elif deal.is_lost is True and prev_is_lost is False:
+        outcome = "deal_lost"
+    elif stage_changed and not deal.is_won and not deal.is_lost:
+        outcome = "deal_advanced"
+    else:
+        outcome = None
+
     await db.commit()
     await db.refresh(deal)
 
@@ -314,6 +328,51 @@ async def update_deal(
         except Exception:
             logging.getLogger(__name__).exception(
                 "[ai_memory] failed to create memory event for deal %s", deal.id
+            )
+
+    if outcome is not None:
+        try:
+            now = datetime.now(timezone.utc)
+            sug = (await db.execute(
+                select(AgentSuggestion)
+                .where(
+                    AgentSuggestion.tenant_id == current_user.tenant_id,
+                    AgentSuggestion.entity_type == "deal",
+                    AgentSuggestion.entity_id == deal.id,
+                    AgentSuggestion.status.in_(["confirmed", "executed"]),
+                    AgentSuggestion.created_at >= now - timedelta(days=7),
+                )
+                .order_by(AgentSuggestion.created_at.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+
+            if sug is not None:
+                days_to_outcome = max(0, (now - sug.created_at).days)
+                outcome_value = (
+                    float(deal.amount) if outcome == "deal_closed" and deal.amount is not None else 0.0
+                )
+                action_taken = (
+                    "stage_change" if outcome == "deal_advanced"
+                    else ("deal_won" if outcome == "deal_closed" else "deal_lost")
+                )
+                db.add(AIOutcomeFeedback(
+                    tenant_id=current_user.tenant_id,
+                    suggestion_id=sug.id,
+                    action_taken=action_taken,
+                    entity_type="deal",
+                    entity_id=deal.id,
+                    outcome=outcome,
+                    outcome_value=outcome_value,
+                    days_to_outcome=days_to_outcome,
+                    context_at_action={
+                        "stage_name": new_stage_name,
+                        "owner_id": str(deal.owner_id) if deal.owner_id else None,
+                    },
+                ))
+                await db.commit()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "[ai_outcome] failed to create outcome feedback for deal %s", deal.id
             )
 
     return deal
