@@ -18,6 +18,7 @@ from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.core.redis import redis_client
 from app.models.activity import ActivityType, LeadActivity
+from app.models.ai_memory import AIMemoryEvent
 from app.models.pipeline import PipelineStage
 from app.models.conversation import (
     Conversation,
@@ -637,6 +638,30 @@ async def reply_to_lead(
     await db.flush()   # get msg.id before commit
     msg_id = msg.id
     await db.commit()
+
+    # 8a. AI memory event — independent of Redis; failure must not block response
+    try:
+        memory_event = AIMemoryEvent(
+            tenant_id=current_user.tenant_id,
+            entity_type="conversation",
+            entity_id=conversation.id,
+            event_type="wa_message_sent",
+            event_data={
+                "message_id": str(msg_id),
+                "text": text[:500],
+                "lead_id": str(lead_id),
+            },
+            actor_id=current_user.id,
+        )
+        db.add(memory_event)
+        await db.flush()
+        event_id = str(memory_event.id)
+        await db.commit()
+
+        from app.tasks.ai_memory_tasks import update_entity_context_task
+        update_entity_context_task.delay(event_id)
+    except Exception:
+        logger.exception("[ai_memory] failed to create memory event for reply to lead %s", lead_id)
 
     # 8. Agregar al historial de Redis para continuidad del bot
     history_key = f"conv:{conversation.id}"
