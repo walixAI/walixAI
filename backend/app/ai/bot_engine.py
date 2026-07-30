@@ -206,6 +206,7 @@ async def _process_message_inner(
             db.add(memory_event)
             await db.flush()  # assign memory_event.id
             event_id = str(memory_event.id)
+            await db.commit()
 
             from app.tasks.ai_memory_tasks import update_entity_context_task
             update_entity_context_task.delay(event_id)
