@@ -74,6 +74,10 @@ class SummaryResponse(BaseModel):
     summary: str
 
 
+class SuggestReplyResponse(BaseModel):
+    draft: str
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _extract_json(text: str) -> dict:
@@ -323,3 +327,96 @@ async def get_conversation_summary(
         )
 
     return SummaryResponse(summary=summary)
+
+
+@router.get("/suggest-reply", response_model=SuggestReplyResponse)
+async def suggest_reply(
+    conversation_id: uuid.UUID = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SuggestReplyResponse:
+    """Returns an AI-generated draft reply for the last 15 messages of a conversation."""
+    from sqlalchemy import select
+    from app.models.lead import Lead
+    from app.models.ai_memory import AIEntityContext
+
+    # ── 1. Access validation (same as conversation-summary) ───────────────────
+    conv = await db.get(Conversation, conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    branch = await db.get(Branch, conv.branch_id)
+    if branch is None or branch.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Sin acceso a esta conversación")
+
+    # ── 2. Load last 15 messages ──────────────────────────────────────────────
+    result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc())
+        .limit(15)
+    )
+    messages = list(reversed(result.scalars().all()))
+
+    if not messages:
+        return SuggestReplyResponse(draft="")
+
+    transcript = "\n".join(
+        f"{'Cliente' if m.role == 'user' else 'Agente'}: {m.content}"
+        for m in messages
+        if m.role in ("user", "assistant")
+    )
+
+    # ── 3. Load lead + AIEntityContext for personalization ────────────────────
+    memory_block = ""
+    if conv.lead_id:
+        lead = await db.get(Lead, conv.lead_id)
+        if lead:
+            ai_ctx_result = await db.execute(
+                select(AIEntityContext).where(
+                    AIEntityContext.tenant_id == current_user.tenant_id,
+                    AIEntityContext.entity_type == "contact",
+                    AIEntityContext.entity_id == lead.id,
+                )
+            )
+            ai_ctx = ai_ctx_result.scalar_one_or_none()
+            if ai_ctx and ai_ctx.context_summary:
+                facts_text = ""
+                if ai_ctx.key_facts:
+                    facts_text = "\n- " + "\n- ".join(str(f) for f in ai_ctx.key_facts[:5])
+                memory_block = (
+                    f"\nCONTEXTO DEL CLIENTE (memoria):\n{ai_ctx.context_summary}"
+                    f"{facts_text}\n"
+                )
+
+    # ── 4. Build prompt and call Claude ──────────────────────────────────────
+    system_prompt = (
+        "Eres un asistente de CRM para PyMEs mexicanas. Tu tarea es redactar un borrador "
+        "de respuesta breve para el agente de ventas, en español, con tono profesional pero cercano. "
+        "Máximo 3 oraciones. No uses emojis. Responde ÚNICAMENTE con este JSON: {\"draft\": \"...\"}"
+    )
+    user_prompt = (
+        f"CONVERSACIÓN RECIENTE:\n{transcript}"
+        f"{memory_block}\n"
+        "Redacta el siguiente mensaje que debería enviar el agente."
+    )
+
+    try:
+        response = await _anthropic.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=200,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        parsed = _extract_json(response.content[0].text)
+        draft = str(parsed.get("draft", ""))
+    except Exception:
+        logger.exception(
+            "ai/suggest-reply: failed for conversation=%s", conversation_id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="No se pudo generar el borrador. Intenta de nuevo.",
+        )
+
+    return SuggestReplyResponse(draft=draft)
