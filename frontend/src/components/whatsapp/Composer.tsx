@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Send, Loader2 } from "lucide-react";
+import { Send, Loader2, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -10,9 +10,24 @@ interface Props {
   sending?: boolean;
   sendError?: string | null;
   placeholder?: string;
+  onAiSuggest?: () => void;
+  aiLoading?: boolean;
+  aiDraftActive?: boolean;
+  onClearAiDraft?: () => void;
 }
 
-export function Composer({ value, onChange, onSend, sending, sendError, placeholder }: Props) {
+export function Composer({
+  value,
+  onChange,
+  onSend,
+  sending,
+  sendError,
+  placeholder,
+  onAiSuggest,
+  aiLoading,
+  aiDraftActive,
+  onClearAiDraft,
+}: Props) {
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   // auto-grow
@@ -35,8 +50,48 @@ export function Composer({ value, onChange, onSend, sending, sendError, placehol
     }
   };
 
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (aiDraftActive) onClearAiDraft?.();
+    onChange(e.target.value);
+  };
+
   return (
     <div className="border-t border-border bg-card">
+      {/* AI suggest row */}
+      <div className="px-3 pt-2 flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onAiSuggest}
+          disabled={aiLoading || sending}
+          className="h-7 px-2 text-xs text-primary gap-1.5 hover:bg-primary/10"
+        >
+          {aiLoading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="h-3.5 w-3.5" />
+          )}
+          Sugerir respuesta
+        </Button>
+      </div>
+
+      {/* AI draft badge */}
+      {aiDraftActive && (
+        <div className="px-3 pt-1 flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-1 text-xs bg-primary/5 border border-primary/40 text-primary rounded-full px-2 py-0.5">
+            <Sparkles className="h-3 w-3" />
+            Borrador IA
+          </span>
+          <button
+            onClick={onClearAiDraft}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Descartar borrador"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {sendError && (
         <div className="px-3 pt-2 text-xs text-danger flex items-center gap-1">
           <span className="font-medium">Error:</span> {sendError}
@@ -47,7 +102,7 @@ export function Composer({ value, onChange, onSend, sending, sendError, placehol
           <Textarea
             ref={taRef}
             value={value}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={handleChange}
             onKeyDown={onKey}
             placeholder={placeholder ?? "Escribe un mensaje..."}
             rows={1}

@@ -1406,6 +1406,10 @@ export const api = {
     return request(`/api/ai/conversation-summary?conversation_id=${conversationId}`);
   },
 
+  async getSuggestReply(conversationId: string): Promise<{ draft: string }> {
+    return request(`/api/ai/suggest-reply?conversation_id=${conversationId}`);
+  },
+
   // Automations
   async getAutomations(params: {
     page?: number;

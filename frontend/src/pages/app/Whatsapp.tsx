@@ -28,12 +28,14 @@ export default function Whatsapp() {
   const [draft, setDraft] = useState("");
   const [replyError, setReplyError] = useState<string | null>(null);
   const [pendingMessages, setPendingMessages] = useState<PendingMsg[]>([]);
+  const [aiDraftActive, setAiDraftActive] = useState(false);
 
   // Reset composer state when switching leads
   useEffect(() => {
     setDraft("");
     setReplyError(null);
     setPendingMessages([]);
+    setAiDraftActive(false);
   }, [activeLeadId]);
 
   // Fetch all leads — 5 s refresh for real-time inbox
@@ -177,6 +179,24 @@ export default function Whatsapp() {
     replyMutation.mutate(text);
   };
 
+  const suggestMutation = useMutation({
+    mutationFn: () => api.getSuggestReply(conversation!.conversation_id!),
+  });
+
+  const runAiSuggest = async () => {
+    if (!conversation?.conversation_id) return;
+    try {
+      const result = await suggestMutation.mutateAsync();
+      if (result.draft) {
+        setDraft(result.draft);
+        setAiDraftActive(true);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Error al generar el borrador";
+      toast.error("No se pudo sugerir respuesta", { description: msg });
+    }
+  };
+
   const activeLead$ = useMemo(
     () => leads.find((l) => l.id === activeLeadId) ?? null,
     [leads, activeLeadId]
@@ -283,6 +303,10 @@ export default function Whatsapp() {
                         sending={replyMutation.isPending}
                         sendError={replyError}
                         placeholder={`Escribe tu mensaje a ${activeLead?.name ?? activeLead?.wa_phone ?? "el lead"}...`}
+                        onAiSuggest={runAiSuggest}
+                        aiLoading={suggestMutation.isPending}
+                        aiDraftActive={aiDraftActive}
+                        onClearAiDraft={() => setAiDraftActive(false)}
                       />
                     )}
                   </>
