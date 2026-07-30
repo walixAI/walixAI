@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, field_validator
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
-from app.models.finance import FinancePermission
+from app.models.finance import ExpenseCategory, FinancePermission
 from app.models.tenant import Branch
 from app.models.user import User, UserRole
 
@@ -63,6 +64,29 @@ class FinancePermissionOut(BaseModel):
 class FinancePermissionCreate(BaseModel):
     user_id: uuid.UUID
     branch_id: uuid.UUID | None = None
+
+
+class ExpenseCategoryOut(BaseModel):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    name: str
+    kind: str
+    icon: str | None
+    is_active: bool
+    model_config = {"from_attributes": True}
+
+
+class ExpenseCategoryCreate(BaseModel):
+    name: str
+    kind: Literal["fijo", "variable"]
+    icon: str | None = None
+
+
+class ExpenseCategoryUpdate(BaseModel):
+    name: str | None = None
+    kind: Literal["fijo", "variable"] | None = None
+    icon: str | None = None
+    is_active: bool | None = None
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -137,6 +161,69 @@ async def create_finance_permission(
         user_name=target_user.name,
         user_email=target_user.email,
     )
+
+
+@router.get("/expense-categories", response_model=list[ExpenseCategoryOut])
+async def list_expense_categories(
+    include_inactive: bool = Query(False),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ExpenseCategoryOut]:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    q = select(ExpenseCategory).where(ExpenseCategory.tenant_id == current_user.tenant_id)
+    if not include_inactive:
+        q = q.where(ExpenseCategory.is_active.is_(True))
+    q = q.order_by(ExpenseCategory.kind, ExpenseCategory.name)
+    rows = (await db.execute(q)).scalars().all()
+    return [ExpenseCategoryOut.model_validate(r) for r in rows]
+
+
+@router.post("/expense-categories", response_model=ExpenseCategoryOut, status_code=status.HTTP_201_CREATED)
+async def create_expense_category(
+    body: ExpenseCategoryCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExpenseCategoryOut:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    cat = ExpenseCategory(
+        tenant_id=current_user.tenant_id,
+        name=body.name.strip(),
+        kind=body.kind,
+        icon=body.icon,
+    )
+    db.add(cat)
+    await db.commit()
+    await db.refresh(cat)
+    return ExpenseCategoryOut.model_validate(cat)
+
+
+@router.patch("/expense-categories/{category_id}", response_model=ExpenseCategoryOut)
+async def update_expense_category(
+    category_id: uuid.UUID,
+    body: ExpenseCategoryUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExpenseCategoryOut:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    cat = (await db.execute(
+        select(ExpenseCategory).where(
+            ExpenseCategory.id == category_id,
+            ExpenseCategory.tenant_id == current_user.tenant_id,
+        )
+    )).scalar_one_or_none()
+    if cat is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Categoría no encontrada")
+    if body.name is not None:
+        cat.name = body.name.strip()
+    if body.kind is not None:
+        cat.kind = body.kind
+    if body.icon is not None:
+        cat.icon = body.icon
+    if body.is_active is not None:
+        cat.is_active = body.is_active
+    await db.commit()
+    await db.refresh(cat)
+    return ExpenseCategoryOut.model_validate(cat)
 
 
 @router.delete("/permissions/{permission_id}", status_code=status.HTTP_204_NO_CONTENT)
