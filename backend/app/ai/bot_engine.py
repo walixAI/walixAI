@@ -23,6 +23,7 @@ from app.models.conversation import (
     Message,
     MessageRole,
 )
+from app.models.ai_memory import AIMemoryEvent
 from app.models.lead import Lead, LeadStatus
 from app.models.tenant import Branch
 from app.services.whatsapp import WhatsAppService
@@ -179,14 +180,39 @@ async def _process_message_inner(
 
         # 4. Persist the user message regardless of handler so the agent can
         #    see it in the dashboard even when in human control mode.
-        db.add(
-            Message(
-                conversation_id=conversation.id,
-                wa_message_id=message_id,
-                role=MessageRole.USER,
-                content=message_body,
-            )
+        inbound_msg = Message(
+            conversation_id=conversation.id,
+            wa_message_id=message_id,
+            role=MessageRole.USER,
+            content=message_body,
         )
+        db.add(inbound_msg)
+
+        # 4a. AI memory event — flushed here, committed by existing commits below.
+        try:
+            await db.flush()  # assign inbound_msg.id
+            memory_event = AIMemoryEvent(
+                tenant_id=tenant_id,
+                entity_type="conversation",
+                entity_id=conversation.id,
+                event_type="wa_message_received",
+                event_data={
+                    "message_id": message_id,
+                    "text": message_body[:500],
+                    "lead_id": str(lead.id),
+                },
+                actor_id=None,
+            )
+            db.add(memory_event)
+            await db.flush()  # assign memory_event.id
+            event_id = str(memory_event.id)
+
+            from app.tasks.ai_memory_tasks import update_entity_context_task
+            update_entity_context_task.delay(event_id)
+        except Exception:
+            logger.exception(
+                "[ai_memory] failed to create memory event for inbound msg from lead %s", lead.id
+            )
 
         # 5. Human in control — save the message but let bot stay silent.
         if conversation.current_handler == ConversationHandler.HUMAN:
