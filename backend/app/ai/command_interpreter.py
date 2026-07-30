@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.activity import ActivityType, LeadActivity
 from app.models.ai_log import AICommandLog
+from app.models.ai_memory import AIEntityContext
 from app.models.alert import AlertRule
 from app.models.conversation import Message
 from app.models.lead import Lead, LeadStatus
@@ -158,6 +159,15 @@ async def _enrich_lead(lead_id: uuid.UUID, db: AsyncSession) -> dict:
             for m in reversed(msgs_result.scalars().all())
         ]
 
+    ai_ctx_result = await db.execute(
+        select(AIEntityContext).where(
+            AIEntityContext.tenant_id == lead.tenant_id,
+            AIEntityContext.entity_type == "contact",
+            AIEntityContext.entity_id == lead_id,
+        )
+    )
+    ai_ctx = ai_ctx_result.scalar_one_or_none()
+
     return {
         "lead": {
             "id": str(lead.id),
@@ -170,6 +180,10 @@ async def _enrich_lead(lead_id: uuid.UUID, db: AsyncSession) -> dict:
             "risk_reason": lead.risk_reason,
         },
         "recent_messages": recent_messages,
+        "ai_memory": {
+            "context_summary": ai_ctx.context_summary if ai_ctx else "",
+            "key_facts": ai_ctx.key_facts if ai_ctx else [],
+        },
     }
 
 
