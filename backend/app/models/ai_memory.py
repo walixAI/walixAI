@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -104,3 +104,29 @@ class AIOutcomeFeedback(Base):
     context_at_action: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default="{}"
     )
+
+
+class AITenantPattern(Base):
+    """Aggregated business patterns learned from AIOutcomeFeedback for a tenant (Etapa 6.4)."""
+
+    __tablename__ = "ai_tenant_patterns"
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "pattern_type", name="uq_ai_tenant_patterns_tenant_type"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # "best_followup_day" | "peak_response_hours" | "avg_close_days" | "top_objections"
+    pattern_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    pattern_data: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
+    confidence_score: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0"
+    )
+    sample_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
