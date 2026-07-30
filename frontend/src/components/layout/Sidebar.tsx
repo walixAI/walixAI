@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, Users2, MessageCircle, BarChart3,
-  Settings, Kanban, TrendingUp, Zap, CreditCard, BarChart2, Bot, BookOpen,
+  Settings, Kanban, TrendingUp, Zap, CreditCard, BarChart2, Bot, BookOpen, ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/walix/Logo";
@@ -22,6 +22,7 @@ export function Sidebar() {
 
   const MAIN_ITEMS = [
     { to: "/dashboard",   label: "Dashboard",       icon: LayoutDashboard },
+    { to: "/mi-dia",      label: "Mi Día",           icon: ClipboardList },
     ...(roiVisible ? [{ to: "/roi", label: "ROI", icon: BarChart2 }] : []),
     { to: "/pipeline",    label: "Pipeline",         icon: Kanban },
     { to: "/contacts",    label: entities,            icon: Users },
