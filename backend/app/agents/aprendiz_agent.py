@@ -97,21 +97,13 @@ async def run_aprendiz_agent(tenant_id: uuid.UUID, db: AsyncSession) -> int:
     total_responded = len(responded_rows)
 
     if total_responded >= _MIN_SAMPLE:
-        dow_counts: Counter[int] = Counter()
+        dow_counts_sun: Counter[int] = Counter()
         hour_counts: Counter[int] = Counter()
         for ts in responded_rows:
             local = ts.astimezone(MX_TZ)
-            dow_counts[local.weekday() + 1 % 7] += 1   # 0=Mon in isoweekday; map to 0=Sun style
-            hour_counts[local.hour] += 1
-
-        # Remap: Python weekday() gives 0=Mon…6=Sun; convert to 0=Sun…6=Sat
-        # Actually use isoweekday: 1=Mon…7=Sun, then map Sunday=7→0
-        dow_counts_sun: Counter[int] = Counter()
-        for ts in responded_rows:
-            local = ts.astimezone(MX_TZ)
             isoday = local.isoweekday()  # 1=Mon … 7=Sun
-            dow_sun = 0 if isoday == 7 else isoday  # 0=Sun, 1=Mon … 6=Sat
-            dow_counts_sun[dow_sun] += 1
+            dow_counts_sun[0 if isoday == 7 else isoday] += 1  # 0=Sun, 1=Mon … 6=Sat
+            hour_counts[local.hour] += 1
 
         best_dow = dow_counts_sun.most_common(1)[0][0]
         top3_hours = [h for h, _ in hour_counts.most_common(3)]
