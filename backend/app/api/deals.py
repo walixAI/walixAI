@@ -116,6 +116,33 @@ async def create_deal(
     db.add(deal)
     await db.commit()
     await db.refresh(deal)
+
+    try:
+        memory_event = AIMemoryEvent(
+            tenant_id=current_user.tenant_id,
+            entity_type="deal",
+            entity_id=deal.id,
+            event_type="deal_created",
+            event_data={
+                "title": deal.title,
+                "amount": str(deal.amount) if deal.amount is not None else None,
+                "source": deal.source,
+                "pipeline_stage_id": str(deal.pipeline_stage_id),
+            },
+            actor_id=current_user.id,
+        )
+        db.add(memory_event)
+        await db.flush()
+        event_id = str(memory_event.id)
+        await db.commit()
+
+        from app.tasks.ai_memory_tasks import update_entity_context_task
+        update_entity_context_task.delay(event_id)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "[ai_memory] failed to create memory event for deal %s", deal.id
+        )
+
     return deal
 
 
