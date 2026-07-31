@@ -1,0 +1,30 @@
+export const TOOL_LABELS: Record<string, string> = {
+  get_pipeline_status: "Pipeline",
+  search_contacts: "Buscar contactos",
+  get_contact_context: "Contexto contacto",
+  get_my_tasks: "Mis tareas",
+  get_my_suggestions: "Sugerencias",
+  get_my_deals: "Mis deals",
+  get_profitability: "Rentabilidad",
+  get_run_rate: "Run rate",
+  get_expenses_summary: "Gastos",
+  get_monthly_goal: "Meta mensual",
+  get_team_performance: "Rendimiento equipo",
+  create_contact: "Crear contacto",
+  create_deal: "Crear deal",
+  move_deal_stage: "Mover deal",
+  add_note: "Agregar nota",
+  create_task: "Crear tarea",
+  prepare_whatsapp_message: "Borrador WhatsApp",
+  set_monthly_goal: "Establecer meta",
+};
+
+export const WRITE_TOOL_NAMES = new Set([
+  "create_contact",
+  "create_deal",
+  "move_deal_stage",
+  "add_note",
+  "create_task",
+  "prepare_whatsapp_message",
+  "set_monthly_goal",
+]);

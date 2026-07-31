@@ -14,11 +14,12 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Bot, BookOpen, Zap, CheckCircle2, Copy, ChevronLeft, ChevronRight,
-  Loader2, Pencil, RefreshCw, Plus, Trash2, Unplug, X, Save, Target,
+  Loader2, Pencil, RefreshCw, Plus, Trash2, Unplug, X, Save, Target, Cpu,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type MetaConfigIn, type KBDocumentListItem } from "@/lib/api";
 import { GoalsTab } from "@/components/settings/goals/GoalsTab";
+import { CapabilitiesTab } from "@/components/settings/builder/CapabilitiesTab";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenantLabels } from "@/hooks/useTenantLabels";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ const TABS = [
   { key: "kb",        label: "Base de conocimiento", icon: BookOpen },
   { key: "whatsapp",  label: "WhatsApp / Meta",     icon: Zap },
   { key: "metas",     label: "Metas",                icon: Target },
+  { key: "builder",   label: "Walix Builder",        icon: Cpu },
 ] as const;
 
 // ── Row helper ────────────────────────────────────────────────────────────────
@@ -793,7 +795,8 @@ function WhatsAppTab({ branchId, canManage }: { branchId: string; canManage: boo
 export default function Settings() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = (searchParams.get("tab") ?? "bot") as "bot" | "kb" | "whatsapp" | "metas";
+  const activeTab = (searchParams.get("tab") ?? "bot") as "bot" | "kb" | "whatsapp" | "metas" | "builder";
+  const isOwner = user?.role === "owner" || user?.role === "platform_owner";
   const canManage = user?.role === "owner" || user?.role === "it" || user?.role === "gerente";
 
   // Branch resolution
@@ -853,10 +856,14 @@ export default function Settings() {
         ))}
       </div>
 
-      {/* Tab content — Metas renders for any user (API enforces access) */}
+      {/* Tab content — Metas and Builder render for any user (API enforces write access) */}
       {activeTab === "metas" ? (
         <div className="rounded-xl border border-border bg-card p-5 shadow-card">
           <GoalsTab />
+        </div>
+      ) : activeTab === "builder" ? (
+        <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+          <CapabilitiesTab isOwner={isOwner} />
         </div>
       ) : !canManage ? (
         <p className="text-sm text-muted-foreground py-4">Solo owner, gerente o IT pueden acceder a esta sección.</p>

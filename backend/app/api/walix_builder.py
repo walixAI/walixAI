@@ -1,4 +1,4 @@
-"""B2 — Walix Builder: chat de composición de recetas + guardado en copilot_capabilities.
+"""B2/B4 — Walix Builder: chat de composición de recetas + CRUD de capacidades.
 
 Separado de ai_copilot.py porque es un sistema distinto:
   - ai_copilot.py: sesión conversacional multi-turno para usuarios finales,
@@ -6,20 +6,33 @@ Separado de ai_copilot.py porque es un sistema distinto:
   - walix_builder.py: chat de diseño para admins, conversación stateless
                       (el estado vive en el frontend, no hay tabla de historial),
                       solo compone y guarda recetas — NO ejecuta ninguna tool del
-                      CRM todavía (la ejecución dinámica real es B3).
+                      CRM (la ejecución dinámica real es B3).
 
 Rutas:
-  POST /api/ai/builder/chat  — un turno de composición (OWNER/PLATFORM_OWNER only)
-  POST /api/ai/builder/save  — guarda la receta en copilot_capabilities (OWNER only)
+  POST   /api/ai/builder/chat                   — turno de composición (OWNER/PLATFORM_OWNER)
+  POST   /api/ai/builder/save                   — guarda receta (OWNER/PLATFORM_OWNER)
+  GET    /api/ai/builder/capabilities           — lista capacidades del tenant (todos los usuarios)
+  PATCH  /api/ai/builder/capabilities/{id}      — toggle is_active (OWNER/PLATFORM_OWNER)
+  DELETE /api/ai/builder/capabilities/{id}      — hard-delete (OWNER/PLATFORM_OWNER)
+
+Permisos:
+  GET list: todos los usuarios autenticados del tenant pueden ver las capacidades
+  (mismo criterio que la policy "tenant members read capabilities" de Lovable RLS).
+  Escritura (save, toggle, delete): solo OWNER/PLATFORM_OWNER vía _require_owner().
+
+Hard-delete: igual que Lovable. FK copilot_action_log.capability_id tiene
+ON DELETE SET NULL (definida en B1), por lo que el historial de logs no se pierde.
 """
 from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.copilot_engine import CLAUDE_MODEL, _anthropic  # reusar cliente y modelo
@@ -289,3 +302,94 @@ async def builder_save(
         current_user.id,
     )
     return BuilderSaveResponse(id=cap_id)
+
+
+# ── B4: CRUD de capacidades ────────────────────────────────────────────────────
+
+class CapabilityOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: str | None = None
+    kind: str
+    recipe_json: dict
+    trigger_phrases: list
+    scope_type: str
+    scope_roles: list
+    scope_user_ids: list
+    channels: list
+    require_confirmation: bool
+    daily_limit: int | None = None
+    is_active: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class CapabilityToggleRequest(BaseModel):
+    is_active: bool
+
+
+@router.get("/builder/capabilities", response_model=list[CapabilityOut])
+async def list_capabilities(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[CapabilityOut]:
+    """List all capabilities for the current tenant, ordered newest first.
+
+    Open to all authenticated tenant members (mirrors Lovable RLS policy
+    'tenant members read capabilities'). Write ops require OWNER.
+    """
+    rows = (await db.execute(
+        select(CopilotCapability)
+        .where(CopilotCapability.tenant_id == current_user.tenant_id)
+        .order_by(CopilotCapability.created_at.desc())
+    )).scalars().all()
+    return [CapabilityOut.model_validate(r) for r in rows]
+
+
+@router.patch("/builder/capabilities/{capability_id}", response_model=CapabilityOut)
+async def toggle_capability(
+    capability_id: uuid.UUID,
+    body: CapabilityToggleRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CapabilityOut:
+    """Toggle is_active on a capability. OWNER / PLATFORM_OWNER only."""
+    _require_owner(current_user)
+    cap = (await db.execute(
+        select(CopilotCapability).where(
+            CopilotCapability.id == capability_id,
+            CopilotCapability.tenant_id == current_user.tenant_id,
+        )
+    )).scalar_one_or_none()
+    if cap is None:
+        raise HTTPException(status_code=404, detail="Capacidad no encontrada")
+    cap.is_active = body.is_active
+    await db.commit()
+    await db.refresh(cap)
+    logger.info("Builder toggle: id=%s is_active=%s by=%s", capability_id, body.is_active, current_user.id)
+    return CapabilityOut.model_validate(cap)
+
+
+@router.delete("/builder/capabilities/{capability_id}", status_code=204)
+async def delete_capability(
+    capability_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Hard-delete a capability. OWNER / PLATFORM_OWNER only.
+
+    Safe: copilot_action_log.capability_id is ON DELETE SET NULL (B1) —
+    existing log rows are preserved with capability_id=NULL.
+    """
+    _require_owner(current_user)
+    cap = (await db.execute(
+        select(CopilotCapability).where(
+            CopilotCapability.id == capability_id,
+            CopilotCapability.tenant_id == current_user.tenant_id,
+        )
+    )).scalar_one_or_none()
+    if cap is None:
+        raise HTTPException(status_code=404, detail="Capacidad no encontrada")
+    await db.delete(cap)
+    await db.commit()
+    logger.info("Builder delete: id=%s by=%s", capability_id, current_user.id)
