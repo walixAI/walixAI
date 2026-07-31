@@ -183,7 +183,7 @@ El bot de WhatsApp hace la primera calificación 24/7. Cuando el lead está list
        │              │               │
 ┌──────▼──────┐ ┌─────▼──────┐ ┌─────▼──────────────────┐
 │  PostgreSQL  │ │   Redis    │ │    Celery + Beat        │
-│  +pgvector  │ │  (Upstash) │ │  11 scheduled tasks     │
+│  +pgvector  │ │  (Upstash) │ │  12 scheduled tasks     │
 │  33 tablas  │ │  broker +  │ │  6 agentes IA           │
 │  UUID PKs   │ │  dedup     │ │  metrics + alerts       │
 └─────────────┘ └────────────┘ └────────────┬───────────┘
@@ -206,7 +206,7 @@ El bot de WhatsApp hace la primera calificación 24/7. Cuando el lead está list
 | Páginas frontend | 22 |
 | Componentes UI | 128 |
 | Agentes de IA proactivos | 6 |
-| Tareas Celery programadas | 11 |
+| Tareas Celery programadas | 12 |
 | Sprints completados | 13 (Sprint 13A) |
 | Migraciones Alembic | 30+ |
 | Templates de industria | 8+ |

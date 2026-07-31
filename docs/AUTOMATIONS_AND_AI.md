@@ -372,6 +372,20 @@ Top asesor: Carlos López (5 leads calificados)
 
 ---
 
+### Generación de gastos recurrentes
+
+**Trigger:** Primer día del mes a las 06:00 (antes que el resumen mensual a las 09:00)  
+**Task Celery:** `app.tasks.finance_tasks.run_generate_recurring_expenses`  
+**Archivo:** `app/tasks/finance_tasks.py`
+
+**Qué hace:**
+- Itera todos los `RecurringExpense` activos de todos los tenants
+- Para cada plantilla, crea un `Expense` con `source="recurring"` y `status="confirmed"` en el día del mes configurado (`day_of_month`, rango 1-28)
+- Idempotente: si ya existe un `Expense` con ese `recurring_id` dentro del mes actual, lo omite (seguro si el worker cae y se re-ejecuta)
+- También se puede disparar manualmente con `POST /api/finance/recurring-expenses/generate` (requiere rol OWNER)
+
+---
+
 ## Cronograma completo de automatizaciones
 
 ```
@@ -393,6 +407,9 @@ Top asesor: Carlos López (5 leads calificados)
 08:00 ─────────────────────────────────────────────────────
   :00  Follow-up Agent (primera ejecución del día)
   :00  Config Agent (solo lunes)
+
+06:00 ─────────────────────────────────────────────────────
+  :00  Generación gastos recurrentes (solo día 1)
 
 09:00 ─────────────────────────────────────────────────────
   :00  Closing Agent

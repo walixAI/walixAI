@@ -51,6 +51,7 @@ celery_app = Celery(
         "app.tasks.alerts_tasks",
         "app.tasks.dlq_handler",
         "app.tasks.ai_memory_tasks",
+        "app.tasks.finance_tasks",
     ],
 )
 
@@ -125,6 +126,11 @@ celery_app.conf.beat_schedule = {
     "aprendiz-agent-weekly": {
         "task": "app.tasks.agent_tasks.run_aprendiz_all_tenants",
         "schedule": crontab(hour=3, minute=0, day_of_week=0),
+    },
+    # Finance
+    "generate-recurring-expenses-monthly": {
+        "task": "app.tasks.finance_tasks.run_generate_recurring_expenses",
+        "schedule": crontab(day_of_month=1, hour=6, minute=0),
     },
 }
 
