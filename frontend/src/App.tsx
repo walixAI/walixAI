@@ -35,10 +35,12 @@ const BillingSuccess = lazy(() => import("@/pages/billing/BillingSuccess"));
 const ROIDashboard = lazy(() => import("@/pages/roi/ROIDashboard"));
 const MiDiaPage = lazy(() => import("@/pages/app/MiDia"));
 const TasksPage = lazy(() => import("@/pages/app/Tasks"));
+const FinancePage = lazy(() => import("@/pages/app/Finance"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
+      retry: 0,                      // surface errors immediately (avoids 7 s delay on 403s)
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       staleTime: 30_000,
@@ -117,6 +119,7 @@ const AppRoutes = () => {
             <Route path="/billing/success" element={<BillingSuccess />} />
             <Route path="/mi-dia" element={<MiDiaPage />} />
             <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/finance" element={<FinancePage />} />
 
           </Route>
 

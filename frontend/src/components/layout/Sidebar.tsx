@@ -2,6 +2,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, Users2, MessageCircle, BarChart3,
   Settings, Kanban, TrendingUp, Zap, CreditCard, BarChart2, Bot, BookOpen, ClipboardList, ListTodo,
+  Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/walix/Logo";
@@ -28,6 +29,7 @@ export function Sidebar() {
     { to: "/pipeline",    label: "Pipeline",         icon: Kanban },
     { to: "/contacts",    label: entities,            icon: Users },
     { to: "/forecast",    label: "Forecast",         icon: TrendingUp },
+    { to: "/finance",     label: "Finanzas",          icon: Wallet },
     { to: "/automations", label: "Automatizaciones", icon: Zap },
     { to: "/whatsapp",    label: "WhatsApp",         icon: MessageCircle, badge: true },
     { to: "/reports",     label: "Reportes",         icon: BarChart3 },
