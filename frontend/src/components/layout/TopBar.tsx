@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { ArrowRight, LogOut, User as UserIcon, Loader2, MapPin } from "lucide-react";
+import { ArrowRight, LogOut, User as UserIcon, Loader2, MapPin, Sparkles } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -15,6 +15,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { clearToken, api } from "@/lib/api";
 import { useAIBarStore } from "@/stores/aiBarStore";
 import { AIPanel } from "@/components/ai/AIPanel";
+import { useCopilotStore } from "@/stores/copilot";
 import { cn } from "@/lib/utils";
 
 export function TopBar() {
@@ -91,6 +92,7 @@ export function TopBar() {
   });
 
   const { pendingCommand, setPendingCommand } = useAIBarStore();
+  const openCopilot = useCopilotStore((s) => s.openDrawer);
 
   const buildCtx = (extra?: Record<string, unknown>): Record<string, unknown> => ({
     ...currentContext,
@@ -187,6 +189,16 @@ export function TopBar() {
             : <ArrowRight className="h-3.5 w-3.5" />}
         </button>
       </div>
+
+      {/* Copilot toggle button */}
+      <button
+        onClick={openCopilot}
+        title="Abrir Copiloto (Ctrl+/)"
+        className="shrink-0 p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+        aria-label="Abrir Copiloto"
+      >
+        <Sparkles className="h-4 w-4" />
+      </button>
 
       {/* User menu */}
       <DropdownMenu>

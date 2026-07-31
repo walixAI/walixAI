@@ -143,4 +143,63 @@
     background-clip: text;
     color: transparent;
   }
+  .scrollbar-none { scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+}
+
+/* ── Copilot markdown renderer ──────────────────────────────────────────────── */
+/* Classes injected by renderMarkdown() in CopilotDrawer.tsx via dangerouslySetInnerHTML.
+   Tailwind cannot detect dynamic class strings, so they live here as plain CSS. */
+.copilot-md p        { margin-bottom: 0.4em; line-height: 1.6; }
+.copilot-md p:last-child { margin-bottom: 0; }
+.copilot-md strong   { font-weight: 600; }
+.copilot-md em       { font-style: italic; }
+.copilot-md br       { display: block; content: ""; margin-top: 0.25em; }
+
+.copilot-h1 { font-size: 1.1em; font-weight: 700; margin: 0.75em 0 0.4em; }
+.copilot-h2 { font-size: 1em;   font-weight: 700; margin: 0.6em 0 0.3em; }
+.copilot-h3 { font-size: 0.95em; font-weight: 600; margin: 0.5em 0 0.25em; }
+
+.copilot-list {
+  padding-left: 1.25em;
+  margin: 0.35em 0;
+  list-style-type: disc;
+}
+.copilot-list li { margin-bottom: 0.2em; }
+
+.copilot-pre {
+  background-color: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  padding: 0.6em 0.8em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  font-size: 0.8em;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.copilot-code {
+  background-color: hsl(var(--muted));
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+}
+
+.copilot-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82em;
+  margin: 0.5em 0;
+}
+.copilot-table th,
+.copilot-table td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.3em 0.6em;
+  text-align: left;
+}
+.copilot-table th {
+  background-color: hsl(var(--muted));
+  font-weight: 600;
 }

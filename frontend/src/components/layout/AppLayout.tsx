@@ -6,6 +6,7 @@ import { BottomNav } from "./BottomNav";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { TrialBanner } from "./TrialBanner";
 import { CommandPalette } from "./CommandPalette";
+import { CopilotDrawer } from "@/components/walix/CopilotDrawer";
 import { OnboardingTour, useAutoOnboardingTour, resetTour } from "@/components/walix/OnboardingTour";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -27,6 +28,7 @@ export function AppLayout() {
       <ImpersonationBanner />
       <TrialBanner />
       <CommandPalette />
+      <CopilotDrawer />
       <OnboardingTour open={tour.open} onClose={tour.close} />
       <div className="flex flex-1 min-h-0">
         <Sidebar />
