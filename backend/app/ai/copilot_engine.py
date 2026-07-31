@@ -343,6 +343,17 @@ async def run_copilot_turn(
     # 2. Save the incoming user message
     await _save_row(db, user, session_id, "user", message)
 
+    # B3: Capability fast path — check BEFORE the normal tool-use loop.
+    # Lazy import breaks the circular chain: copilot_engine → capability_runner
+    # → walix_builder → copilot_engine. By the time this line runs, all modules
+    # are fully initialized (FastAPI startup completes before any request arrives).
+    from app.ai.capability_runner import handle_capability_turn  # noqa: PLC0415
+    cap_result = await handle_capability_turn(message, session_id, user, tenant, db)
+    if cap_result is not None:
+        await _save_row(db, user, session_id, "assistant", cap_result["reply"])
+        await db.commit()
+        return cap_result
+
     # 3. Build system prompt (includes entity context if provided)
     system = await build_system_prompt(user, tenant, db, entity_type, entity_id)
 
