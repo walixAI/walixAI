@@ -114,6 +114,14 @@ class Tenant(Base):
     monthly_goal_by_type: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default="{}"
     )
+    count_business_days: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    profit_thresholds: Mapped[dict] = mapped_column(
+        JSONB, nullable=False,
+        default=lambda: {"green": 20, "yellow": 10, "orange": 0},
+        server_default='{"green": 20, "yellow": 10, "orange": 0}',
+    )
 
     companies: Mapped[list["Company"]] = relationship(
         back_populates="tenant", cascade="all, delete-orphan"

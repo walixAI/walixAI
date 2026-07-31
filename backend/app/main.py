@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import activities, agents, ai, auth, automations, billing, billing_webhook, branches, contacts, dashboard, deals, finance, goals, health, kb, leads, metrics, onboarding, pipeline, pipelines, platform, saved_views, support, tags, tasks, tenant, webhooks
+from app.api import activities, agents, ai, auth, automations, billing, billing_webhook, branches, contacts, dashboard, deals, finance, goals, health, kb, leads, metrics, onboarding, pipeline, pipelines, platform, profitability, saved_views, support, tags, tasks, tenant, webhooks
 from app.api.industry_onboarding import onboarding_router as industry_onboarding_router
 from app.api.industry_onboarding import settings_router as industry_settings_router
 from app.api.users import team_router, users_router
@@ -87,6 +87,7 @@ app.include_router(pipelines.router, prefix="/api")            # multi-pipeline 
 app.include_router(tasks.router, prefix="/api")                # Etapa 5: /api/tasks/*
 app.include_router(finance.router, prefix="/api")              # Metas/Gastos
 app.include_router(goals.router, prefix="/api")                # Metas Gen2
+app.include_router(profitability.router, prefix="/api")        # Rentabilidad / run-rate
 app.include_router(health.router)  # /health — no prefix, used by deploy smoke tests
 
 
