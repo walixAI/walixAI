@@ -231,6 +231,64 @@ export function useGoalSplitSuggestion(params: GoalSplitParams | null) {
   });
 }
 
+// ── Rendimiento completo del equipo (owner/platform_owner only) ───────────────
+
+export interface TeamPerformanceMember {
+  userId: string;
+  name: string;
+  email: string | null;
+  assignedGoal: number | null;
+  wonAmount: number;
+  runRate: number;
+  runRatePct: number | null;
+  expenses: number;
+  marginPct: number | null;
+  label: "green" | "yellow" | "orange" | "red" | "unknown";
+}
+
+export function useTeamPerformance(enabled = true, year?: number, month?: number) {
+  return useQuery({
+    queryKey: ["team-performance", enabled, year ?? null, month ?? null],
+    enabled,
+    queryFn: async (): Promise<TeamPerformanceMember[]> => {
+      const users = await apiRequest<any[]>("/api/users");
+      const active = (users ?? []).filter(
+        (u) => u.is_active && u.role !== "platform_owner",
+      );
+
+      const params = new URLSearchParams();
+      if (year != null) params.set("year", String(year));
+      if (month != null) params.set("month", String(month));
+      const qs = params.toString() ? `?${params.toString()}` : "";
+
+      const rows = await Promise.all(
+        active.map(async (u) => {
+          const [rr, prof] = await Promise.allSettled([
+            apiRequest<any>(`/api/finance/run-rate/users/${u.id}${qs}`),
+            apiRequest<any>(`/api/finance/profitability/users/${u.id}${qs}`),
+          ]);
+          const r = rr.status === "fulfilled" ? rr.value : null;
+          const p = prof.status === "fulfilled" ? prof.value : null;
+          return {
+            userId: u.id as string,
+            name: (u.full_name ?? u.name ?? u.email ?? "—") as string,
+            email: (u.email ?? null) as string | null,
+            assignedGoal: r?.user_goal != null ? Number(r.user_goal) : null,
+            wonAmount: Number(r?.won_revenue ?? 0),
+            runRate: Number(r?.run_rate ?? 0),
+            runRatePct: r?.pct_of_goal != null ? Number(r.pct_of_goal) : null,
+            expenses: Number(p?.expenses ?? 0),
+            marginPct: p?.profit_pct != null ? Number(p.profit_pct) : null,
+            label: (p?.label ?? "unknown") as TeamPerformanceMember["label"],
+          };
+        }),
+      );
+
+      return rows.sort((a, b) => b.wonAmount - a.wonAmount);
+    },
+  });
+}
+
 // ── Run-rate por vendedor (solo owner/platform_owner pueden ver otros) ────────
 
 export interface SellerRunRate {
