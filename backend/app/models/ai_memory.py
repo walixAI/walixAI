@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -243,3 +243,112 @@ class AIConversationMessage(Base):
     context_snapshot: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default="{}"
     )
+
+
+class CopilotCapability(Base):
+    """B1 — Walix Builder: receta o capacidad nativa del Copiloto.
+
+    kind="recipe"  → pasos encadenados definidos en recipe_json (ejecutados por el motor B3).
+    kind="native"  → reservado para primitivas built-in del motor.
+    scope_roles almacena valores del UserRole real de walixAI en minúsculas
+    (ej. "gerente", "asesor") — NO los nombres del Lovable repo.
+    Todos los campos de listas usan JSONB (patrón universal del proyecto).
+    """
+
+    __tablename__ = "copilot_capabilities"
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('recipe', 'native')", name="ck_copilot_cap_kind"),
+        CheckConstraint("scope_type IN ('all', 'role', 'user')", name="ck_copilot_cap_scope_type"),
+        Index("ix_copilot_capabilities_tenant_active", "tenant_id", "is_active"),
+        Index("ix_copilot_capabilities_tenant_id", "tenant_id"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # "recipe" | "native"
+    kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="recipe", server_default="recipe"
+    )
+    recipe_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="'{}'"
+    )
+    # Frases que pueden disparar esta receta
+    trigger_phrases: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="'[]'"
+    )
+    # "all" | "role" | "user"
+    scope_type: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="all", server_default="all"
+    )
+    # UserRole values in lowercase: ["gerente", "asesor", ...]
+    scope_roles: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="'[]'"
+    )
+    # UUIDs of specific users with access
+    scope_user_ids: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="'[]'"
+    )
+    # ["web"] | ["whatsapp"] | ["web", "whatsapp"]
+    channels: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=lambda: ["web"], server_default='\'["web"]\''
+    )
+    require_confirmation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    daily_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+
+class CopilotActionLog(Base):
+    """B1 — Bitácora de ejecución de pasos de una receta del Copiloto.
+
+    Append-only en la práctica, pero incluye updated_at porque Base lo exige
+    en todos los modelos del proyecto.
+    status: "ok" | "error" | "dry_run"
+    """
+
+    __tablename__ = "copilot_action_log"
+
+    __table_args__ = (
+        CheckConstraint("status IN ('ok', 'error', 'dry_run')", name="ck_copilot_log_status"),
+        Index("ix_copilot_action_log_tenant_created", "tenant_id", "created_at"),
+        Index("ix_copilot_action_log_capability_id", "capability_id"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    capability_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("copilot_capabilities.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    step_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    step_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    input: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    output: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # "ok" | "error" | "dry_run"
+    status: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="ok", server_default="ok"
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
