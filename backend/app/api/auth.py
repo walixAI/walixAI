@@ -59,6 +59,7 @@ class TenantOut(BaseModel):
     deal_name: str = "Oportunidad"
     deal_plural: str = "Oportunidades"
     contact_statuses: list = []
+    deal_type_options: list[str] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -211,6 +212,7 @@ async def me(
         deal_name=(tenant.deal_name or "Oportunidad") if tenant else "Oportunidad",
         deal_plural=(tenant.deal_plural or "Oportunidades") if tenant else "Oportunidades",
         contact_statuses=tenant.contact_statuses_config or [] if tenant else [],
+        deal_type_options=tenant.deal_type_options or [] if tenant else [],
     )
     return MeResponse(
         user=UserMeOut.model_validate(current_user),

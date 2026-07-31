@@ -8,7 +8,7 @@
  * goal-split-suggestion envía user_ids como params repetidos:
  *   ?user_ids=uuid1&user_ids=uuid2  (FastAPI list[uuid.UUID])
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "./_client";
 
 // ── Tipos: Run-rate del tenant ────────────────────────────────────────────────
@@ -228,5 +228,57 @@ export function useGoalSplitSuggestion(params: GoalSplitParams | null) {
       );
       return r ?? {};
     },
+  });
+}
+
+// ── Finance settings ──────────────────────────────────────────────────────────
+
+export interface FinanceSettings {
+  countBusinessDays: boolean;
+  profitThresholds: { green: number; yellow: number; orange: number };
+}
+
+function mapFinanceSettings(r: any): FinanceSettings {
+  const t = r.profit_thresholds ?? {};
+  return {
+    countBusinessDays: !!r.count_business_days,
+    profitThresholds: {
+      green: Number(t.green ?? 20),
+      yellow: Number(t.yellow ?? 10),
+      orange: Number(t.orange ?? 0),
+    },
+  };
+}
+
+export function useFinanceSettings() {
+  return useQuery({
+    queryKey: ["finance-settings"],
+    queryFn: async (): Promise<FinanceSettings> => {
+      const r = await apiRequest<any>("/api/finance/settings");
+      return mapFinanceSettings(r);
+    },
+  });
+}
+
+export function useUpdateFinanceSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Partial<FinanceSettings>) =>
+      apiRequest<any>("/api/finance/settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          ...(input.countBusinessDays !== undefined && {
+            count_business_days: input.countBusinessDays,
+          }),
+          ...(input.profitThresholds && {
+            profit_thresholds: {
+              green: input.profitThresholds.green,
+              yellow: input.profitThresholds.yellow,
+              orange: input.profitThresholds.orange,
+            },
+          }),
+        }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["finance-settings"] }),
   });
 }

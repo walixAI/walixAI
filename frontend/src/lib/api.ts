@@ -232,6 +232,7 @@ export interface TenantData {
   deal_name: string;
   deal_plural: string;
   contact_statuses: Array<{ key: string; label: string; color: string }>;
+  deal_type_options?: string[];
 }
 
 export interface MeResponse {
