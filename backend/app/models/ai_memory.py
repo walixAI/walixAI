@@ -206,3 +206,40 @@ class AIDraftEdit(Base):
     original: Mapped[str] = mapped_column(Text, nullable=False)
     edited: Mapped[str] = mapped_column(Text, nullable=False)
     char_delta: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+
+class AIConversationMessage(Base):
+    """One turn in a Copiloto conversational session.
+
+    session_id is the conversationKey from the frontend (e.g. "global",
+    "contact:uuid", "deal:uuid"). role is user/assistant/tool — validated
+    in Pydantic, not with a DB CHECK constraint.
+    """
+
+    __tablename__ = "ai_conversation_history"
+
+    __table_args__ = (
+        Index("ix_ai_conv_history_session_created", "session_id", "created_at"),
+        Index("ix_ai_conv_history_tenant_id", "tenant_id"),
+        Index("ix_ai_conv_history_user_id", "user_id"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    session_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    role: Mapped[str] = mapped_column(String(10), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tool_calls: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    context_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
