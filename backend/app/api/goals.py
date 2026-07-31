@@ -8,14 +8,14 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.api.finance import _require_finance_access, _require_owner
 from app.core.database import get_db
-from app.models.goals import MonthlyGoal, MonthlyGoalHistory, ProductCategory
+from app.models.goals import MonthlyGoal, MonthlyGoalAssignment, MonthlyGoalHistory, ProductCategory
 from app.models.user import User
 
 router = APIRouter(prefix="/goals", tags=["goals"])
@@ -369,3 +369,168 @@ async def update_monthly_goal(
     await db.commit()
     await db.refresh(goal)
     return MonthlyGoalOut.model_validate(goal)
+
+
+# ── Assignment schemas ────────────────────────────────────────────────────────
+
+class MonthlyGoalAssignmentOut(BaseModel):
+    id: uuid.UUID
+    goal_id: uuid.UUID
+    tenant_id: uuid.UUID
+    user_id: uuid.UUID
+    share_percent: Decimal
+    amount: Decimal
+    user_name: str
+    user_email: str
+    model_config = {"from_attributes": True}
+
+
+class MonthlyGoalAssignmentUpsertItem(BaseModel):
+    user_id: uuid.UUID
+    share_percent: Decimal = Field(ge=0, le=100)
+
+
+class MonthlyGoalAssignmentsBulkSet(BaseModel):
+    assignments: list[MonthlyGoalAssignmentUpsertItem]
+
+
+# ── Assignment helpers ────────────────────────────────────────────────────────
+
+async def _get_goal_or_404(goal_id: uuid.UUID, tenant_id: uuid.UUID, db: AsyncSession) -> MonthlyGoal:
+    goal = (await db.execute(
+        select(MonthlyGoal).where(
+            MonthlyGoal.id == goal_id,
+            MonthlyGoal.tenant_id == tenant_id,
+        )
+    )).scalar_one_or_none()
+    if goal is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meta mensual no encontrada")
+    return goal
+
+
+def _assignments_as_list(rows: list) -> list[dict]:
+    """Serialize assignment rows to JSON-safe list for history."""
+    return jsonable_encoder([
+        {"user_id": r.user_id, "share_percent": r.share_percent, "amount": r.amount}
+        for r in rows
+    ])
+
+
+# ── Assignment endpoints ──────────────────────────────────────────────────────
+
+@router.get("/monthly-goals/{goal_id}/assignments", response_model=list[MonthlyGoalAssignmentOut])
+async def list_goal_assignments(
+    goal_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[MonthlyGoalAssignmentOut]:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    await _get_goal_or_404(goal_id, current_user.tenant_id, db)
+    rows = (await db.execute(
+        select(MonthlyGoalAssignment, User)
+        .join(User, User.id == MonthlyGoalAssignment.user_id)
+        .where(MonthlyGoalAssignment.goal_id == goal_id)
+        .order_by(MonthlyGoalAssignment.share_percent.desc())
+    )).all()
+    return [
+        MonthlyGoalAssignmentOut(
+            id=a.id, goal_id=a.goal_id, tenant_id=a.tenant_id, user_id=a.user_id,
+            share_percent=a.share_percent, amount=a.amount,
+            user_name=u.name, user_email=u.email,
+        )
+        for a, u in rows
+    ]
+
+
+@router.put("/monthly-goals/{goal_id}/assignments", response_model=list[MonthlyGoalAssignmentOut])
+async def set_goal_assignments(
+    goal_id: uuid.UUID,
+    body: MonthlyGoalAssignmentsBulkSet,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[MonthlyGoalAssignmentOut]:
+    await _require_finance_access(current_user, branch_id=None, db=db)
+    goal = await _get_goal_or_404(goal_id, current_user.tenant_id, db)
+
+    # (b) validate all user_ids belong to this tenant
+    user_ids = [item.user_id for item in body.assignments]
+    users_map: dict[uuid.UUID, User] = {}
+    if user_ids:
+        user_rows = (await db.execute(
+            select(User).where(
+                User.id.in_(user_ids),
+                User.tenant_id == current_user.tenant_id,
+            )
+        )).scalars().all()
+        users_map = {u.id: u for u in user_rows}
+        missing = [uid for uid in user_ids if uid not in users_map]
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Usuario(s) no encontrado(s) en este tenant: {missing}",
+            )
+
+    # (c) sum == 100 required for non-draft goals with at least one assignment
+    if body.assignments and not goal.is_draft:
+        total = sum(item.share_percent for item in body.assignments)
+        if abs(total - Decimal("100")) >= Decimal("0.01"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    f"La suma de porcentajes debe ser 100% "
+                    f"(actual: {total:.2f}%). "
+                    f"Marca la meta como borrador para guardar parcialmente."
+                ),
+            )
+
+    # (d) capture before state, delete-then-insert (verified Lovable pattern)
+    before_rows = (await db.execute(
+        select(MonthlyGoalAssignment).where(MonthlyGoalAssignment.goal_id == goal_id)
+    )).scalars().all()
+    before_data = _assignments_as_list(before_rows)
+
+    await db.execute(delete(MonthlyGoalAssignment).where(MonthlyGoalAssignment.goal_id == goal_id))
+
+    # (e) insert with auto-calculated amounts
+    new_assignments: list[MonthlyGoalAssignment] = []
+    for item in body.assignments:
+        amount = (goal.amount * item.share_percent / Decimal("100")).quantize(Decimal("0.01"))
+        a = MonthlyGoalAssignment(
+            goal_id=goal_id,
+            tenant_id=current_user.tenant_id,
+            user_id=item.user_id,
+            share_percent=item.share_percent,
+            amount=amount,
+        )
+        db.add(a)
+        new_assignments.append(a)
+
+    await db.flush()
+    after_data = _assignments_as_list(new_assignments)
+
+    # (f) single history entry for the whole bulk change
+    db.add(MonthlyGoalHistory(
+        tenant_id=current_user.tenant_id,
+        goal_id=goal_id,
+        action="assignment_changed",
+        before_data=before_data,
+        after_data=after_data,
+        changed_by=current_user.id,
+    ))
+    await db.commit()
+
+    # re-fetch with user join for response
+    result_rows = (await db.execute(
+        select(MonthlyGoalAssignment, User)
+        .join(User, User.id == MonthlyGoalAssignment.user_id)
+        .where(MonthlyGoalAssignment.goal_id == goal_id)
+        .order_by(MonthlyGoalAssignment.share_percent.desc())
+    )).all()
+    return [
+        MonthlyGoalAssignmentOut(
+            id=a.id, goal_id=a.goal_id, tenant_id=a.tenant_id, user_id=a.user_id,
+            share_percent=a.share_percent, amount=a.amount,
+            user_name=u.name, user_email=u.email,
+        )
+        for a, u in result_rows
+    ]
