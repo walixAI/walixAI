@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import activities, agents, ai, auth, automations, billing, billing_webhook, branches, contacts, dashboard, deals, finance, goals, health, kb, leads, metrics, onboarding, pipeline, pipelines, platform, profitability, saved_views, support, tags, tasks, tenant, webhooks
+from app.api import activities, agents, ai, ai_copilot, auth, automations, billing, billing_webhook, branches, contacts, dashboard, deals, finance, goals, health, kb, leads, metrics, onboarding, pipeline, pipelines, platform, profitability, saved_views, support, tags, tasks, tenant, webhooks
 from app.api.industry_onboarding import onboarding_router as industry_onboarding_router
 from app.api.industry_onboarding import settings_router as industry_settings_router
 from app.api.users import team_router, users_router
@@ -56,6 +56,7 @@ app.add_middleware(TenantContextMiddleware)
 
 app.include_router(agents.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
+app.include_router(ai_copilot.router, prefix="/api")  # C4: /api/ai/copilot/*
 app.include_router(auth.router, prefix="/api")
 app.include_router(automations.router, prefix="/api")
 app.include_router(leads.router, prefix="/api")

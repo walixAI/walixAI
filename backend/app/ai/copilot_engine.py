@@ -1,17 +1,19 @@
-"""C2 — Copiloto: loop agéntico multi-turno con tool-use nativo de Claude.
+"""C2/C4 — Copiloto: loop agéntico multi-turno con tool-use nativo de Claude.
 
 SDK: anthropic 0.104.x — usa tools=[...] con input_schema JSON Schema,
 stop_reason == "tool_use", content blocks tipo ToolUseBlock, responde con
 bloques tool_result en un mensaje role="user".
 
 Este archivo expone dos funciones públicas:
-  build_system_prompt(user, tenant, db) -> str
-  run_copilot_turn(message, session_id, user, tenant, db, max_iterations) -> dict
+  build_system_prompt(user, tenant, db, entity_type, entity_id) -> str
+  run_copilot_turn(message, session_id, user, tenant, db,
+                   entity_type, entity_id, max_iterations) -> dict
 """
 from __future__ import annotations
 
 import json
 import logging
+import uuid as _uuid_mod
 from datetime import date
 from typing import Any
 
@@ -49,7 +51,36 @@ _ROLE_LABELS: dict[UserRole, str] = {
 }
 
 
-async def build_system_prompt(user: User, tenant: Tenant, db: AsyncSession) -> str:
+async def _resolve_entity_name(
+    entity_type: str,
+    entity_id: _uuid_mod.UUID,
+    tenant_id: _uuid_mod.UUID,
+    db: AsyncSession,
+) -> str:
+    """Returns a human-readable name for the active entity, for system-prompt injection."""
+    try:
+        if entity_type == "deal":
+            from app.models.deal import Deal
+            obj = await db.get(Deal, entity_id)
+            if obj and obj.tenant_id == tenant_id:
+                return obj.title
+        elif entity_type in ("contact", "lead"):
+            from app.models.lead import Lead
+            obj = await db.get(Lead, entity_id)
+            if obj and obj.tenant_id == tenant_id and not obj.deleted_at:
+                return " ".join(filter(None, [obj.name, obj.last_name])) or "Sin nombre"
+    except Exception:
+        logger.debug("_resolve_entity_name: lookup failed for %s %s", entity_type, entity_id)
+    return str(entity_id)
+
+
+async def build_system_prompt(
+    user: User,
+    tenant: Tenant,
+    db: AsyncSession,
+    entity_type: str | None = None,
+    entity_id: _uuid_mod.UUID | None = None,
+) -> str:
     today = date.today()
     year, month = today.year, today.month
 
@@ -100,6 +131,19 @@ async def build_system_prompt(user: User, tenant: Tenant, db: AsyncSession) -> s
 
     role_label = _ROLE_LABELS.get(user.role, str(user.role))
 
+    # Active-screen context (C4: entity_type/entity_id from HTTP request)
+    entity_block = ""
+    if entity_type and entity_id:
+        entity_name = await _resolve_entity_name(entity_type, entity_id, tenant.id, db)
+        entity_block = (
+            f"\nCONTEXTO DE PANTALLA ACTIVA:\n"
+            f"  Tipo: {entity_type}\n"
+            f"  ID: {entity_id}\n"
+            f"  Nombre: {entity_name}\n"
+            f"  → Cuando el usuario mencione 'este {entity_type}' o el {entity_type} actual, "
+            f"referirse a este registro específico.\n"
+        )
+
     return (
         "Eres Walix Copiloto, el asistente de inteligencia artificial del CRM Walix "
         "para PyMEs mexicanas. Tu función es ayudar al equipo de ventas a consultar "
@@ -114,7 +158,8 @@ async def build_system_prompt(user: User, tenant: Tenant, db: AsyncSession) -> s
         f"  Rol: {role_label}\n\n"
         f"ETAPAS DEL PIPELINE ACTIVO:\n{stage_list}\n\n"
         f"FINANZAS DEL MES ACTUAL:\n  {goal_line}\n\n"
-        f"SUGERENCIAS PROACTIVAS PENDIENTES:\n{sugg_block}\n\n"
+        f"SUGERENCIAS PROACTIVAS PENDIENTES:\n{sugg_block}\n"
+        f"{entity_block}\n"
         "INSTRUCCIONES DE COMPORTAMIENTO — LECTURA:\n"
         "- Responde SIEMPRE en español, con tono profesional y directo.\n"
         "- Usa las tools disponibles para obtener datos antes de responder. "
@@ -168,12 +213,15 @@ async def _load_history(
     db: AsyncSession,
     limit: int = _HISTORY_LIMIT,
 ) -> list[AIConversationMessage]:
+    # Filter by user_id (not just tenant_id) — history is private per user.
+    # Two users from the same tenant with session_id="global" must not see each other's turns.
     rows = (
         await db.execute(
             select(AIConversationMessage)
             .where(
                 AIConversationMessage.session_id == session_id,
                 AIConversationMessage.tenant_id == user.tenant_id,
+                AIConversationMessage.user_id == user.id,
             )
             .order_by(AIConversationMessage.created_at.asc())
             .limit(limit)
@@ -277,6 +325,8 @@ async def run_copilot_turn(
     user: User,
     tenant: Tenant,
     db: AsyncSession,
+    entity_type: str | None = None,
+    entity_id: _uuid_mod.UUID | None = None,
     max_iterations: int = 5,
 ) -> dict[str, Any]:
     """Execute one user turn of the Copiloto conversation.
@@ -293,8 +343,8 @@ async def run_copilot_turn(
     # 2. Save the incoming user message
     await _save_row(db, user, session_id, "user", message)
 
-    # 3. Build system prompt
-    system = await build_system_prompt(user, tenant, db)
+    # 3. Build system prompt (includes entity context if provided)
+    system = await build_system_prompt(user, tenant, db, entity_type, entity_id)
 
     # 4. Build API message list: history + current user turn
     api_messages = _rows_to_api_messages(history_rows)
