@@ -231,6 +231,57 @@ export function useGoalSplitSuggestion(params: GoalSplitParams | null) {
   });
 }
 
+// ── Run-rate por vendedor (solo owner/platform_owner pueden ver otros) ────────
+
+export interface SellerRunRate {
+  userId: string;
+  name: string;
+  wonRevenue: number;
+  runRate: number;
+  userGoal: number | null;
+  pctOfGoal: number | null;
+}
+
+export function useRunRateBySeller(enabled = true, year?: number, month?: number) {
+  return useQuery({
+    queryKey: ["run-rate-by-seller", enabled, year ?? null, month ?? null],
+    enabled,
+    queryFn: async (): Promise<SellerRunRate[]> => {
+      const users = await apiRequest<any[]>("/api/users");
+      const active = (users ?? []).filter(
+        (u) => u.is_active && u.role !== "platform_owner",
+      );
+      const params = new URLSearchParams();
+      if (year != null) params.set("year", String(year));
+      if (month != null) params.set("month", String(month));
+      const qs = params.toString() ? `?${params.toString()}` : "";
+
+      const results = await Promise.all(
+        active.map(async (u) => {
+          try {
+            const r = await apiRequest<any>(`/api/finance/run-rate/users/${u.id}${qs}`);
+            return { u, r };
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      return results
+        .filter(Boolean)
+        .map((item) => ({
+          userId: item!.u.id as string,
+          name: (item!.u.full_name ?? item!.u.name ?? item!.u.email ?? "—") as string,
+          wonRevenue: Number(item!.r.won_revenue ?? 0),
+          runRate: Number(item!.r.run_rate ?? 0),
+          userGoal: item!.r.user_goal != null ? Number(item!.r.user_goal) : null,
+          pctOfGoal: item!.r.pct_of_goal != null ? Number(item!.r.pct_of_goal) : null,
+        }))
+        .sort((a, b) => b.wonRevenue - a.wonRevenue);
+    },
+  });
+}
+
 // ── Finance settings ──────────────────────────────────────────────────────────
 
 export interface FinanceSettings {

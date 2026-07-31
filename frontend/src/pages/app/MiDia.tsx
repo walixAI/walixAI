@@ -1,11 +1,15 @@
 import { useRef, useState } from "react";
-import { ClipboardList, CheckCircle2 } from "lucide-react";
+import { ClipboardList, CheckCircle2, ChevronDown } from "lucide-react";
 import { useMyTasksToday, type TaskTodayItem } from "@/lib/queries/tasks";
 import { formatMXN } from "@/lib/queries/pipeline";
 import { WBadge } from "@/components/walix/Badge";
 import { KpiCardsSkeleton, ListRowsSkeleton } from "@/components/walix/Skeletons";
 import { Button } from "@/components/ui/button";
 import { CloseTaskDialog } from "@/components/miDia/CloseTaskDialog";
+import { RunRateCard } from "@/components/walix/RunRateCard";
+import { ProfitabilityCard } from "@/components/walix/ProfitabilityCard";
+import { useAuth } from "@/hooks/useAuth";
+import { cn } from "@/lib/utils";
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -126,9 +130,16 @@ function ColumnGroup({
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function MiDia() {
+  const { user } = useAuth();
+  const canSeeTeam =
+    user?.role === "owner" ||
+    user?.role === "platform_owner" ||
+    user?.role === "gerente";
+
   const { data, isPending } = useMyTasksToday();
   const [selectedTask, setSelectedTask] = useState<TaskTodayItem | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [expanded, setExpanded] = useState<"runrate" | "profit" | null>(null);
 
   const cobrarRef = useRef<HTMLDivElement>(null);
   const cotizarRef = useRef<HTMLDivElement>(null);
@@ -192,6 +203,53 @@ export default function MiDia() {
           value={String(totals?.byKind?.cotizacion ?? 0)}
           onClick={() => scrollToCol(cotizarRef)}
         />
+      </div>
+
+      {/* Financial cards (colapsables) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {/* Run Rate */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <button
+            type="button"
+            className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/30 transition-colors"
+            onClick={() => setExpanded(expanded === "runrate" ? null : "runrate")}
+          >
+            <span className="text-sm font-semibold">Run Rate del mes</span>
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 text-muted-foreground transition-transform",
+                expanded === "runrate" && "rotate-180",
+              )}
+            />
+          </button>
+          {expanded === "runrate" && (
+            <div className="border-t border-border p-4">
+              <RunRateCard compact showSellers={canSeeTeam} />
+            </div>
+          )}
+        </div>
+
+        {/* Rentabilidad */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <button
+            type="button"
+            className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-muted/30 transition-colors"
+            onClick={() => setExpanded(expanded === "profit" ? null : "profit")}
+          >
+            <span className="text-sm font-semibold">Rentabilidad del mes</span>
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 text-muted-foreground transition-transform",
+                expanded === "profit" && "rotate-180",
+              )}
+            />
+          </button>
+          {expanded === "profit" && (
+            <div className="border-t border-border p-4">
+              <ProfitabilityCard />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Column groups */}

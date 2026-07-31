@@ -27,6 +27,8 @@ import { KpiCardsSkeleton, ListRowsSkeleton } from "@/components/walix/Skeletons
 import { ProactiveBriefing } from "@/components/walix/ProactiveBriefing";
 import { TaskCards } from "@/components/dashboard/TaskCards";
 import { AIPatternsCard } from "@/components/walix/AIPatternsCard";
+import { RunRateCard } from "@/components/walix/RunRateCard";
+import { ProfitabilityCard } from "@/components/walix/ProfitabilityCard";
 
 const activityIcon: Record<string, { icon: typeof MoveRight; color: string }> = {
   deal: { icon: MoveRight, color: "text-primary bg-primary/10" },
@@ -58,6 +60,10 @@ const stageColors = [
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const canSeeTeam =
+    user?.role === "owner" ||
+    user?.role === "platform_owner" ||
+    user?.role === "gerente";
   const [showAlert, setShowAlert] = useState(true);
 
   const { data: kpis, isLoading: kpisLoading } = useDashboardKpis();
@@ -165,6 +171,12 @@ export default function Dashboard() {
         })}
       </div>
       )}
+
+      {/* Row: Run Rate + Rentabilidad */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <RunRateCard compact showSellers={canSeeTeam} />
+        <ProfitabilityCard />
+      </div>
 
       {/* Row: Mis Tareas */}
       <TaskCards />

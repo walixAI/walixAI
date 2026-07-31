@@ -528,3 +528,50 @@ export function useDeleteExpenseRule() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["expense-rules"] }),
   });
 }
+
+// ── Desglose mensual de gastos confirmados (client-side) ──────────────────────
+
+export interface ExpenseBreakdown {
+  fijo: number;
+  variable: number;
+  total: number;
+  bySeller: { userId: string; amount: number }[];
+}
+
+export function useMonthExpenseBreakdown(enabled = true) {
+  const today = new Date();
+  const month = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-01`;
+
+  return useQuery({
+    queryKey: ["expense-breakdown-month", month],
+    enabled,
+    queryFn: async (): Promise<ExpenseBreakdown> => {
+      const qs = new URLSearchParams({ status: "confirmed", month });
+      const rows = await apiRequest<any[]>(`/api/finance/expenses?${qs.toString()}`);
+      const expenses = (rows ?? []).map(mapExpense);
+
+      const fijo = expenses
+        .filter((e) => e.kind === "fijo")
+        .reduce((s, e) => s + e.amount, 0);
+      const variable = expenses
+        .filter((e) => e.kind === "variable")
+        .reduce((s, e) => s + e.amount, 0);
+
+      const bySellerMap: Record<string, number> = {};
+      expenses.forEach((e) => {
+        if (e.ownerId) {
+          bySellerMap[e.ownerId] = (bySellerMap[e.ownerId] ?? 0) + e.amount;
+        }
+      });
+
+      return {
+        fijo,
+        variable,
+        total: fijo + variable,
+        bySeller: Object.entries(bySellerMap)
+          .map(([userId, amount]) => ({ userId, amount }))
+          .sort((a, b) => b.amount - a.amount),
+      };
+    },
+  });
+}
