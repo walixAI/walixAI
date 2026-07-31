@@ -19,7 +19,7 @@ from anthropic import AsyncAnthropic
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.copilot_tools import COPILOT_READ_TOOLS, execute_read_tool, _serial
+from app.ai.copilot_tools import COPILOT_TOOLS, execute_tool, _serial
 from app.core.config import settings
 from app.models.agent import AgentSuggestion
 from app.models.ai_memory import AIConversationMessage
@@ -115,7 +115,7 @@ async def build_system_prompt(user: User, tenant: Tenant, db: AsyncSession) -> s
         f"ETAPAS DEL PIPELINE ACTIVO:\n{stage_list}\n\n"
         f"FINANZAS DEL MES ACTUAL:\n  {goal_line}\n\n"
         f"SUGERENCIAS PROACTIVAS PENDIENTES:\n{sugg_block}\n\n"
-        "INSTRUCCIONES DE COMPORTAMIENTO:\n"
+        "INSTRUCCIONES DE COMPORTAMIENTO — LECTURA:\n"
         "- Responde SIEMPRE en español, con tono profesional y directo.\n"
         "- Usa las tools disponibles para obtener datos antes de responder. "
         "No inventes ni estimes cifras: si no tienes datos, dilo.\n"
@@ -134,7 +134,30 @@ async def build_system_prompt(user: User, tenant: Tenant, db: AsyncSession) -> s
         "- Formatea cantidades monetarias en MXN con $ y comas (ej. $12,500).\n"
         "- Sé conciso. No menciones nombres técnicos de herramientas al usuario.\n"
         "- Si el usuario no tiene acceso a cierta información, explícalo brevemente "
-        "sin revelar detalles técnicos."
+        "sin revelar detalles técnicos.\n\n"
+        "INSTRUCCIONES DE COMPORTAMIENTO — ESCRITURA:\n"
+        "- Solo ejecuta acciones de escritura cuando el usuario lo haya pedido "
+        "de forma explícita. No actúes proactivamente.\n"
+        "- create_contact: cuando el usuario pida agregar o registrar un nuevo contacto o cliente.\n"
+        "- create_deal: cuando el usuario pida abrir o crear una oportunidad o deal "
+        "para un contacto existente. Si no sabes el lead_id, usa search_contacts primero.\n"
+        "- move_deal_stage: cuando el usuario pida mover, avanzar o cambiar la etapa de un deal. "
+        "Si no sabes el deal_id o stage_id, usa get_my_deals / get_pipeline_status primero.\n"
+        "- add_note: cuando el usuario quiera registrar observaciones o comentarios "
+        "sobre un contacto o deal.\n"
+        "- create_task: cuando el usuario quiera programar un seguimiento, cotización, "
+        "cobro u otra actividad pendiente.\n"
+        "- prepare_whatsapp_message: cuando el usuario pida redactar o preparar un mensaje "
+        "de WhatsApp. IMPORTANTE: esta tool NUNCA envía el mensaje; solo guarda el borrador. "
+        "Después de llamarla, muestra el borrador al usuario y recuérdale que debe enviarlo manualmente.\n"
+        "- set_monthly_goal — PROTOCOLO OBLIGATORIO DE CONFIRMACIÓN:\n"
+        "  1. Cuando el usuario pida cambiar la meta, NO llames set_monthly_goal todavía.\n"
+        "  2. Primero explica qué vas a hacer y pregunta: '¿Confirmas que quieres "
+        "establecer la meta mensual en $XX,XXX MXN para MM/AAAA?'\n"
+        "  3. SOLO cuando el usuario responda afirmativamente, llama set_monthly_goal "
+        "con confirmed=true.\n"
+        "  4. NUNCA llames esta herramienta con confirmed=false — ese valor solo existe "
+        "como salvaguarda interna."
     )
 
 # ── History loading & serialization ──────────────────────────────────────────
@@ -287,7 +310,7 @@ async def run_copilot_turn(
                 model=CLAUDE_MODEL,
                 max_tokens=_MAX_TOKENS,
                 system=system,
-                tools=COPILOT_READ_TOOLS,
+                tools=COPILOT_TOOLS,
                 messages=api_messages,
             )
         except Exception:
@@ -340,7 +363,7 @@ async def run_copilot_turn(
         for block in tool_use_blocks:
             tool_calls_made.append(block.name)
             try:
-                result = await execute_read_tool(
+                result = await execute_tool(
                     block.name, dict(block.input), user, tenant, db
                 )
             except Exception:
