@@ -13,6 +13,7 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +33,35 @@ from app.services.profitability import (
 router = APIRouter(prefix="/finance", tags=["profitability"])
 
 _OWNER_ROLES = (UserRole.OWNER, UserRole.PLATFORM_OWNER)
+
+_THRESHOLD_KEYS = {"green", "yellow", "orange"}
+
+
+# ── Schemas ───────────────────────────────────────────────────────────────────
+
+class TenantFinanceSettingsOut(BaseModel):
+    count_business_days: bool
+    profit_thresholds: dict
+
+
+class TenantFinanceSettingsUpdate(BaseModel):
+    count_business_days: bool | None = None
+    profit_thresholds: dict | None = None
+
+    @field_validator("profit_thresholds")
+    @classmethod
+    def _validate_thresholds(cls, v: dict | None) -> dict | None:
+        if v is None:
+            return v
+        missing = _THRESHOLD_KEYS - set(v.keys())
+        if missing:
+            raise ValueError(
+                f"profit_thresholds requiere las keys: {', '.join(sorted(missing))}"
+            )
+        for key in _THRESHOLD_KEYS:
+            if not isinstance(v[key], (int, float)):
+                raise ValueError(f"profit_thresholds.{key} debe ser numérico")
+        return v
 
 
 async def _get_tenant(current_user: User, db: AsyncSession) -> Tenant:
@@ -145,3 +175,42 @@ async def goal_split_suggestion(
         db,
     )
     return {k: float(v) for k, v in result.items()}
+
+
+# ── GET /finance/settings ─────────────────────────────────────────────────────
+
+@router.get("/settings", response_model=TenantFinanceSettingsOut)
+async def get_finance_settings(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TenantFinanceSettingsOut:
+    """Return tenant-level finance settings (day counting and profitability thresholds)."""
+    await _require_finance_access(current_user, None, db)
+    tenant = await _get_tenant(current_user, db)
+    return TenantFinanceSettingsOut(
+        count_business_days=tenant.count_business_days,
+        profit_thresholds=tenant.profit_thresholds or {"green": 20, "yellow": 10, "orange": 0},
+    )
+
+
+# ── PATCH /finance/settings ───────────────────────────────────────────────────
+
+@router.patch("/settings", response_model=TenantFinanceSettingsOut)
+async def update_finance_settings(
+    body: TenantFinanceSettingsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TenantFinanceSettingsOut:
+    """Update count_business_days and/or profit_thresholds. Owner only."""
+    _require_owner(current_user)
+    tenant = await _get_tenant(current_user, db)
+    if body.count_business_days is not None:
+        tenant.count_business_days = body.count_business_days
+    if body.profit_thresholds is not None:
+        tenant.profit_thresholds = body.profit_thresholds
+    await db.commit()
+    await db.refresh(tenant)
+    return TenantFinanceSettingsOut(
+        count_business_days=tenant.count_business_days,
+        profit_thresholds=tenant.profit_thresholds or {"green": 20, "yellow": 10, "orange": 0},
+    )
