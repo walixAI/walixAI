@@ -10,7 +10,6 @@ import uuid
 from calendar import monthrange
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import TypedDict
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,6 +70,16 @@ def _profit_label(profit_pct: float | None, thresholds: dict) -> str:
     return "red"
 
 
+def _run_rate_status(pct_of_goal: float | None) -> str:
+    if pct_of_goal is None:
+        return "red"
+    if pct_of_goal >= 100:
+        return "green"
+    if pct_of_goal >= 70:
+        return "yellow"
+    return "red"
+
+
 # ── Public service functions ───────────────────────────────────────────────────
 
 async def get_current_month_goal(
@@ -101,7 +110,6 @@ async def get_tenant_run_rate(
     """Projected full-month revenue based on won deals so far."""
     today = date.today()
 
-    # Sum of amount for deals won this month (updated_at as proxy for close date)
     won_q = await db.execute(
         select(func.coalesce(func.sum(Deal.amount), 0)).where(
             Deal.tenant_id == tenant.id,
@@ -115,7 +123,6 @@ async def get_tenant_run_rate(
     count_biz = bool(tenant.count_business_days)
     elapsed = _elapsed_days(year, month, count_biz, today)
     total = _total_days(year, month, count_biz)
-
     run_rate = won_revenue * Decimal(total) / Decimal(elapsed) if elapsed > 0 else Decimal("0")
 
     goal = await get_current_month_goal(tenant.id, year, month, db)
@@ -123,7 +130,77 @@ async def get_tenant_run_rate(
 
     pct_of_goal: float | None = None
     if goal_amount and goal_amount > 0:
-        pct_of_goal = float(run_rate / goal_amount * 100)
+        pct_of_goal = round(float(run_rate / goal_amount * 100), 2)
+
+    expected_today = 0.0
+    gap = 0.0
+    if goal_amount and goal_amount > 0:
+        expected_today = float(goal_amount) * elapsed / total
+        gap = max(0.0, float(goal_amount) - float(won_revenue))
+
+    # Open (active) deals grouped by pipeline stage name
+    open_deals_q = await db.execute(
+        select(Deal.amount, PipelineStage.name)
+        .join(PipelineStage, Deal.pipeline_stage_id == PipelineStage.id)
+        .where(
+            Deal.tenant_id == tenant.id,
+            Deal.is_won.is_(False),
+            Deal.is_lost.is_(False),
+        )
+    )
+    open_quotes_amount = 0.0
+    open_quotes_count = 0
+    negotiation_amount = 0.0
+    negotiation_count = 0
+    for deal_amount, stage_name in open_deals_q.fetchall():
+        sn = (stage_name or "").lower()
+        if "cotiz" in sn:
+            open_quotes_amount += float(deal_amount or 0)
+            open_quotes_count += 1
+        elif "negoc" in sn or "propuesta" in sn:
+            negotiation_amount += float(deal_amount or 0)
+            negotiation_count += 1
+
+    # Won revenue breakdown by deal_type using tenant-configured types
+    by_type_q = await db.execute(
+        select(Deal.deal_type, func.coalesce(func.sum(Deal.amount), 0))
+        .where(
+            Deal.tenant_id == tenant.id,
+            Deal.is_won.is_(True),
+            func.extract("year", Deal.updated_at) == year,
+            func.extract("month", Deal.updated_at) == month,
+        )
+        .group_by(Deal.deal_type)
+    )
+    deal_type_options = list(tenant.deal_type_options or [])
+    sold_by_deal_type: dict[str, float] = {dt: 0.0 for dt in deal_type_options}
+    for deal_type, type_total in by_type_q.fetchall():
+        key = deal_type if (deal_type and deal_type in deal_type_options) else "sin_tipo"
+        sold_by_deal_type[key] = sold_by_deal_type.get(key, 0.0) + float(type_total)
+
+    # Recommendations (port of Lovable useRunRate logic, max 3)
+    recommendations: list[str] = []
+    remaining_days = total - elapsed
+    if not goal_amount or goal_amount <= 0:
+        recommendations.append("Define una meta mensual para ver proyecciones de rendimiento")
+    elif run_rate >= goal_amount:
+        recommendations.append(f"¡Excelente! Estás proyectado a superar tu meta de ${float(goal_amount):,.0f}")
+        recommendations.append(f"Llevas ${float(won_revenue):,.0f} vendidos hasta hoy")
+        recommendations.append("Considera aumentar tu meta el próximo período")
+    else:
+        recommendations.append(
+            f"Necesitas cerrar ${gap:,.0f} más para alcanzar tu meta de ${float(goal_amount):,.0f}"
+        )
+        if remaining_days > 0 and gap > 0:
+            daily_needed = gap / remaining_days
+            recommendations.append(
+                f"Necesitas vender ${daily_needed:,.0f} diarios en los {remaining_days} días restantes"
+            )
+        if open_quotes_amount > 0:
+            recommendations.append(
+                f"Tienes ${open_quotes_amount:,.0f} en cotizaciones abiertas que podrían cerrar"
+            )
+    recommendations = recommendations[:3]
 
     return {
         "year": year,
@@ -133,7 +210,16 @@ async def get_tenant_run_rate(
         "elapsed_days": elapsed,
         "total_days": total,
         "goal_amount": float(goal_amount) if goal_amount is not None else None,
-        "pct_of_goal": round(pct_of_goal, 2) if pct_of_goal is not None else None,
+        "pct_of_goal": pct_of_goal,
+        "expected_today": round(expected_today, 2),
+        "gap": round(gap, 2),
+        "status": _run_rate_status(pct_of_goal),
+        "open_quotes_amount": round(open_quotes_amount, 2),
+        "open_quotes_count": open_quotes_count,
+        "negotiation_amount": round(negotiation_amount, 2),
+        "negotiation_count": negotiation_count,
+        "sold_by_deal_type": sold_by_deal_type,
+        "recommendations": recommendations,
     }
 
 
@@ -143,7 +229,7 @@ async def get_tenant_profitability(
     month: int,
     db: AsyncSession,
 ) -> dict:
-    """Revenue - confirmed expenses for the period, with profit % and label."""
+    """Revenue minus confirmed expenses for the period, with profit % and label."""
     won_q = await db.execute(
         select(func.coalesce(func.sum(Deal.amount), 0)).where(
             Deal.tenant_id == tenant.id,
@@ -153,16 +239,6 @@ async def get_tenant_profitability(
         )
     )
     revenue = Decimal(str(won_q.scalar()))
-
-    cost_q = await db.execute(
-        select(func.coalesce(func.sum(Deal.cost_amount), 0)).where(
-            Deal.tenant_id == tenant.id,
-            Deal.is_won.is_(True),
-            func.extract("year", Deal.updated_at) == year,
-            func.extract("month", Deal.updated_at) == month,
-        )
-    )
-    deal_costs = Decimal(str(cost_q.scalar()))
 
     exp_q = await db.execute(
         select(func.coalesce(func.sum(Expense.amount), 0)).where(
@@ -174,8 +250,7 @@ async def get_tenant_profitability(
     )
     expenses = Decimal(str(exp_q.scalar()))
 
-    total_costs = deal_costs + expenses
-    profit = revenue - total_costs
+    profit = revenue - expenses
     profit_pct: float | None = None
     if revenue > 0:
         profit_pct = round(float(profit / revenue * 100), 2)
@@ -186,9 +261,7 @@ async def get_tenant_profitability(
         "year": year,
         "month": month,
         "revenue": float(revenue),
-        "deal_costs": float(deal_costs),
         "expenses": float(expenses),
-        "total_costs": float(total_costs),
         "profit": float(profit),
         "profit_pct": profit_pct,
         "label": _profit_label(profit_pct, thresholds),
@@ -259,7 +332,7 @@ async def get_user_profitability(
     month: int,
     db: AsyncSession,
 ) -> dict:
-    """Revenue and deal costs for a user's won deals in a period."""
+    """Revenue minus confirmed tenant expenses for the period, scoped by user revenue."""
     won_q = await db.execute(
         select(func.coalesce(func.sum(Deal.amount), 0)).where(
             Deal.tenant_id == tenant.id,
@@ -271,18 +344,17 @@ async def get_user_profitability(
     )
     revenue = Decimal(str(won_q.scalar()))
 
-    cost_q = await db.execute(
-        select(func.coalesce(func.sum(Deal.cost_amount), 0)).where(
-            Deal.tenant_id == tenant.id,
-            Deal.owner_id == user_id,
-            Deal.is_won.is_(True),
-            func.extract("year", Deal.updated_at) == year,
-            func.extract("month", Deal.updated_at) == month,
+    exp_q = await db.execute(
+        select(func.coalesce(func.sum(Expense.amount), 0)).where(
+            Expense.tenant_id == tenant.id,
+            Expense.status == "confirmed",
+            func.extract("year", Expense.incurred_at) == year,
+            func.extract("month", Expense.incurred_at) == month,
         )
     )
-    deal_costs = Decimal(str(cost_q.scalar()))
+    expenses = Decimal(str(exp_q.scalar()))
 
-    profit = revenue - deal_costs
+    profit = revenue - expenses
     profit_pct: float | None = None
     if revenue > 0:
         profit_pct = round(float(profit / revenue * 100), 2)
@@ -294,7 +366,7 @@ async def get_user_profitability(
         "year": year,
         "month": month,
         "revenue": float(revenue),
-        "deal_costs": float(deal_costs),
+        "expenses": float(expenses),
         "profit": float(profit),
         "profit_pct": profit_pct,
         "label": _profit_label(profit_pct, thresholds),
@@ -303,57 +375,57 @@ async def get_user_profitability(
 
 async def suggest_goal_split(
     tenant_id: uuid.UUID,
-    year: int,
-    month: int,
+    dimension: str,
+    dimension_value_text: str | None,
+    dimension_value_uuid: uuid.UUID | None,
+    user_ids: list[uuid.UUID],
     db: AsyncSession,
-) -> list[dict]:
-    """Suggest equal goal distribution among active users with deals.
+) -> dict[str, Decimal]:
+    """Suggest goal distribution based on 3-month trailing sales per user.
 
-    Returns a list of {user_id, name, suggested_pct, suggested_amount}
-    for the global goal of the given period.
+    Returns {str(user_id): share_percent}. Equal split when no sales in window.
+    Window: [start_of_month - 3 months, start_of_month) — calendar months.
     """
-    goal = await db.execute(
-        select(MonthlyGoal).where(
-            MonthlyGoal.tenant_id == tenant_id,
-            MonthlyGoal.period_year == year,
-            MonthlyGoal.period_month == month,
-            MonthlyGoal.dimension == "global",
+    if not user_ids:
+        return {}
+
+    today = date.today()
+    window_end = date(today.year, today.month, 1)
+    bm = today.month - 3
+    by = today.year
+    if bm <= 0:
+        bm += 12
+        by -= 1
+    window_start = date(by, bm, 1)
+
+    sales: dict[str, Decimal] = {}
+    for uid in user_ids:
+        q = (
+            select(func.coalesce(func.sum(Deal.amount), 0))
+            .where(
+                Deal.tenant_id == tenant_id,
+                Deal.owner_id == uid,
+                Deal.is_won.is_(True),
+                Deal.updated_at >= window_start,
+                Deal.updated_at < window_end,
+            )
         )
-    )
-    goal_row = goal.scalar_one_or_none()
-    if goal_row is None:
-        return []
+        if dimension == "deal_type" and dimension_value_text:
+            q = q.where(Deal.deal_type == dimension_value_text)
+        elif dimension == "pipeline" and dimension_value_uuid:
+            q = q.join(PipelineStage, Deal.pipeline_stage_id == PipelineStage.id).where(
+                PipelineStage.pipeline_id == dimension_value_uuid
+            )
+        elif dimension == "product_category" and dimension_value_uuid:
+            q = q.where(Deal.product_category_id == dimension_value_uuid)
 
-    # Active users who own at least one deal in the last 3 months
-    active_users_q = await db.execute(
-        select(User.id, User.name).where(
-            User.tenant_id == tenant_id,
-            User.is_active.is_(True),
-            User.id.in_(
-                select(Deal.owner_id).where(
-                    Deal.tenant_id == tenant_id,
-                    Deal.owner_id.isnot(None),
-                ).distinct()
-            ),
-        )
-    )
-    users = active_users_q.fetchall()
-    if not users:
-        return []
+        row = await db.execute(q)
+        sales[str(uid)] = Decimal(str(row.scalar()))
 
-    n = len(users)
-    base_pct = round(Decimal("100") / Decimal(n), 3)
-    # Give remainder to first user to ensure sum = 100
-    remainder = Decimal("100") - base_pct * n
-    total_goal = Decimal(str(goal_row.amount))
+    total = sum(sales.values())
+    if total > 0:
+        return {uid_str: round(v / total * Decimal("100"), 2) for uid_str, v in sales.items()}
 
-    result = []
-    for i, (uid, uname) in enumerate(users):
-        pct = base_pct + (remainder if i == 0 else Decimal("0"))
-        result.append({
-            "user_id": str(uid),
-            "name": uname,
-            "suggested_pct": float(pct),
-            "suggested_amount": float(total_goal * pct / Decimal("100")),
-        })
-    return result
+    # Equal split when nobody sold in the window
+    equal = round(Decimal("100") / Decimal(len(user_ids)), 2)
+    return {str(uid): equal for uid in user_ids}

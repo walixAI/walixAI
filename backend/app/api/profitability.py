@@ -127,13 +127,21 @@ async def user_profitability(
 
 @router.get("/goal-split-suggestion")
 async def goal_split_suggestion(
-    year: int = Query(default=None),
-    month: int = Query(default=None),
+    dimension: str = Query(...),
+    dimension_value_text: str | None = Query(default=None),
+    dimension_value_uuid: uuid.UUID | None = Query(default=None),
+    user_ids: list[uuid.UUID] = Query(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[dict]:
-    """Suggest equal goal distribution among active reps with recent deals."""
+) -> dict[str, float]:
+    """Suggest split % per user based on 3-month trailing sales in the given dimension."""
     _require_owner(current_user)
-    if year is None or month is None:
-        year, month = _current_period()
-    return await suggest_goal_split(current_user.tenant_id, year, month, db)
+    result = await suggest_goal_split(
+        current_user.tenant_id,
+        dimension,
+        dimension_value_text,
+        dimension_value_uuid,
+        user_ids,
+        db,
+    )
+    return {k: float(v) for k, v in result.items()}
