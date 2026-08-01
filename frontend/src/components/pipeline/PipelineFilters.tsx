@@ -31,7 +31,7 @@ interface Props {
 }
 
 export function PipelineFilters({ value, onChange }: Props) {
-  const { data: sellers = [] } = useTenantUsers(); // MVP: vacío hasta wirear usuarios (owner fase 2)
+  const { data: sellers = [] } = useTenantUsers();
   const activeCount =
     (value.ownerName !== "all" ? 1 : 0) +
     (value.amountMin ? 1 : 0) +

@@ -98,11 +98,23 @@ function DealCardImpl({
 
       <div className="flex items-center justify-between gap-2 mt-3">
         <HealthBadges health={health} />
-        <Avatar className="h-5 w-5">
-          <AvatarFallback className="text-[9px] text-white" style={{ backgroundColor: deal.ownerColor }}>
-            {deal.ownerInitials}
-          </AvatarFallback>
-        </Avatar>
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Avatar
+                className="h-5 w-5 cursor-default"
+                aria-label={deal.ownerId ? `Asignado a ${deal.ownerName}` : "Sin asignar"}
+              >
+                <AvatarFallback className="text-[9px] text-white" style={{ backgroundColor: deal.ownerColor }}>
+                  {deal.ownerInitials}
+                </AvatarFallback>
+              </Avatar>
+            </TooltipTrigger>
+            <TooltipContent side="left">
+              {deal.ownerId ? `Asignado a ${deal.ownerName}` : "Sin asignar"}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
 
       {/* Probability progress bar at the bottom */}
