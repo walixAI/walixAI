@@ -78,6 +78,7 @@ export interface LeadListItem {
   pipeline_stage_id: string | null;
   created_at: string;
   updated_at: string;
+  last_inbound_at: string | null;
 }
 
 export interface LeadDetail extends LeadListItem {

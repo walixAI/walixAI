@@ -182,7 +182,7 @@ export function ConversationList({ leads, activeId, onSelect, loading }: Props) 
                         </span>
                       )}
                       {(() => {
-                        const sw = getServiceWindowFromTimestamp(lead.updated_at);
+                        const sw = getServiceWindowFromTimestamp(lead.last_inbound_at);
                         return (
                           <span
                             className={cn(

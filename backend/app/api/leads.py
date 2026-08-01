@@ -63,6 +63,7 @@ class LeadListItem(BaseModel):
     pipeline_stage_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+    last_inbound_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -269,7 +270,29 @@ async def list_leads(
     rows = await db.execute(
         base.order_by(Lead.created_at.desc()).limit(limit).offset(offset)
     )
-    items = [LeadListItem.model_validate(lead) for lead in rows.scalars().all()]
+    leads = rows.scalars().all()
+
+    # Single query — no N+1 — to get last inbound message timestamp per lead.
+    lead_ids = [lead.id for lead in leads]
+    inbound_map: dict[uuid.UUID, datetime] = {}
+    if lead_ids:
+        inbound_q = (
+            select(Conversation.lead_id, func.max(Message.created_at).label("last_at"))
+            .join(Message, Message.conversation_id == Conversation.id)
+            .where(
+                Conversation.lead_id.in_(lead_ids),
+                Message.role == MessageRole.USER,
+            )
+            .group_by(Conversation.lead_id)
+        )
+        for row in (await db.execute(inbound_q)).all():
+            inbound_map[row.lead_id] = row.last_at
+
+    items = []
+    for lead in leads:
+        item = LeadListItem.model_validate(lead)
+        item.last_inbound_at = inbound_map.get(lead.id)
+        items.append(item)
 
     return LeadListResponse(items=items, total=total, limit=limit, offset=offset)
 
