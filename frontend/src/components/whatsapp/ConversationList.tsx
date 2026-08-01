@@ -6,6 +6,13 @@ import { cn } from "@/lib/utils";
 import { StatusBadge } from "./StatusBadge";
 import type { LeadListItem } from "@/lib/api";
 import { ConversationListSkeleton } from "@/components/walix/Skeletons";
+import { getServiceWindowFromTimestamp, type WindowTone } from "@/lib/whatsapp/serviceWindow";
+
+const WINDOW_CHIP_CLASSES: Record<WindowTone, string> = {
+  open: "bg-success/10 text-success",
+  closing: "bg-warning/10 text-warning",
+  closed: "bg-danger/10 text-danger",
+};
 
 type Tab = "all" | "bot" | "human" | "calificados";
 
@@ -167,13 +174,26 @@ export function ConversationList({ leads, activeId, onSelect, loading }: Props) 
                     <p className="text-xs text-muted-foreground truncate mt-0.5">
                       {lead.wa_phone}
                     </p>
-                    <div className="flex items-center gap-2 mt-1.5">
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                       <StatusBadge status={lead.status} />
                       {lead.qualification_score != null && (
                         <span className="text-[10px] text-muted-foreground">
                           Score: {(lead.qualification_score * 10).toFixed(1)}
                         </span>
                       )}
+                      {(() => {
+                        const sw = getServiceWindowFromTimestamp(lead.updated_at);
+                        return (
+                          <span
+                            className={cn(
+                              "text-[10px] font-medium px-1.5 py-0.5 rounded",
+                              WINDOW_CHIP_CLASSES[sw.tone],
+                            )}
+                          >
+                            {sw.shortLabel}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                 </button>

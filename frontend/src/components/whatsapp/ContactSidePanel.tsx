@@ -3,6 +3,15 @@ import { StatusBadge } from "./StatusBadge";
 import type { LeadDetail } from "@/lib/api";
 import { WBadge } from "@/components/walix/Badge";
 import { AssignmentDropdown } from "./AssignmentDropdown";
+import { cn } from "@/lib/utils";
+import type { ServiceWindow, WindowTone } from "@/lib/whatsapp/serviceWindow";
+import type { GuidanceCard } from "@/lib/whatsapp/guidance";
+
+const WINDOW_BADGE: Record<WindowTone, { bg: string; text: string; label: string }> = {
+  open:    { bg: "bg-success/10",  text: "text-success",  label: "Abierta" },
+  closing: { bg: "bg-warning/10",  text: "text-warning",  label: "Cerrándose" },
+  closed:  { bg: "bg-danger/10",   text: "text-danger",   label: "Cerrada" },
+};
 
 const SENTIMENT_LABELS: Record<string, string> = {
   neutral: "Neutral",
@@ -20,9 +29,11 @@ const SENTIMENT_VARIANT: Record<string, "neutral" | "info" | "danger" | "warning
 
 interface Props {
   lead: LeadDetail;
+  serviceWindow?: ServiceWindow;
+  guidance?: GuidanceCard;
 }
 
-export function ContactSidePanel({ lead }: Props) {
+export function ContactSidePanel({ lead, serviceWindow, guidance }: Props) {
   const qData = lead.qualification_data as Record<string, unknown>;
 
   const qualFields = [
@@ -38,6 +49,44 @@ export function ContactSidePanel({ lead }: Props) {
     <aside className="w-[300px] shrink-0 border-l border-border bg-card hidden lg:flex flex-col h-full">
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-5">
+          {/* Ventana de servicio 24 h */}
+          {serviceWindow && (
+            <section>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                Ventana WhatsApp
+              </h3>
+              <div className="border border-border rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Estado</span>
+                  <span
+                    className={cn(
+                      "text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                      WINDOW_BADGE[serviceWindow.tone].bg,
+                      WINDOW_BADGE[serviceWindow.tone].text,
+                    )}
+                  >
+                    {WINDOW_BADGE[serviceWindow.tone].label}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">{serviceWindow.description}</p>
+
+                {guidance && (
+                  <div className="pt-1 border-t border-border space-y-1.5">
+                    <p className="text-xs font-medium">{guidance.title}</p>
+                    <ul className="space-y-1">
+                      {guidance.steps.map((step, i) => (
+                        <li key={i} className="text-[11px] text-muted-foreground flex gap-1.5">
+                          <span className="shrink-0 text-muted-foreground/50">{i + 1}.</span>
+                          {step}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
           {/* Calificacion */}
           <section>
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">

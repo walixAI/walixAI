@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { MessageCircle, ChevronLeft } from "lucide-react";
 import { api } from "@/lib/api";
 import type { MessageOut } from "@/lib/api";
+import { getServiceWindowFromMessages } from "@/lib/whatsapp/serviceWindow";
+import { getGuidance } from "@/lib/whatsapp/guidance";
 import { toast } from "sonner";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
@@ -207,6 +209,15 @@ export default function Whatsapp() {
     [leads, activeLeadId]
   );
 
+  const serviceWindow = useMemo(
+    () => getServiceWindowFromMessages(messages),
+    [messages]
+  );
+  const guidance = useMemo(
+    () => getGuidance(messages, serviceWindow),
+    [messages, serviceWindow]
+  );
+
   const loadingAction =
     handoffMutation.isPending || returnToBotMutation.isPending || assignMutation.isPending;
 
@@ -312,6 +323,7 @@ export default function Whatsapp() {
                         aiLoading={suggestMutation.isPending}
                         aiDraftActive={aiDraftActive}
                         onClearAiDraft={() => setAiDraftActive(false)}
+                        serviceWindow={serviceWindow}
                       />
                     )}
                   </>
@@ -319,7 +331,11 @@ export default function Whatsapp() {
               </div>
 
               {activeLead && panelOpen && !isMobile && (
-                <ContactSidePanel lead={activeLead} />
+                <ContactSidePanel
+                  lead={activeLead}
+                  serviceWindow={serviceWindow}
+                  guidance={guidance}
+                />
               )}
             </main>
           )}
