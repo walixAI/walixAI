@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { useDashboardKpis } from "@/lib/queries/dashboard";
-import { Sparkles, AlertTriangle, X } from "lucide-react";
+import { Sparkles, AlertTriangle, X, Settings2 } from "lucide-react";
 import { LayoutRenderer } from "@/components/dashboard/LayoutRenderer";
+import { CustomizeSheet } from "@/components/dashboard/CustomizeSheet";
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -15,6 +16,7 @@ function getGreeting() {
 export default function Dashboard() {
   const { user } = useAuth();
   const [showAlert, setShowAlert] = useState(true);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
 
   const { data: kpis } = useDashboardKpis();
   const atRiskDealsCount = kpis?.staleDeals ?? 0;
@@ -59,17 +61,33 @@ export default function Dashboard() {
           </h1>
           <p className="text-sm text-muted-foreground capitalize mt-1">{today}</p>
         </div>
-        <Button
-          onClick={() => { /* TODO fase 2 */ }}
-          className="bg-gradient-brand hover:opacity-90 text-primary-foreground shadow-glow gap-2"
-        >
-          <Sparkles className="h-4 w-4" />
-          Resumen del día
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setCustomizeOpen(true)}
+            className="gap-2"
+          >
+            <Settings2 className="h-4 w-4" />
+            Personalizar
+          </Button>
+          <Button
+            onClick={() => { /* TODO fase 2 */ }}
+            className="bg-gradient-brand hover:opacity-90 text-primary-foreground shadow-glow gap-2"
+          >
+            <Sparkles className="h-4 w-4" />
+            Resumen del día
+          </Button>
+        </div>
       </div>
 
       {/* Widgets dinámicos — orden y visibilidad desde el backend */}
       <LayoutRenderer surface="dashboard" />
+
+      <CustomizeSheet
+        open={customizeOpen}
+        onOpenChange={setCustomizeOpen}
+        scope="user"
+      />
     </div>
   );
 }

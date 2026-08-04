@@ -9,18 +9,19 @@
  * Rutas relacionadas:
  *   /settings/team — Equipo (enlace en sidebar, página propia)
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Bot, BookOpen, Zap, CheckCircle2, Copy, ChevronLeft, ChevronRight,
   Loader2, Pencil, RefreshCw, Plus, Trash2, Unplug, X, Save, Target, Cpu,
-  MessageSquare, EyeOff,
+  MessageSquare, EyeOff, LayoutGrid,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type MetaConfigIn, type KBDocumentListItem, type MessageTemplate, type TemplateCreateIn } from "@/lib/api";
 import { GoalsTab } from "@/components/settings/goals/GoalsTab";
 import { CapabilitiesTab } from "@/components/settings/builder/CapabilitiesTab";
+import { CustomizeSheet } from "@/components/dashboard/CustomizeSheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenantLabels } from "@/hooks/useTenantLabels";
 import { Button } from "@/components/ui/button";
@@ -42,12 +43,13 @@ const TONE_OPTIONS = [
 ];
 
 const TABS = [
-  { key: "bot",        label: "Bot IA",              icon: Bot },
-  { key: "kb",         label: "Base de conocimiento", icon: BookOpen },
-  { key: "whatsapp",   label: "WhatsApp / Meta",     icon: Zap },
-  { key: "plantillas", label: "Plantillas WA",       icon: MessageSquare },
-  { key: "metas",      label: "Metas",               icon: Target },
-  { key: "builder",    label: "Walix Builder",       icon: Cpu },
+  { key: "bot",        label: "Bot IA",              icon: Bot,         adminOnly: false },
+  { key: "kb",         label: "Base de conocimiento", icon: BookOpen,   adminOnly: false },
+  { key: "whatsapp",   label: "WhatsApp / Meta",     icon: Zap,         adminOnly: false },
+  { key: "plantillas", label: "Plantillas WA",       icon: MessageSquare, adminOnly: false },
+  { key: "metas",      label: "Metas",               icon: Target,      adminOnly: false },
+  { key: "builder",    label: "Walix Builder",       icon: Cpu,         adminOnly: false },
+  { key: "dashboard",  label: "Dashboard",           icon: LayoutGrid,  adminOnly: true },
 ] as const;
 
 // ── Row helper ────────────────────────────────────────────────────────────────
@@ -1122,14 +1124,100 @@ function WhatsAppTab({ branchId, canManage }: { branchId: string; canManage: boo
 }
 
 // ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║  TAB: DASHBOARD ADMIN                                                      ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+
+const ROLE_OPTIONS = [
+  { value: "gerente",  label: "Gerente" },
+  { value: "doctor",   label: "Doctor" },
+  { value: "asesor",   label: "Asesor" },
+  { value: "soporte",  label: "Soporte" },
+] as const;
+
+function DashboardAdminTab() {
+  const [sheetScope, setSheetScope] = useState<"tenant_default" | "role" | null>(null);
+  const [selectedRole, setSelectedRole] = useState<string>("gerente");
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-sm font-semibold">Configuración del Dashboard</h3>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Define el orden y visibilidad de los widgets para todos los usuarios o por rol.
+        </p>
+      </div>
+
+      {/* Opción 1: default del tenant */}
+      <div className="rounded-lg border border-border p-4 space-y-3">
+        <div>
+          <p className="text-sm font-medium">Default general del tenant</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Vista que ven todos los usuarios que no tienen layout personal ni default por rol.
+          </p>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setSheetScope("tenant_default")}>
+          <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
+          Editar default del tenant
+        </Button>
+      </div>
+
+      {/* Opción 2: default por rol */}
+      <div className="rounded-lg border border-border p-4 space-y-3">
+        <div>
+          <p className="text-sm font-medium">Default por rol</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Vista que ven los usuarios de un rol específico que no tienen layout personal.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={selectedRole} onValueChange={setSelectedRole}>
+            <SelectTrigger className="h-8 text-sm w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ROLE_OPTIONS.map((r) => (
+                <SelectItem key={r.value} value={r.value} className="text-sm">
+                  {r.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="outline" onClick={() => setSheetScope("role")}>
+            <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
+            Editar
+          </Button>
+        </div>
+      </div>
+
+      {sheetScope === "tenant_default" && (
+        <CustomizeSheet
+          open={true}
+          onOpenChange={(v) => { if (!v) setSheetScope(null); }}
+          scope="tenant_default"
+        />
+      )}
+      {sheetScope === "role" && (
+        <CustomizeSheet
+          open={true}
+          onOpenChange={(v) => { if (!v) setSheetScope(null); }}
+          scope="role"
+          role={selectedRole}
+        />
+      )}
+    </div>
+  );
+}
+
+// ╔══════════════════════════════════════════════════════════════════════════════╗
 // ║  MAIN PAGE                                                                 ║
 // ╚══════════════════════════════════════════════════════════════════════════════╝
 
 export default function Settings() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = (searchParams.get("tab") ?? "bot") as "bot" | "kb" | "whatsapp" | "plantillas" | "metas" | "builder";
+  const activeTab = (searchParams.get("tab") ?? "bot") as "bot" | "kb" | "whatsapp" | "plantillas" | "metas" | "builder" | "dashboard";
   const isOwner = user?.role === "owner" || user?.role === "platform_owner";
+  const isAdmin = isOwner || user?.role === "it";
   const canManage = user?.role === "owner" || user?.role === "it" || user?.role === "gerente";
 
   // Branch resolution
@@ -1170,9 +1258,9 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Tabs — "dashboard" visible solo para owner/IT */}
       <div className="flex gap-0.5 bg-muted rounded-lg p-1">
-        {TABS.map(({ key, label, icon: Icon }) => (
+        {TABS.filter((t) => !t.adminOnly || isAdmin).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -1189,8 +1277,16 @@ export default function Settings() {
         ))}
       </div>
 
-      {/* Tab content — Metas and Builder render for any user (API enforces write access) */}
-      {activeTab === "metas" ? (
+      {/* Tab content */}
+      {activeTab === "dashboard" ? (
+        isAdmin ? (
+          <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+            <DashboardAdminTab />
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground py-4">Solo owner o IT pueden acceder a esta sección.</p>
+        )
+      ) : activeTab === "metas" ? (
         <div className="rounded-xl border border-border bg-card p-5 shadow-card">
           <GoalsTab />
         </div>
@@ -1207,7 +1303,7 @@ export default function Settings() {
           {activeTab === "bot"        && <BotTab branchId={branchId} />}
           {activeTab === "kb"         && <KBTab branchId={branchId} />}
           {activeTab === "whatsapp"   && <WhatsAppTab branchId={branchId} canManage={canManage} />}
-          {activeTab === "plantillas" && <TemplatesTab branchId={branchId} isAdmin={isOwner || user?.role === "it"} />}
+          {activeTab === "plantillas" && <TemplatesTab branchId={branchId} isAdmin={isAdmin} />}
         </div>
       )}
     </div>
