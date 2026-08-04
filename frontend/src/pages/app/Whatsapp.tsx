@@ -324,6 +324,8 @@ export default function Whatsapp() {
                         aiDraftActive={aiDraftActive}
                         onClearAiDraft={() => setAiDraftActive(false)}
                         serviceWindow={serviceWindow}
+                        leadId={activeLeadId ?? undefined}
+                        branchId={activeLead?.branch_id}
                       />
                     )}
                   </>

@@ -172,6 +172,34 @@ export interface KBDocumentListItem {
   created_at: string;
 }
 
+export interface MessageTemplate {
+  id: string;
+  tenant_id: string;
+  branch_id: string | null;
+  name: string;
+  language: string;
+  category: string;
+  body_preview: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateCreateIn {
+  name: string;
+  language?: string;
+  category?: string;
+  body_preview?: string | null;
+}
+
+export interface TemplatePatchIn {
+  name?: string;
+  language?: string;
+  category?: string;
+  body_preview?: string | null;
+  is_active?: boolean;
+}
+
 export interface KBDocumentDetail {
   id: string;
   title: string;
@@ -1552,5 +1580,44 @@ export const api = {
   // Deals (contact panel — active only)
   async getDealsByLead(leadId: string): Promise<DealListResponse> {
     return request(`/api/deals?lead_id=${leadId}&is_won=false&is_lost=false`);
+  },
+
+  // ── Message Templates ───────────────────────────────────────────────────────
+
+  async listBranchTemplates(branchId: string, includeInactive = false): Promise<MessageTemplate[]> {
+    const qs = includeInactive ? "?include_inactive=true" : "";
+    return request(`/api/branches/${branchId}/message-templates${qs}`);
+  },
+
+  async createBranchTemplate(branchId: string, data: TemplateCreateIn): Promise<MessageTemplate> {
+    return request(`/api/branches/${branchId}/message-templates`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async createTenantTemplate(data: TemplateCreateIn): Promise<MessageTemplate> {
+    return request("/api/message-templates", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateTemplate(templateId: string, data: TemplatePatchIn): Promise<MessageTemplate> {
+    return request(`/api/message-templates/${templateId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async deactivateTemplate(templateId: string): Promise<void> {
+    return request(`/api/message-templates/${templateId}`, { method: "DELETE" });
+  },
+
+  async sendTemplate(leadId: string, templateId: string): Promise<MessageOut> {
+    return request(`/api/leads/${leadId}/send-template`, {
+      method: "POST",
+      body: JSON.stringify({ template_id: templateId }),
+    });
   },
 };

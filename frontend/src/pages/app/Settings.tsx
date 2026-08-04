@@ -15,9 +15,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Bot, BookOpen, Zap, CheckCircle2, Copy, ChevronLeft, ChevronRight,
   Loader2, Pencil, RefreshCw, Plus, Trash2, Unplug, X, Save, Target, Cpu,
+  MessageSquare, EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type MetaConfigIn, type KBDocumentListItem } from "@/lib/api";
+import { api, type MetaConfigIn, type KBDocumentListItem, type MessageTemplate, type TemplateCreateIn } from "@/lib/api";
 import { GoalsTab } from "@/components/settings/goals/GoalsTab";
 import { CapabilitiesTab } from "@/components/settings/builder/CapabilitiesTab";
 import { useAuth } from "@/hooks/useAuth";
@@ -41,11 +42,12 @@ const TONE_OPTIONS = [
 ];
 
 const TABS = [
-  { key: "bot",       label: "Bot IA",              icon: Bot },
-  { key: "kb",        label: "Base de conocimiento", icon: BookOpen },
-  { key: "whatsapp",  label: "WhatsApp / Meta",     icon: Zap },
-  { key: "metas",     label: "Metas",                icon: Target },
-  { key: "builder",   label: "Walix Builder",        icon: Cpu },
+  { key: "bot",        label: "Bot IA",              icon: Bot },
+  { key: "kb",         label: "Base de conocimiento", icon: BookOpen },
+  { key: "whatsapp",   label: "WhatsApp / Meta",     icon: Zap },
+  { key: "plantillas", label: "Plantillas WA",       icon: MessageSquare },
+  { key: "metas",      label: "Metas",               icon: Target },
+  { key: "builder",    label: "Walix Builder",       icon: Cpu },
 ] as const;
 
 // ── Row helper ────────────────────────────────────────────────────────────────
@@ -582,6 +584,337 @@ function KBTab({ branchId }: { branchId: string }) {
 }
 
 // ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║  TAB: PLANTILLAS WA                                                        ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+
+interface TemplateFormState {
+  name: string;
+  language: string;
+  category: string;
+  body_preview: string;
+}
+
+const EMPTY_FORM: TemplateFormState = { name: "", language: "es_MX", category: "General", body_preview: "" };
+
+function TemplateDialog({
+  open,
+  template,
+  branchId,
+  isTenantWide,
+  onClose,
+}: {
+  open: boolean;
+  template: MessageTemplate | null;
+  branchId: string;
+  isTenantWide: boolean;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState<TemplateFormState>(EMPTY_FORM);
+
+  useEffect(() => {
+    if (open) {
+      setForm(template
+        ? { name: template.name, language: template.language, category: template.category, body_preview: template.body_preview ?? "" }
+        : EMPTY_FORM
+      );
+    }
+  }, [open, template]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const data: TemplateCreateIn = {
+        name: form.name.trim(),
+        language: form.language.trim() || "es_MX",
+        category: form.category.trim() || "General",
+        body_preview: form.body_preview.trim() || null,
+      };
+      if (template) {
+        return api.updateTemplate(template.id, data);
+      }
+      if (isTenantWide) {
+        return api.createTenantTemplate(data);
+      }
+      return api.createBranchTemplate(branchId, data);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["branch-templates", branchId] });
+      qc.invalidateQueries({ queryKey: ["branch-templates-admin", branchId] });
+      toast.success(template ? "Plantilla actualizada" : "Plantilla creada");
+      onClose();
+    },
+    onError: (e: Error) => toast.error("Error al guardar", { description: e.message }),
+  });
+
+  const canSave = form.name.trim().length > 0;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {template ? "Editar plantilla" : isTenantWide ? "Nueva plantilla global" : "Nueva plantilla de sucursal"}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 mt-2">
+          <div className="space-y-1.5">
+            <Label>Nombre en Meta <span className="text-danger">*</span></Label>
+            <Input
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="ej. confirmacion_cita_v2"
+              className="font-mono text-sm"
+              autoFocus
+            />
+            <p className="text-[11px] text-muted-foreground">Nombre exacto tal como está aprobado en Meta Business Manager</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Idioma</Label>
+              <Input
+                value={form.language}
+                onChange={(e) => setForm((f) => ({ ...f, language: e.target.value }))}
+                placeholder="es_MX"
+                className="font-mono text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Categoría</Label>
+              <Input
+                value={form.category}
+                onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+                placeholder="Seguimiento"
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Vista previa (opcional)</Label>
+            <Textarea
+              value={form.body_preview}
+              onChange={(e) => setForm((f) => ({ ...f, body_preview: e.target.value }))}
+              rows={3}
+              placeholder="Hola {{1}}, tu cita está confirmada para el {{2}}…"
+              className="text-sm resize-none"
+            />
+            <p className="text-[11px] text-muted-foreground">Solo referencia visual — no se envía a Meta</p>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button
+              className="flex-1"
+              disabled={!canSave || saveMutation.isPending}
+              onClick={() => saveMutation.mutate()}
+            >
+              {saveMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+              Guardar
+            </Button>
+            <Button variant="outline" onClick={onClose}>Cancelar</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TemplatesTab({ branchId, isAdmin }: { branchId: string; isAdmin: boolean }) {
+  const qc = useQueryClient();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editTemplate, setEditTemplate] = useState<MessageTemplate | null>(null);
+  const [creatingTenantWide, setCreatingTenantWide] = useState(false);
+
+  const { data: templates = [], isLoading } = useQuery({
+    queryKey: ["branch-templates-admin", branchId],
+    queryFn: () => api.listBranchTemplates(branchId, true),
+    enabled: !!branchId,
+    staleTime: 30_000,
+  });
+
+  const deactivateMutation = useMutation({
+    mutationFn: (id: string) => api.deactivateTemplate(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["branch-templates-admin", branchId] });
+      qc.invalidateQueries({ queryKey: ["branch-templates", branchId] });
+      toast.success("Plantilla desactivada");
+    },
+    onError: (e: Error) => toast.error("Error", { description: e.message }),
+  });
+
+  const reactivateMutation = useMutation({
+    mutationFn: (id: string) => api.updateTemplate(id, { is_active: true }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["branch-templates-admin", branchId] });
+      qc.invalidateQueries({ queryKey: ["branch-templates", branchId] });
+      toast.success("Plantilla reactivada");
+    },
+    onError: (e: Error) => toast.error("Error", { description: e.message }),
+  });
+
+  function openCreate(tenantWide: boolean) {
+    setEditTemplate(null);
+    setCreatingTenantWide(tenantWide);
+    setDialogOpen(true);
+  }
+
+  function openEdit(t: MessageTemplate) {
+    setEditTemplate(t);
+    setCreatingTenantWide(t.branch_id === null);
+    setDialogOpen(true);
+  }
+
+  const branchTemplates = templates.filter((t) => t.branch_id !== null);
+  const globalTemplates = templates.filter((t) => t.branch_id === null);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-sm font-semibold">Plantillas de WhatsApp</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Plantillas aprobadas en Meta Business Manager. Se usan cuando la ventana de 24 h está cerrada.
+          </p>
+        </div>
+        <Button size="sm" className="gap-1.5 shrink-0" onClick={() => openCreate(false)}>
+          <Plus className="h-3.5 w-3.5" />
+          Nueva
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Cargando plantillas…
+        </div>
+      ) : (
+        <>
+          {/* Branch-specific */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Esta sucursal</p>
+            {branchTemplates.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Sin plantillas de esta sucursal aún.</p>
+            ) : (
+              <TemplateTable
+                templates={branchTemplates}
+                onEdit={openEdit}
+                onDeactivate={(id) => deactivateMutation.mutate(id)}
+                onReactivate={(id) => reactivateMutation.mutate(id)}
+              />
+            )}
+          </div>
+
+          {/* Global (tenant-wide) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Globales (todas las sucursales)</p>
+              {isAdmin && (
+                <button
+                  onClick={() => openCreate(true)}
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                >
+                  <Plus className="h-3 w-3" /> Agregar global
+                </button>
+              )}
+            </div>
+            {globalTemplates.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Sin plantillas globales aún.</p>
+            ) : (
+              <TemplateTable
+                templates={globalTemplates}
+                onEdit={isAdmin ? openEdit : undefined}
+                onDeactivate={isAdmin ? (id) => deactivateMutation.mutate(id) : undefined}
+                onReactivate={isAdmin ? (id) => reactivateMutation.mutate(id) : undefined}
+              />
+            )}
+          </div>
+        </>
+      )}
+
+      <TemplateDialog
+        open={dialogOpen}
+        template={editTemplate}
+        branchId={branchId}
+        isTenantWide={creatingTenantWide}
+        onClose={() => { setDialogOpen(false); setEditTemplate(null); }}
+      />
+    </div>
+  );
+}
+
+function TemplateTable({
+  templates,
+  onEdit,
+  onDeactivate,
+  onReactivate,
+}: {
+  templates: MessageTemplate[];
+  onEdit?: (t: MessageTemplate) => void;
+  onDeactivate?: (id: string) => void;
+  onReactivate?: (id: string) => void;
+}) {
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/30">
+            <th className="text-left px-3 py-2 text-xs font-semibold text-muted-foreground">Nombre</th>
+            <th className="text-left px-3 py-2 text-xs font-semibold text-muted-foreground hidden sm:table-cell">Categoría</th>
+            <th className="text-left px-3 py-2 text-xs font-semibold text-muted-foreground hidden md:table-cell">Idioma</th>
+            <th className="text-right px-3 py-2 text-xs font-semibold text-muted-foreground">Acciones</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {templates.map((t) => (
+            <tr key={t.id} className={cn("transition-colors", t.is_active ? "hover:bg-muted/20" : "opacity-50 bg-muted/10")}>
+              <td className="px-3 py-2.5">
+                <span className="font-mono text-xs font-medium">{t.name}</span>
+                {!t.is_active && (
+                  <span className="ml-1.5 text-[9px] font-semibold uppercase bg-muted text-muted-foreground px-1 py-0.5 rounded">
+                    Inactiva
+                  </span>
+                )}
+              </td>
+              <td className="px-3 py-2.5 hidden sm:table-cell">
+                <span className="text-xs text-muted-foreground">{t.category}</span>
+              </td>
+              <td className="px-3 py-2.5 hidden md:table-cell">
+                <span className="text-xs font-mono text-muted-foreground">{t.language}</span>
+              </td>
+              <td className="px-3 py-2.5">
+                <div className="flex items-center justify-end gap-2">
+                  {onEdit && (
+                    <button
+                      onClick={() => onEdit(t)}
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                  )}
+                  {t.is_active && onDeactivate && (
+                    <button
+                      onClick={() => onDeactivate(t.id)}
+                      className="text-xs text-muted-foreground hover:text-danger flex items-center gap-1 transition-colors"
+                      title="Desactivar"
+                    >
+                      <EyeOff className="h-3 w-3" />
+                    </button>
+                  )}
+                  {!t.is_active && onReactivate && (
+                    <button
+                      onClick={() => onReactivate(t.id)}
+                      className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
+                      title="Reactivar"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ╔══════════════════════════════════════════════════════════════════════════════╗
 // ║  TAB: WHATSAPP / META LEAD ADS (código existente movido aquí)              ║
 // ╚══════════════════════════════════════════════════════════════════════════════╝
 
@@ -795,7 +1128,7 @@ function WhatsAppTab({ branchId, canManage }: { branchId: string; canManage: boo
 export default function Settings() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = (searchParams.get("tab") ?? "bot") as "bot" | "kb" | "whatsapp" | "metas" | "builder";
+  const activeTab = (searchParams.get("tab") ?? "bot") as "bot" | "kb" | "whatsapp" | "plantillas" | "metas" | "builder";
   const isOwner = user?.role === "owner" || user?.role === "platform_owner";
   const canManage = user?.role === "owner" || user?.role === "it" || user?.role === "gerente";
 
@@ -871,9 +1204,10 @@ export default function Settings() {
         <p className="text-sm text-muted-foreground py-4">No se encontraron sucursales en tu cuenta.</p>
       ) : (
         <div className="rounded-xl border border-border bg-card p-5 shadow-card">
-          {activeTab === "bot"      && <BotTab branchId={branchId} />}
-          {activeTab === "kb"       && <KBTab branchId={branchId} />}
-          {activeTab === "whatsapp" && <WhatsAppTab branchId={branchId} canManage={canManage} />}
+          {activeTab === "bot"        && <BotTab branchId={branchId} />}
+          {activeTab === "kb"         && <KBTab branchId={branchId} />}
+          {activeTab === "whatsapp"   && <WhatsAppTab branchId={branchId} canManage={canManage} />}
+          {activeTab === "plantillas" && <TemplatesTab branchId={branchId} isAdmin={isOwner || user?.role === "it"} />}
         </div>
       )}
     </div>

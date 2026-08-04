@@ -29,6 +29,7 @@ from app.models.conversation import (
 )
 from app.core.config import settings
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
+from app.models.message_template import MessageTemplate
 from app.models.tenant import Branch
 from app.models.user import User, UserRole  # noqa: F401  (also used by get_current_user)
 from app.services.whatsapp import WhatsAppService
@@ -576,6 +577,78 @@ async def send_message(
             logger.exception("send_message: WA delivery failed for lead %s", lead_id)
     else:
         logger.warning("send_message: branch %s has no WA credentials", lead.branch_id)
+
+    await db.commit()
+    await db.refresh(msg)
+    return MessageOut.model_validate(msg)
+
+
+class SendTemplateBody(BaseModel):
+    template_id: uuid.UUID
+
+
+@router.post("/{lead_id}/send-template", response_model=MessageOut, status_code=201)
+async def send_template(
+    lead_id: uuid.UUID,
+    body: SendTemplateBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MessageOut:
+    """Send a pre-approved WhatsApp template message.
+
+    Unlike free-text messages, templates bypass the 24h service window.
+    The template must belong to the same tenant as the lead, and if it is
+    branch-scoped it must match the lead's branch.
+    """
+    lead = await _get_lead_accessible(db, lead_id, current_user)
+
+    tmpl = await db.get(MessageTemplate, body.template_id)
+    if not tmpl or tmpl.tenant_id != lead.tenant_id:
+        raise HTTPException(status_code=404, detail="Plantilla no encontrada")
+    if tmpl.branch_id is not None and tmpl.branch_id != lead.branch_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="La plantilla no pertenece a la sucursal del lead",
+        )
+
+    conversation = await _get_active_conversation(db, lead_id)
+    if conversation is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El lead no tiene conversación activa",
+        )
+
+    preview = tmpl.body_preview or tmpl.name
+    msg = Message(
+        conversation_id=conversation.id,
+        role=MessageRole.ASSISTANT,
+        content=f"[Plantilla: {tmpl.name}] {preview}",
+        sent_by_user_id=current_user.id,
+    )
+    db.add(msg)
+    db.add(LeadActivity(
+        lead_id=lead.id,
+        tenant_id=lead.tenant_id,
+        actor_id=current_user.id,
+        activity_type=ActivityType.REPLY,
+        payload={"preview": f"[Plantilla] {tmpl.name}", "template_id": str(tmpl.id)},
+    ))
+    await db.flush()
+
+    branch = await db.get(Branch, lead.branch_id)
+    if branch and branch.wa_phone_number_id and branch.wa_token:
+        try:
+            await _whatsapp.send_template_message(
+                to_phone=lead.wa_phone,
+                template_name=tmpl.name,
+                language=tmpl.language,
+                phone_number_id=branch.wa_phone_number_id,
+                token=branch.wa_token,
+            )
+        except Exception:
+            logger.exception("send_template: WA delivery failed for lead %s", lead_id)
+    else:
+        logger.warning("send_template: branch %s has no WA credentials", lead.branch_id)
 
     await db.commit()
     await db.refresh(msg)

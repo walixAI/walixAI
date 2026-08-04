@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import activities, agents, ai, ai_copilot, auth, automations, billing, billing_webhook, branches, contacts, dashboard, deals, finance, goals, health, kb, leads, metrics, onboarding, pipeline, pipelines, platform, profitability, saved_views, support, tags, tasks, tenant, walix_builder, webhooks
+from app.api import activities, agents, ai, ai_copilot, auth, automations, billing, billing_webhook, branches, contacts, dashboard, deals, finance, goals, health, kb, leads, message_templates, metrics, onboarding, pipeline, pipelines, platform, profitability, saved_views, support, tags, tasks, tenant, walix_builder, webhooks
 from app.api.industry_onboarding import onboarding_router as industry_onboarding_router
 from app.api.industry_onboarding import settings_router as industry_settings_router
 from app.api.users import team_router, users_router
@@ -90,6 +90,8 @@ app.include_router(finance.router, prefix="/api")              # Metas/Gastos
 app.include_router(goals.router, prefix="/api")                # Metas Gen2
 app.include_router(profitability.router, prefix="/api")        # Rentabilidad / run-rate
 app.include_router(walix_builder.router, prefix="/api")        # B2: /api/ai/builder/*
+app.include_router(message_templates.branch_templates_router, prefix="/api")
+app.include_router(message_templates.templates_router, prefix="/api")
 app.include_router(health.router)  # /health — no prefix, used by deploy smoke tests
 
 
