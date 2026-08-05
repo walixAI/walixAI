@@ -131,12 +131,13 @@ export default function Pipeline() {
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
-  const closingThisMonth = activeDeals
-    .filter((d) => d.expectedCloseDate && new Date(d.expectedCloseDate) >= startOfMonth && new Date(d.expectedCloseDate) < endOfMonth)
+  // Deals ya cerrados (ganados) este mes — updatedAt cae en el mes actual
+  const closingThisMonth = deals
+    .filter((d) => d.isWon && new Date(d.updatedAt) >= startOfMonth && new Date(d.updatedAt) < endOfMonth)
     .reduce((s, d) => s + d.amount, 0);
 
-  const closingPrevMonth = filtered
-    .filter((d) => d.expectedCloseDate && new Date(d.expectedCloseDate) >= startOfPrevMonth && new Date(d.expectedCloseDate) < startOfMonth)
+  const closingPrevMonth = deals
+    .filter((d) => d.isWon && new Date(d.updatedAt) >= startOfPrevMonth && new Date(d.updatedAt) < startOfMonth)
     .reduce((s, d) => s + d.amount, 0);
 
   const closingDeltaPct =

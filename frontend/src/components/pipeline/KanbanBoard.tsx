@@ -7,7 +7,7 @@ import {
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { toast } from "sonner";
 import {
-  formatMXN, useUpdateDealStage,
+  useUpdateDealStage,
   type PipelineDeal, type PipelineStage,
 } from "@/lib/queries/pipeline";
 import { KanbanColumn } from "./KanbanColumn";
@@ -63,48 +63,23 @@ export function KanbanBoard(props: Props) {
     );
   }
 
-  const totalPipeline = deals.reduce((s, d) => s + d.amount, 0);
-
   return (
     <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
-      {/* Contenedor del board con ALTURA FIJA relativa al viewport.
-          Ajusta el sustraendo (260px) si tu layout tiene más/menos chrome arriba. */}
-      <div className="flex flex-col h-[calc(100vh-260px)] min-h-[420px]">
-        {/* Carril de columnas: scroll HORIZONTAL aquí; el vertical vive dentro de cada columna. */}
-        <div className="flex-1 min-h-0 flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
-          {stages.map((stage) => (
-            <KanbanColumn
-              key={stage.id}
-              stage={stage}
-              allStages={stages}
-              deals={deals.filter((d) => d.stageId === stage.id)}
-              contactName={props.contactName}
-              contactColor={props.contactColor}
-              contactLastActivityAt={props.contactLastActivityAt}
-              onOpenDeal={props.onOpenDeal}
-              onAddDeal={props.onAddDeal}
-              onRequestLost={props.onRequestLost}
-            />
-          ))}
-        </div>
-
-        {/* Footer de totales por etapa (no se desplaza con el scroll vertical de las columnas). */}
-        <div className="shrink-0 -mx-6 px-6 py-2 bg-slate-800 text-white border-t border-slate-700 mt-2">
-          <div className="flex gap-3 overflow-x-auto items-center">
-            {stages.map((stage) => {
-              const total = deals.filter((d) => d.stageId === stage.id).reduce((s, d) => s + d.amount, 0);
-              return (
-                <div key={stage.id} className="w-[280px] shrink-0 text-xs">
-                  <span className="text-slate-400">{stage.name}: </span>
-                  <span className="font-semibold">{formatMXN(total)}</span>
-                </div>
-              );
-            })}
-            <div className="ml-auto pl-4 border-l border-slate-600 text-sm font-bold whitespace-nowrap">
-              Total pipeline: {formatMXN(totalPipeline)}
-            </div>
-          </div>
-        </div>
+      <div className="h-[calc(100vh-260px)] min-h-[420px] flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+        {stages.map((stage) => (
+          <KanbanColumn
+            key={stage.id}
+            stage={stage}
+            allStages={stages}
+            deals={deals.filter((d) => d.stageId === stage.id)}
+            contactName={props.contactName}
+            contactColor={props.contactColor}
+            contactLastActivityAt={props.contactLastActivityAt}
+            onOpenDeal={props.onOpenDeal}
+            onAddDeal={props.onAddDeal}
+            onRequestLost={props.onRequestLost}
+          />
+        ))}
       </div>
 
       <DragOverlay>
