@@ -31,14 +31,14 @@ export function useDashboardKpis() {
     queryFn: async (): Promise<KpiBundle> => {
       const r = await apiRequest<any>("/api/dashboard/kpis");
       return {
-        pipelineValue: Number(r.pipeline_value ?? 0),
-        pipelineDeltaPct: Number(r.pipeline_delta_pct ?? 0),
-        activeDeals: Number(r.active_deals ?? 0),
-        staleDeals: Number(r.stale_deals ?? 0),
-        messagesToday: Number(r.messages_today ?? 0),
-        messagesUnanswered: Number(r.messages_unanswered ?? 0),
-        closeRate: Number(r.close_rate ?? 0),
-        closeRateDelta: Number(r.close_rate_delta ?? 0),
+        pipelineValue: Number(r.pipelineValue ?? 0),
+        pipelineDeltaPct: Number(r.pipelineDeltaPct ?? 0),
+        activeDeals: Number(r.activeDeals ?? 0),
+        staleDeals: Number(r.staleDeals ?? 0),
+        messagesToday: Number(r.messagesToday ?? 0),
+        messagesUnanswered: Number(r.messagesUnanswered ?? 0),
+        closeRate: Number(r.closeRate ?? 0),
+        closeRateDelta: Number(r.closeRateDelta ?? 0),
       };
     },
   });
