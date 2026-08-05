@@ -26,9 +26,9 @@ from app.models.conversation import (
 )
 from app.models.agent import AgentSuggestion
 from app.models.ai_memory import AIMemoryEvent, AIOutcomeFeedback
-from app.models.lead import Lead, LeadStatus
+from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.tenant import Branch
-from app.services.whatsapp import WhatsAppService
+from app.services.whatsapp import WhatsAppService, _normalize_mx_phone
 
 logger = logging.getLogger(__name__)
 
@@ -64,32 +64,65 @@ async def _get_or_create_lead(
     branch_id: uuid.UUID,
     tenant_id: uuid.UUID,
 ) -> Lead:
+    # Meta delivers MX mobiles as 521XXXXXXXXXX; leads may be stored as 52XXXXXXXXXX.
+    # Check both variants so we never create duplicates from format differences.
+    normalized = _normalize_mx_phone(wa_phone)
+    phones = list({wa_phone, normalized})
+
+    # 1. Same branch — exact match first.
     result = await db.execute(
-        select(Lead).where(Lead.wa_phone == wa_phone, Lead.branch_id == branch_id)
+        select(Lead).where(
+            Lead.wa_phone.in_(phones),
+            Lead.branch_id == branch_id,
+            Lead.deleted_at.is_(None),
+        )
     )
     lead = result.scalar_one_or_none()
-    if lead is None:
-        lead = Lead(wa_phone=wa_phone, branch_id=branch_id, tenant_id=tenant_id)
-        db.add(lead)
-        await db.flush()
+    if lead is not None:
+        return lead
+
+    # 2. Any other branch of the same tenant — recognize returning contacts.
+    result = await db.execute(
+        select(Lead).where(
+            Lead.wa_phone.in_(phones),
+            Lead.tenant_id == tenant_id,
+            Lead.deleted_at.is_(None),
+        ).limit(1)
+    )
+    lead = result.scalar_one_or_none()
+    if lead is not None:
+        return lead
+
+    # 3. New contact — create in current branch.
+    lead = Lead(
+        wa_phone=wa_phone,
+        branch_id=branch_id,
+        tenant_id=tenant_id,
+        source=LeadSource.WHATSAPP_INBOUND,
+        prospection_source="whatsapp_inbound",
+    )
+    db.add(lead)
+    await db.flush()
     return lead
 
 
 async def _get_or_create_active_conversation(
     db: AsyncSession,
     lead: Lead,
+    branch_id: uuid.UUID,
 ) -> Conversation:
     result = await db.execute(
         select(Conversation)
         .where(
             Conversation.lead_id == lead.id,
+            Conversation.branch_id == branch_id,
             Conversation.status != ConversationStatus.CLOSED,
         )
         .order_by(Conversation.started_at.desc())
     )
     conv = result.scalars().first()
     if conv is None:
-        conv = Conversation(lead_id=lead.id, branch_id=lead.branch_id)
+        conv = Conversation(lead_id=lead.id, branch_id=branch_id)
         db.add(conv)
         await db.flush()
     return conv
@@ -177,7 +210,7 @@ async def _process_message_inner(
         logger.info("process_message: lead=%s", lead.id)
 
         # 3. Conversation
-        conversation = await _get_or_create_active_conversation(db, lead)
+        conversation = await _get_or_create_active_conversation(db, lead, branch_id)
         logger.info("process_message: conversation=%s", conversation.id)
 
         # 4. Persist the user message regardless of handler so the agent can

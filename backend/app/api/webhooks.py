@@ -21,7 +21,7 @@ from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.user import User
 from app.models.meta_ads import MetaLeadConfig
 from app.models.tenant import Branch
-from app.services.whatsapp import WhatsAppService
+from app.services.whatsapp import WhatsAppService, _normalize_mx_phone
 
 _CODE_RE = re.compile(r"^\d{6}$")
 _CONFIRM_WORDS = frozenset({"sí", "si", "confirmar"})
