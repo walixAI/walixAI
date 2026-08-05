@@ -247,27 +247,39 @@ async def get_pipeline_stages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict]:
+    is_multi_branch = current_user.role in _MULTI_BRANCH_ROLES
+
     if pipeline_id is not None:
         p = await db.get(Pipeline, pipeline_id)
         if p is None or p.tenant_id != current_user.tenant_id:
             raise HTTPException(status_code=404, detail="Pipeline no encontrado")
-        resolved_id = pipeline_id
+        stage_filter = [
+            PipelineStage.tenant_id == current_user.tenant_id,
+            PipelineStage.pipeline_id == pipeline_id,
+            PipelineStage.is_archived.is_(False),
+        ]
+    elif is_multi_branch:
+        # Owner/IT: all active stages across all branches of the tenant
+        stage_filter = [
+            PipelineStage.tenant_id == current_user.tenant_id,
+            PipelineStage.is_archived.is_(False),
+        ]
     else:
         resolved_id = await resolve_default_pipeline_id(
             current_user.tenant_id, db, user_branch_id=current_user.branch_id
         )
-
-    if resolved_id is None:
-        return []
+        if resolved_id is None:
+            return []
+        stage_filter = [
+            PipelineStage.tenant_id == current_user.tenant_id,
+            PipelineStage.pipeline_id == resolved_id,
+            PipelineStage.is_archived.is_(False),
+        ]
 
     stages = (
         await db.execute(
             select(PipelineStage)
-            .where(
-                PipelineStage.tenant_id == current_user.tenant_id,
-                PipelineStage.pipeline_id == resolved_id,
-                PipelineStage.is_archived.is_(False),
-            )
+            .where(*stage_filter)
             .order_by(PipelineStage.order_index)
         )
     ).scalars().all()
@@ -292,18 +304,23 @@ async def get_pipeline_deals(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[DealKanbanItem]:
+    is_multi_branch = current_user.role in _MULTI_BRANCH_ROLES
+
     if pipeline_id is not None:
         p = await db.get(Pipeline, pipeline_id)
         if p is None or p.tenant_id != current_user.tenant_id:
             raise HTTPException(status_code=404, detail="Pipeline no encontrado")
-        resolved_id = pipeline_id
+        pipeline_filter = PipelineStage.pipeline_id == pipeline_id
+    elif is_multi_branch:
+        # Owner/IT: all deals in the tenant regardless of pipeline/branch
+        pipeline_filter = None
     else:
         resolved_id = await resolve_default_pipeline_id(
             current_user.tenant_id, db, user_branch_id=current_user.branch_id
         )
-
-    if resolved_id is None:
-        return []
+        if resolved_id is None:
+            return []
+        pipeline_filter = PipelineStage.pipeline_id == resolved_id
 
     # Subquery: MAX(created_at) de lead_activities por lead_id
     last_activity_sq = (
@@ -316,22 +333,21 @@ async def get_pipeline_deals(
         .subquery()
     )
 
-    rows = (
-        await db.execute(
-            select(
-                Deal,
-                PipelineStage.name.label("stage_name"),
-                last_activity_sq.c.last_at.label("contact_last_activity_at"),
-            )
-            .join(PipelineStage, Deal.pipeline_stage_id == PipelineStage.id)
-            .outerjoin(last_activity_sq, Deal.lead_id == last_activity_sq.c.lead_id)
-            .where(
-                Deal.tenant_id == current_user.tenant_id,
-                PipelineStage.pipeline_id == resolved_id,
-            )
-            .order_by(Deal.updated_at.desc())
+    base_query = (
+        select(
+            Deal,
+            PipelineStage.name.label("stage_name"),
+            last_activity_sq.c.last_at.label("contact_last_activity_at"),
         )
-    ).fetchall()
+        .join(PipelineStage, Deal.pipeline_stage_id == PipelineStage.id)
+        .outerjoin(last_activity_sq, Deal.lead_id == last_activity_sq.c.lead_id)
+        .where(Deal.tenant_id == current_user.tenant_id)
+        .order_by(Deal.updated_at.desc())
+    )
+    if pipeline_filter is not None:
+        base_query = base_query.where(pipeline_filter)
+
+    rows = (await db.execute(base_query)).fetchall()
 
     result: list[DealKanbanItem] = []
     for deal, stage_name, last_at in rows:

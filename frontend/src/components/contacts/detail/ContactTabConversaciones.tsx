@@ -110,9 +110,7 @@ export function ContactTabConversaciones({ contact }: ContactTabConversacionesPr
         type="button"
         className="w-full text-left rounded-xl border border-border bg-card p-3 space-y-2 hover:bg-muted/40 transition-colors"
         onClick={() => {
-          if (conversation?.conversation_id) {
-            navigate(`/whatsapp?conversation=${conversation.conversation_id}`);
-          }
+          navigate(`/whatsapp?leadId=${contactId}`);
         }}
       >
         <div className="flex items-center justify-between gap-2">
