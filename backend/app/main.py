@@ -30,15 +30,24 @@ app = FastAPI(
 )
 
 # FRONTEND_URL puede ser una lista separada por comas; limpiamos espacios y diagonales finales
-origins = []
+_KNOWN_ORIGINS = [
+    "https://walix-ai.vercel.app",
+    "https://walix.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+origins = list(_KNOWN_ORIGINS)
 if settings.FRONTEND_URL:
-    origins = [o.strip().rstrip("/") for o in settings.FRONTEND_URL.split(",")]
+    for o in settings.FRONTEND_URL.split(","):
+        cleaned = o.strip().rstrip("/")
+        if cleaned and cleaned not in origins:
+            origins.append(cleaned)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    # Permite cualquier preview/deploy de Vercel del proyecto walix
-    allow_origin_regex=r"https://walix[a-z0-9\-]*\.vercel\.app",
+    # Permite previews de Vercel: walix-*.vercel.app
+    allow_origin_regex=r"https://walix[a-z0-9-]*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

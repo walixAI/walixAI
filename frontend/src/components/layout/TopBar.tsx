@@ -81,12 +81,14 @@ export function TopBar() {
 
   const mutation = useMutation({
     mutationFn: api.sendAICommand,
+    retry: 1,
     onSuccess: (data) => {
       addMessage("assistant", data.response_text, data.suggested_actions, data.action_data);
       setLoading(false);
     },
-    onError: () => {
-      addMessage("assistant", "Ocurrió un error al procesar tu instrucción. Intenta de nuevo.", [], null);
+    onError: (err: Error) => {
+      const detail = err?.message ?? "desconocido";
+      addMessage("assistant", `Error: ${detail}`, [], null);
       setLoading(false);
     },
   });
