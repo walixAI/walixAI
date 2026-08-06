@@ -268,9 +268,28 @@ async def list_leads(
     total_result = await db.execute(select(func.count()).select_from(base.subquery()))
     total = total_result.scalar_one()
 
-    rows = await db.execute(
-        base.order_by(Lead.created_at.desc()).limit(limit).offset(offset)
-    )
+    # WhatsApp inbox (all_dates=True): sort by last inbound message so active
+    # conversations bubble to the top regardless of when the lead was created.
+    if all_dates:
+        last_inbound_sq = (
+            select(
+                Conversation.lead_id,
+                func.max(Message.created_at).label("last_at"),
+            )
+            .join(Message, Message.conversation_id == Conversation.id)
+            .where(Message.role == MessageRole.USER)
+            .group_by(Conversation.lead_id)
+            .subquery("last_inbound")
+        )
+        base_ordered = (
+            base
+            .outerjoin(last_inbound_sq, Lead.id == last_inbound_sq.c.lead_id)
+            .order_by(last_inbound_sq.c.last_at.desc().nulls_last(), Lead.created_at.desc())
+        )
+    else:
+        base_ordered = base.order_by(Lead.created_at.desc())
+
+    rows = await db.execute(base_ordered.limit(limit).offset(offset))
     leads = rows.scalars().all()
 
     # Single query — no N+1 — to get last inbound message timestamp per lead.

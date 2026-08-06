@@ -46,7 +46,7 @@ export default function Whatsapp() {
   // Fetch all leads — 5 s refresh for real-time inbox
   const { data: leadsData, isLoading: leadsLoading } = useQuery({
     queryKey: ["leads", "whatsapp"],
-    queryFn: () => api.listLeads({ all: true }),
+    queryFn: () => api.listLeads({ all: true, limit: 200 }),
     refetchInterval: 5_000,
   });
 

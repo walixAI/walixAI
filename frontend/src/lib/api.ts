@@ -1054,11 +1054,12 @@ export const api = {
   },
 
   // Leads
-  async listLeads(params?: { all?: boolean; status?: LeadStatus; date?: string }): Promise<LeadListResponse> {
+  async listLeads(params?: { all?: boolean; status?: LeadStatus; date?: string; limit?: number }): Promise<LeadListResponse> {
     const qs = new URLSearchParams();
     if (params?.all != null) qs.set("all", String(params.all));
     if (params?.status) qs.set("status", params.status);
     if (params?.date) qs.set("date", params.date);
+    if (params?.limit != null) qs.set("limit", String(params.limit));
     const q = qs.toString() ? `?${qs}` : "";
     return request(`/api/leads${q}`);
   },
