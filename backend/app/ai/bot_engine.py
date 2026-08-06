@@ -64,18 +64,19 @@ async def _get_or_create_lead(
     branch_id: uuid.UUID,
     tenant_id: uuid.UUID,
 ) -> Lead:
-    # Meta delivers MX mobiles as 521XXXXXXXXXX; leads may be stored as 52XXXXXXXXXX.
-    # Check both variants so we never create duplicates from format differences.
-    normalized = _normalize_mx_phone(wa_phone)
-    phones = list({wa_phone, normalized})
+    # Always work with the canonical format (52XXXXXXXXXX for MX mobiles).
+    # Meta delivers 521XXXXXXXXXX; searching both variants covers existing rows
+    # that were saved before this normalization was enforced.
+    canonical = _normalize_mx_phone(wa_phone)
+    phones = list({wa_phone, canonical})
 
-    # 1. Same branch — exact match first.
+    # 1. Same branch — most recent lead wins when duplicates exist.
     result = await db.execute(
         select(Lead).where(
             Lead.wa_phone.in_(phones),
             Lead.branch_id == branch_id,
             Lead.deleted_at.is_(None),
-        ).limit(1)
+        ).order_by(Lead.created_at.desc()).limit(1)
     )
     lead = result.scalar_one_or_none()
     if lead is not None:
@@ -87,15 +88,15 @@ async def _get_or_create_lead(
             Lead.wa_phone.in_(phones),
             Lead.tenant_id == tenant_id,
             Lead.deleted_at.is_(None),
-        ).limit(1)
+        ).order_by(Lead.created_at.desc()).limit(1)
     )
     lead = result.scalar_one_or_none()
     if lead is not None:
         return lead
 
-    # 3. New contact — create in current branch.
+    # 3. New contact — always store the canonical phone format.
     lead = Lead(
-        wa_phone=wa_phone,
+        wa_phone=canonical,
         branch_id=branch_id,
         tenant_id=tenant_id,
         source=LeadSource.WHATSAPP_INBOUND,
