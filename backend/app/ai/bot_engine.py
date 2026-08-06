@@ -163,9 +163,12 @@ async def get_conversation_context(
     Reads from Redis first; falls back to the last N DB messages when the
     Redis key has expired or is missing (e.g. after a Railway redeploy).
     """
-    raw = await redis_client.get(f"conv:{conversation_id}")
-    if raw:
-        return json.loads(raw)
+    try:
+        raw = await redis_client.get(f"conv:{conversation_id}")
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        logger.warning("get_conversation_context: Redis unavailable, falling back to DB")
 
     result = await db.execute(
         select(Message)
@@ -405,12 +408,15 @@ async def _process_message_inner(
         ]
         updated_history = updated_history[-CONV_HISTORY_MAX_MESSAGES:]
 
-        # 13. Persist history in Redis, 24h TTL.
-        await redis_client.set(
-            history_key,
-            json.dumps(updated_history),
-            ex=CONV_HISTORY_TTL_SECONDS,
-        )
+        # 13. Persist history in Redis, 24h TTL (best-effort; DB is the source of truth).
+        try:
+            await redis_client.set(
+                history_key,
+                json.dumps(updated_history),
+                ex=CONV_HISTORY_TTL_SECONDS,
+            )
+        except Exception:
+            logger.warning("bot_engine: Redis unavailable, conversation history not cached")
 
         # 14. Send the reply via WhatsApp using the branch's credentials.
         branch = await db.get(Branch, branch_id)
