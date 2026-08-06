@@ -75,7 +75,7 @@ async def _get_or_create_lead(
             Lead.wa_phone.in_(phones),
             Lead.branch_id == branch_id,
             Lead.deleted_at.is_(None),
-        )
+        ).limit(1)
     )
     lead = result.scalar_one_or_none()
     if lead is not None:
