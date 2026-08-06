@@ -2,23 +2,18 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Kanban, Users, MessageCircle, BarChart3,
-  Settings, Zap, TrendingUp, BarChart2, ClipboardList, ListTodo,
+  Settings, Zap, ClipboardList, ListTodo,
 } from "lucide-react";
 import {
   CommandDialog, CommandEmpty, CommandGroup,
   CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
 import { useTenantLabels } from "@/hooks/useTenantLabels";
-import { useAuth } from "@/hooks/useAuth";
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const { entities, deals } = useTenantLabels();
-  const { user } = useAuth();
-
-  const isOwner = user?.role === "owner" || user?.role === "platform_owner";
-  const roiVisible = isOwner || user?.role === "gerente" || user?.role === "doctor";
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -45,9 +40,7 @@ export function CommandPalette() {
     { label: "WhatsApp",          path: "/whatsapp",     icon: MessageCircle },
     { label: "Reportes",          path: "/reports",      icon: BarChart3 },
     { label: "Automatizaciones",  path: "/automations",  icon: Zap },
-    { label: "Forecast",          path: "/forecast",     icon: TrendingUp },
     { label: "Configuración",     path: "/settings",     icon: Settings },
-    ...(roiVisible ? [{ label: "ROI", path: "/roi", icon: BarChart2 }] : []),
   ];
 
   return (

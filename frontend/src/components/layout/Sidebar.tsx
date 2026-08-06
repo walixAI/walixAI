@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Users, Users2, MessageCircle, BarChart3,
-  Settings, Kanban, TrendingUp, Zap, CreditCard, BarChart2, Bot, BookOpen, ClipboardList, ListTodo,
+  Settings, Kanban, Zap, CreditCard, Bot, BookOpen, ClipboardList, ListTodo,
   Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -19,16 +19,12 @@ export function Sidebar() {
   const isOwner = user?.role === "owner" || user?.role === "platform_owner";
   const canManageBot = isOwner || user?.role === "gerente" || user?.role === "it";
 
-  const roiVisible = isOwner || user?.role === "gerente" || user?.role === "doctor";
-
   const MAIN_ITEMS = [
     { to: "/dashboard",   label: "Dashboard",       icon: LayoutDashboard },
     { to: "/mi-dia",      label: "Mi Día",           icon: ClipboardList },
     { to: "/tasks",       label: "Tareas",           icon: ListTodo },
-    ...(roiVisible ? [{ to: "/roi", label: "ROI", icon: BarChart2 }] : []),
     { to: "/pipeline",    label: "Pipeline",         icon: Kanban },
     { to: "/contacts",    label: entities,            icon: Users },
-    { to: "/forecast",    label: "Forecast",         icon: TrendingUp },
     { to: "/finance",     label: "Finanzas",          icon: Wallet },
     { to: "/automations", label: "Automatizaciones", icon: Zap },
     { to: "/whatsapp",    label: "WhatsApp",         icon: MessageCircle, badge: true },
