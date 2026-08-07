@@ -38,15 +38,6 @@ CLAUDE_MAX_TOKENS = 300
 CONV_HISTORY_TTL_SECONDS = 86_400  # 24h
 CONV_HISTORY_MAX_MESSAGES = 8
 
-ESCALATION_PHRASES: tuple[str, ...] = (
-    "te voy a conectar con",
-    "voy a conectarte con",
-    "conectarte con un asesor",
-    "un asesor te contactará",
-    "un especialista te contactará",
-    "te contactará en breve",
-    "escalando tu caso",
-)
 
 anthropic_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 whatsapp_service = WhatsAppService()
@@ -128,10 +119,6 @@ async def _get_or_create_active_conversation(
         await db.flush()
     return conv
 
-
-def _needs_escalation(text: str) -> bool:
-    lowered = text.lower()
-    return any(phrase in lowered for phrase in ESCALATION_PHRASES)
 
 
 def get_lead_profile(lead: Lead, config: dict[str, Any]) -> str:
@@ -385,17 +372,9 @@ async def _process_message_inner(
             )
         )
 
-        # 11. Escalation check on the assistant's reply.
-        if _needs_escalation(assistant_text):
-            conversation.status = ConversationStatus.HANDOFF
-            conversation.current_handler = ConversationHandler.HUMAN
-            lead.status = LeadStatus.ESCALADO
-            logger.info(
-                "Escalating conversation %s (lead %s) to human",
-                conversation.id,
-                lead.id,
-            )
-
+        # 11. Escalation is handled exclusively by qualify_lead (step 15).
+        #     Phrase-based detection removed — it was too eager and escalated on
+        #     informational responses that happened to mention connecting to an advisor.
         await db.commit()
 
         # 11b. Trigger prediction scoring as a non-blocking background task.
