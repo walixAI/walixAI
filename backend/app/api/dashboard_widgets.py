@@ -150,14 +150,14 @@ async def _get_panel_or_404(
 
 
 async def _get_active_visible_widgets(
-    user: User, db: AsyncSession
+    user: User, db: AsyncSession, panel_key: str = "principal"
 ) -> list[DashboardWidget]:
     rows = (
         await db.execute(
             select(DashboardWidget)
             .where(
                 DashboardWidget.is_active.is_(True),
-                DashboardWidget.surface == "dashboard",
+                DashboardWidget.surface == panel_key,
             )
             .order_by(DashboardWidget.default_position)
         )
@@ -169,7 +169,7 @@ async def _resolve_layout(
     user: User, db: AsyncSession, panel_key: str = "principal"
 ) -> list[ResolvedLayoutItem]:
     """Cascades user → role → tenant_default → catalog default for a given panel."""
-    widgets = await _get_active_visible_widgets(user, db)
+    widgets = await _get_active_visible_widgets(user, db, panel_key=panel_key)
     widget_map = {w.key: w for w in widgets}
 
     scopes_to_try = [
@@ -236,7 +236,7 @@ async def _validate_and_save_layout(
     all_keys_result = await db.execute(
         select(DashboardWidget.key).where(
             DashboardWidget.is_active.is_(True),
-            DashboardWidget.surface == "dashboard",
+            DashboardWidget.surface == panel_key,
         )
     )
     valid_keys = {row[0] for row in all_keys_result.fetchall()}
@@ -343,7 +343,7 @@ async def delete_panel(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Deletes a custom panel. Only the creator can delete it; system panels are protected."""
+    """Deletes a custom panel. Only the creator can delete it; system panels and panels owned by others are protected."""
     panel = await db.get(DashboardPanel, panel_id)
     if panel is None or panel.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Panel no encontrado")
@@ -352,9 +352,9 @@ async def delete_panel(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Los paneles del sistema no se pueden eliminar")
 
-    if panel.created_by != current_user.id and current_user.role not in _ADMIN_ROLES:
+    if panel.created_by != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Solo el creador o un administrador puede eliminar este panel")
+                            detail="Solo el creador puede eliminar este panel")
 
     await db.delete(panel)
     await db.commit()
@@ -370,7 +370,7 @@ async def list_widgets_catalog(
 ) -> list[WidgetOut]:
     """Returns all active widgets visible to the current user's role."""
     await _get_panel_or_404(current_user.tenant_id, panel, current_user, db)
-    widgets = await _get_active_visible_widgets(current_user, db)
+    widgets = await _get_active_visible_widgets(current_user, db, panel_key=panel)
     return [WidgetOut.model_validate(w) for w in widgets]
 
 
