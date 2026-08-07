@@ -1,6 +1,7 @@
 """Metrics, sentiment, forecast, and pipeline-summary endpoints for Walix."""
 import json
 import logging
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -948,3 +949,328 @@ async def get_desempeno_extra(
         lost_reasons=lost_reasons,
         activity_heatmap=activity_heatmap,
     )
+
+
+# ── Pipeline Intelligence ──────────────────────────────────────────────────────
+
+class HealthSignalOut(BaseModel):
+    label: str
+    value: str
+    tone: str  # "positive" | "negative" | "neutral"
+
+
+class PipelineHealthOut(BaseModel):
+    score: int
+    status: str  # "excellent" | "good" | "warning" | "critical"
+    summary: str
+    signals: list[HealthSignalOut]
+
+
+class ClosingSoonDealOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    amount: float
+    pipeline_name: str
+    stage_name: str
+    owner_name: str | None
+    contact_id: uuid.UUID | None
+    expected_close_date: date | None
+
+
+class RiskOut(BaseModel):
+    title: str
+    severity: str
+    detail: str
+
+
+class PipelineIntelligenceOut(BaseModel):
+    generated_at: datetime
+    pipeline_health: PipelineHealthOut
+    closing_soon: list[ClosingSoonDealOut]
+    risks: list[RiskOut]
+    executive_summary: str
+    source: str  # "live" | "fallback"
+
+
+def _extract_json(text: str) -> dict:
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE)
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if not match:
+        raise ValueError(f"No JSON object found in response: {text[:200]}")
+    return json.loads(match.group())
+
+
+def _health_status(score: int) -> str:
+    if score >= 80:
+        return "excellent"
+    if score >= 60:
+        return "good"
+    if score >= 40:
+        return "warning"
+    return "critical"
+
+
+@router.get("/pipeline-intelligence", response_model=PipelineIntelligenceOut)
+async def get_pipeline_intelligence(
+    branch_id: uuid.UUID | None = Query(None),
+    force_refresh: bool = Query(False),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PipelineIntelligenceOut:
+    """Pipeline health, closing-soon deals, AI risks, and executive summary."""
+    tenant_id = current_user.tenant_id
+
+    # ── Branch resolution ─────────────────────────────────────────────────────
+    if branch_id:
+        if current_user.role not in _MULTI_BRANCH_ROLES and current_user.branch_id != branch_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Sin acceso a esta sucursal")
+        branch_ids = [branch_id]
+    else:
+        branches_result = await db.execute(
+            select(Branch.id).where(Branch.tenant_id == tenant_id, Branch.is_active.is_(True))
+        )
+        branch_ids = list(branches_result.scalars().all())
+    if not branch_ids:
+        branch_ids = []
+
+    # ── Cache check ───────────────────────────────────────────────────────────
+    branch_key = str(branch_id) if branch_id else "all"
+    cache_key = f"pipeline-intel:{tenant_id}:{branch_key}"
+    if not force_refresh and redis_client:
+        try:
+            cached = await redis_client.get(cache_key)
+            if cached:
+                return PipelineIntelligenceOut(**json.loads(cached))
+        except Exception:
+            logger.warning("[pipeline-intel] cache read failed")
+
+    now = datetime.now(timezone.utc)
+    stale_cutoff = now - timedelta(days=14)
+
+    # ── Open deals in scope ───────────────────────────────────────────────────
+    # Deal has no branch_id — filter via lead.branch_id
+    scoped_lead_ids_q = select(Lead.id).where(
+        Lead.tenant_id == tenant_id,
+        Lead.branch_id.in_(branch_ids) if branch_ids else Lead.id.isnot(None),
+        Lead.deleted_at.is_(None),
+    )
+
+    open_deals_result = await db.execute(
+        select(func.count(Deal.id)).where(
+            Deal.tenant_id == tenant_id,
+            Deal.lead_id.in_(scoped_lead_ids_q),
+            Deal.is_won.is_(False),
+            Deal.is_lost.is_(False),
+        )
+    )
+    open_count = int(open_deals_result.scalar_one() or 0)
+
+    # ── Stale deals: last stage change older than 14 days ────────────────────
+    # Proxy: most recent DealStageHistory.changed_at per deal, or Deal.created_at
+    # if no history row exists yet (newly created deals without a stage move).
+    # Deliberately NOT using Deal.updated_at because it is touched by any field
+    # edit (amount, title, notes, etc.), which would create false "active" signals.
+    stale_sql = text("""
+        SELECT COUNT(*) FROM deals d
+        WHERE d.tenant_id = :tenant_id
+          AND d.is_won  = false
+          AND d.is_lost = false
+          AND d.lead_id IN (
+              SELECT id FROM leads
+              WHERE tenant_id = :tenant_id
+                AND branch_id = ANY(:branch_ids)
+                AND deleted_at IS NULL
+          )
+          AND COALESCE(
+              (SELECT MAX(dsh.changed_at)
+               FROM deal_stage_history dsh
+               WHERE dsh.deal_id = d.id AND dsh.tenant_id = :tenant_id),
+              d.created_at
+          ) < :stale_cutoff
+    """)
+    stale_result = await db.execute(stale_sql, {
+        "tenant_id": str(tenant_id),
+        "branch_ids": [str(b) for b in branch_ids] if branch_ids else ["00000000-0000-0000-0000-000000000000"],
+        "stale_cutoff": stale_cutoff,
+    })
+    stale_count = int(stale_result.scalar_one() or 0)
+    stale_pct = stale_count / max(open_count, 1) * 100
+
+    # ── Bottleneck stages: > 10 open deals ───────────────────────────────────
+    stage_counts_result = await db.execute(
+        select(Deal.pipeline_stage_id, func.count(Deal.id).label("cnt"))
+        .where(
+            Deal.tenant_id == tenant_id,
+            Deal.lead_id.in_(scoped_lead_ids_q),
+            Deal.is_won.is_(False),
+            Deal.is_lost.is_(False),
+            Deal.pipeline_stage_id.isnot(None),
+        )
+        .group_by(Deal.pipeline_stage_id)
+        .having(func.count(Deal.id) > 10)
+    )
+    bottleneck_rows = stage_counts_result.fetchall()
+    bottleneck_names: list[str] = []
+    for row in bottleneck_rows:
+        stage = await db.get(PipelineStage, row.pipeline_stage_id)
+        if stage:
+            bottleneck_names.append(stage.name)
+
+    health_score = int(max(0, min(100, round(100 - stale_pct * 0.4 - len(bottleneck_names) * 5))))
+
+    signals: list[HealthSignalOut] = [
+        HealthSignalOut(
+            label="Oportunidades activas",
+            value=str(open_count),
+            tone="positive" if open_count > 0 else "neutral",
+        ),
+        HealthSignalOut(
+            label="Deals estancados (>14 días)",
+            value=f"{stale_count} ({stale_pct:.0f}%)",
+            tone="negative" if stale_count > 0 else "positive",
+        ),
+        HealthSignalOut(
+            label="Etapas con cuello de botella",
+            value=", ".join(bottleneck_names) if bottleneck_names else "Ninguna",
+            tone="negative" if bottleneck_names else "positive",
+        ),
+    ]
+
+    # ── Closing soon: deals in the stage immediately before is_won ───────────
+    # For each pipeline in scope, find the won stage, then the pre-won stage.
+    stages_result = await db.execute(
+        select(PipelineStage)
+        .where(
+            PipelineStage.branch_id.in_(branch_ids) if branch_ids else PipelineStage.id.isnot(None),
+            PipelineStage.is_active.is_(True),
+        )
+        .order_by(PipelineStage.pipeline_id, PipelineStage.order_index)
+    )
+    all_stages = stages_result.scalars().all()
+
+    # Group by pipeline_id
+    from itertools import groupby
+    pipeline_stages: dict[uuid.UUID, list[PipelineStage]] = {}
+    for stage in all_stages:
+        pipeline_stages.setdefault(stage.pipeline_id, []).append(stage)
+
+    pre_won_stage_ids: list[uuid.UUID] = []
+    for _pid, stages in pipeline_stages.items():
+        sorted_stages = sorted(stages, key=lambda s: s.order_index)
+        won_idx = next((i for i, s in enumerate(sorted_stages) if s.is_won), None)
+        if won_idx is not None and won_idx > 0:
+            pre_won_stage_ids.append(sorted_stages[won_idx - 1].id)
+
+    # Fetch pipeline names for stage lookup
+    pipeline_ids = list(pipeline_stages.keys())
+    from app.models.pipeline_group import Pipeline
+    pipeline_names_result = await db.execute(
+        select(Pipeline.id, Pipeline.name).where(Pipeline.id.in_(pipeline_ids))
+    )
+    pipeline_name_map: dict[uuid.UUID, str] = {r.id: r.name for r in pipeline_names_result.fetchall()}
+
+    # Stage → pipeline name
+    stage_pipeline_map: dict[uuid.UUID, uuid.UUID] = {
+        stage.id: stage.pipeline_id for stage in all_stages
+    }
+    stage_name_map: dict[uuid.UUID, str] = {stage.id: stage.name for stage in all_stages}
+
+    closing_soon: list[ClosingSoonDealOut] = []
+    if pre_won_stage_ids:
+        closing_deals_result = await db.execute(
+            select(Deal, User.name.label("owner_name"))
+            .outerjoin(User, Deal.owner_id == User.id)
+            .where(
+                Deal.tenant_id == tenant_id,
+                Deal.pipeline_stage_id.in_(pre_won_stage_ids),
+                Deal.is_won.is_(False),
+                Deal.is_lost.is_(False),
+            )
+            .order_by(Deal.expected_close_date.asc().nulls_last())
+            .limit(10)
+        )
+        for row in closing_deals_result.fetchall():
+            deal = row[0]
+            owner_name = row[1]
+            p_id = stage_pipeline_map.get(deal.pipeline_stage_id)
+            closing_soon.append(
+                ClosingSoonDealOut(
+                    id=deal.id,
+                    name=deal.title,
+                    amount=float(deal.amount or 0),
+                    pipeline_name=pipeline_name_map.get(p_id, "—") if p_id else "—",
+                    stage_name=stage_name_map.get(deal.pipeline_stage_id, "—"),
+                    owner_name=owner_name,
+                    contact_id=deal.lead_id,
+                    expected_close_date=deal.expected_close_date,
+                )
+            )
+
+    # ── AI: risks + executive summary ─────────────────────────────────────────
+    source = "live"
+    executive_summary = "Análisis no disponible."
+    risks: list[RiskOut] = []
+
+    try:
+        bottleneck_list = ", ".join(bottleneck_names) if bottleneck_names else "Ninguna"
+        prompt = (
+            "Eres un analista de ventas senior para un CRM de ventas en México. "
+            "Analiza estas señales del pipeline y genera insights accionables.\n\n"
+            "SEÑALES DEL PIPELINE:\n"
+            f"- Oportunidades abiertas: {open_count}\n"
+            f"- Deals estancados (>14 días sin avanzar de etapa): {stale_count} ({stale_pct:.0f}%)\n"
+            f"- Health score: {health_score}/100\n"
+            f"- Etapas con cuello de botella (>10 deals): {bottleneck_list}\n"
+            f"- Próximas a cerrar (en etapa pre-ganado): {len(closing_soon)} deals\n\n"
+            "Devuelve ÚNICAMENTE un JSON con esta estructura:\n"
+            "{\n"
+            '  "summary": "<resumen ejecutivo 1-2 oraciones, español México, menciona el health score>",\n'
+            '  "risks": [\n'
+            '    {"title": "<≤60 chars>", "severity": "<high|medium|low>", "detail": "<≤120 chars>"},\n'
+            "    ...\n"
+            "  ]\n"
+            "}\n"
+            "Máximo 3 riesgos. Sé específico y accionable."
+        )
+        response = await _anthropic.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        data = _extract_json(response.content[0].text)
+        executive_summary = data.get("summary", executive_summary)
+        risks = [
+            RiskOut(
+                title=r.get("title", ""),
+                severity=r.get("severity", "medium"),
+                detail=r.get("detail", r.get("description", "")),
+            )
+            for r in data.get("risks", [])
+        ]
+    except Exception:
+        logger.exception("[pipeline-intel] Haiku call failed, using fallback")
+        source = "fallback"
+
+    result = PipelineIntelligenceOut(
+        generated_at=now,
+        pipeline_health=PipelineHealthOut(
+            score=health_score,
+            status=_health_status(health_score),
+            summary=executive_summary,
+            signals=signals,
+        ),
+        closing_soon=closing_soon,
+        risks=risks,
+        executive_summary=executive_summary,
+        source=source,
+    )
+
+    # ── Cache store ───────────────────────────────────────────────────────────
+    if redis_client:
+        try:
+            await redis_client.setex(cache_key, 600, json.dumps(result.model_dump(), default=str))
+        except Exception:
+            logger.warning("[pipeline-intel] Redis setex failed")
+
+    return result

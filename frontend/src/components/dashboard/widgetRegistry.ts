@@ -14,6 +14,7 @@ import { SalesFunnelChart } from "./SalesFunnelChart";
 import { LeadSourcesChart } from "./LeadSourcesChart";
 import { LostDealsChart } from "./LostDealsChart";
 import { TeamActivityHeatmap } from "./TeamActivityHeatmap";
+import { AiIntelligenceSection } from "./AiIntelligenceSection";
 
 export const widgetRegistry: Record<string, ComponentType> = {
   // Panel: principal
@@ -33,4 +34,5 @@ export const widgetRegistry: Record<string, ComponentType> = {
   lead_sources_chart:          LeadSourcesChart,
   lost_deals_chart:            LostDealsChart,
   team_activity_heatmap:       TeamActivityHeatmap,
+  ai_intelligence_section:     AiIntelligenceSection,
 };
