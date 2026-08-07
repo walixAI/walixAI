@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useCopilotStore } from "@/stores/copilot";
 import { Button } from "@/components/ui/button";
 import { useDashboardKpis } from "@/lib/queries/dashboard";
 import { Sparkles, AlertTriangle, X, Settings2 } from "lucide-react";
@@ -17,6 +18,7 @@ function getGreeting() {
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const sendCopilot = useCopilotStore((s) => s.send);
   const [showAlert, setShowAlert] = useState(true);
   const [customizeOpen, setCustomizeOpen] = useState(false);
 
@@ -80,7 +82,7 @@ export default function Dashboard() {
             Personalizar
           </Button>
           <Button
-            onClick={() => { /* TODO fase 2 */ }}
+            onClick={() => sendCopilot("Dame el resumen del día: pipeline, leads calientes, oportunidades en riesgo y conversaciones pendientes.")}
             className="bg-gradient-brand hover:opacity-90 text-primary-foreground shadow-glow gap-2"
           >
             <Sparkles className="h-4 w-4" />
