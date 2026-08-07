@@ -1220,15 +1220,18 @@ export default function Settings() {
   const isAdmin = isOwner || user?.role === "it";
   const canManage = user?.role === "owner" || user?.role === "it" || user?.role === "gerente";
 
-  // Branch resolution
-  const needsBranchSelect = (user?.role === "owner" || user?.role === "it") && !user?.branch_id;
+  // Branch resolution — owners always see the selector to manage any branch;
+  // IT and gerente without a fixed branch also get it; everyone else uses their assigned branch.
+  const needsBranchSelect = isOwner || (isAdmin && !user?.branch_id);
   const { data: branches = [] } = useQuery({
     queryKey: ["branches"],
     queryFn: () => api.listBranches(),
     enabled: needsBranchSelect,
   });
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
-  const branchId = user?.branch_id ?? (selectedBranchId || (branches[0]?.id ?? ""));
+  const branchId = needsBranchSelect
+    ? (selectedBranchId || (branches[0]?.id ?? ""))
+    : (user?.branch_id ?? "");
 
   function setTab(tab: string) {
     setSearchParams({ tab });
