@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,8 +22,36 @@ class DashboardWidget(Base):
     surface: Mapped[str] = mapped_column(String(50), nullable=False, default="dashboard")
 
 
+class DashboardPanel(Base):
+    """A named dashboard panel (tab) belonging to a tenant.
+
+    System panels (is_system=True) are shared across the tenant and have
+    UNIQUE(tenant_id, key).  Custom panels (is_system=False) are private to
+    their creator, so UNIQUE(tenant_id, created_by, key) — enforced via two
+    partial unique indexes in the migration.
+    """
+    __tablename__ = "dashboard_panels"
+    __table_args__ = (
+        # Partial unique indexes are defined in the migration (see e40231c281ca).
+        # No single SQLAlchemy UniqueConstraint can express the two conditional rules.
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    key: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    min_role: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+
+
 class DashboardLayout(Base):
-    """Saved layout for a tenant+scope combination.
+    """Saved layout for a tenant+panel+scope combination.
 
     scope format:
       "tenant_default"           — baseline for all users in this tenant
@@ -32,7 +60,7 @@ class DashboardLayout(Base):
     """
     __tablename__ = "dashboard_layouts"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "scope", name="uq_dashboard_layouts_tenant_scope"),
+        UniqueConstraint("tenant_id", "panel_key", "scope", name="uq_dashboard_layouts_tenant_panel_scope"),
     )
 
     tenant_id: Mapped[uuid.UUID] = mapped_column(
@@ -40,5 +68,6 @@ class DashboardLayout(Base):
         nullable=False,
         index=True,
     )
+    panel_key: Mapped[str] = mapped_column(String(100), nullable=False, server_default="principal")
     scope: Mapped[str] = mapped_column(String(100), nullable=False)
     items: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
