@@ -52,6 +52,7 @@ export interface CustomizeSheetProps {
   onOpenChange: (open: boolean) => void;
   scope: "user" | "role" | "tenant_default";
   role?: string;
+  panelKey: string;
 }
 
 function SortableRow({ item, onToggle }: { item: LocalItem; onToggle: (key: string) => void }) {
@@ -114,19 +115,19 @@ function SortableRow({ item, onToggle }: { item: LocalItem; onToggle: (key: stri
   );
 }
 
-export function CustomizeSheet({ open, onOpenChange, scope, role }: CustomizeSheetProps) {
+export function CustomizeSheet({ open, onOpenChange, scope, role, panelKey }: CustomizeSheetProps) {
   const qc = useQueryClient();
   const [items, setItems] = useState<LocalItem[]>([]);
 
   const { data: catalog } = useQuery({
-    queryKey: ["dashboard-catalog"],
-    queryFn: () => apiRequest<CatalogItem[]>("/api/dashboard/widgets-catalog"),
+    queryKey: ["dashboard-catalog", panelKey],
+    queryFn: () => apiRequest<CatalogItem[]>(`/api/dashboard/widgets-catalog?panel=${encodeURIComponent(panelKey)}`),
     staleTime: 300_000,
   });
 
   const { data: layout } = useQuery({
-    queryKey: ["dashboard-layout"],
-    queryFn: () => apiRequest<LayoutItem[]>("/api/dashboard/layout"),
+    queryKey: ["dashboard-layout", panelKey],
+    queryFn: () => apiRequest<LayoutItem[]>(`/api/dashboard/layout?panel=${encodeURIComponent(panelKey)}`),
     staleTime: 60_000,
   });
 
@@ -173,7 +174,7 @@ export function CustomizeSheet({ open, onOpenChange, scope, role }: CustomizeShe
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      let url = `/api/dashboard/layout?scope=${scope}`;
+      let url = `/api/dashboard/layout?scope=${scope}&panel=${encodeURIComponent(panelKey)}`;
       if (scope === "role" && role) url += `&role=${role}`;
       return apiRequest<void>(url, {
         method: "PUT",
@@ -187,7 +188,7 @@ export function CustomizeSheet({ open, onOpenChange, scope, role }: CustomizeShe
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["dashboard-layout"] });
+      qc.invalidateQueries({ queryKey: ["dashboard-layout", panelKey] });
       toast.success("Layout guardado");
       onOpenChange(false);
     },

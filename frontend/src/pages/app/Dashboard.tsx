@@ -81,12 +81,13 @@ export default function Dashboard() {
       </div>
 
       {/* Widgets dinámicos — orden y visibilidad desde el backend */}
-      <LayoutRenderer surface="dashboard" />
+      <LayoutRenderer panelKey="principal" />
 
       <CustomizeSheet
         open={customizeOpen}
         onOpenChange={setCustomizeOpen}
         scope="user"
+        panelKey="principal"
       />
     </div>
   );

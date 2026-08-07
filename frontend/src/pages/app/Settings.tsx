@@ -1194,6 +1194,7 @@ function DashboardAdminTab() {
           open={true}
           onOpenChange={(v) => { if (!v) setSheetScope(null); }}
           scope="tenant_default"
+          panelKey="principal"
         />
       )}
       {sheetScope === "role" && (
@@ -1202,6 +1203,7 @@ function DashboardAdminTab() {
           onOpenChange={(v) => { if (!v) setSheetScope(null); }}
           scope="role"
           role={selectedRole}
+          panelKey="principal"
         />
       )}
     </div>

@@ -10,18 +10,18 @@ interface LayoutItem {
   is_mandatory: boolean;
 }
 
-async function fetchLayout(): Promise<LayoutItem[]> {
-  return apiRequest<LayoutItem[]>("/api/dashboard/layout");
+async function fetchLayout(panelKey: string): Promise<LayoutItem[]> {
+  return apiRequest<LayoutItem[]>(`/api/dashboard/layout?panel=${encodeURIComponent(panelKey)}`);
 }
 
 interface Props {
-  surface: "dashboard";
+  panelKey: string;
 }
 
-export function LayoutRenderer({ surface: _surface }: Props) {
+export function LayoutRenderer({ panelKey }: Props) {
   const { data: layout, isLoading } = useQuery({
-    queryKey: ["dashboard-layout"],
-    queryFn: fetchLayout,
+    queryKey: ["dashboard-layout", panelKey],
+    queryFn: () => fetchLayout(panelKey),
     staleTime: 60_000,
   });
 
