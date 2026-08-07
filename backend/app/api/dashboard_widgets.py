@@ -150,15 +150,26 @@ async def _get_panel_or_404(
 
 
 async def _get_active_visible_widgets(
-    user: User, db: AsyncSession, panel_key: str = "principal"
+    user: User, db: AsyncSession, panel: DashboardPanel
 ) -> list[DashboardWidget]:
+    """Returns widgets visible to the user for the given panel.
+
+    System panels (is_system=True) return only widgets with surface == panel.key,
+    keeping their curated catalogs separate.  Custom panels return the full active
+    catalog so the user can compose freely from all available native widgets.
+    """
+    if panel.is_system:
+        where_clause = [
+            DashboardWidget.is_active.is_(True),
+            DashboardWidget.surface == panel.key,
+        ]
+    else:
+        where_clause = [DashboardWidget.is_active.is_(True)]
+
     rows = (
         await db.execute(
             select(DashboardWidget)
-            .where(
-                DashboardWidget.is_active.is_(True),
-                DashboardWidget.surface == panel_key,
-            )
+            .where(*where_clause)
             .order_by(DashboardWidget.default_position)
         )
     ).scalars().all()
@@ -166,10 +177,10 @@ async def _get_active_visible_widgets(
 
 
 async def _resolve_layout(
-    user: User, db: AsyncSession, panel_key: str = "principal"
+    user: User, db: AsyncSession, panel: DashboardPanel
 ) -> list[ResolvedLayoutItem]:
     """Cascades user → role → tenant_default → catalog default for a given panel."""
-    widgets = await _get_active_visible_widgets(user, db, panel_key=panel_key)
+    widgets = await _get_active_visible_widgets(user, db, panel=panel)
     widget_map = {w.key: w for w in widgets}
 
     scopes_to_try = [
@@ -184,7 +195,7 @@ async def _resolve_layout(
             await db.execute(
                 select(DashboardLayout).where(
                     DashboardLayout.tenant_id == user.tenant_id,
-                    DashboardLayout.panel_key == panel_key,
+                    DashboardLayout.panel_key == panel.key,
                     DashboardLayout.scope == scope,
                 )
             )
@@ -227,18 +238,24 @@ async def _resolve_layout(
 async def _validate_and_save_layout(
     tenant_id: uuid.UUID,
     scope: str,
-    panel_key: str,
+    panel: DashboardPanel,
     items: list[LayoutItem],
     db: AsyncSession,
 ) -> None:
-    """Validates all keys exist in catalog, then upserts the layout for panel_key."""
-    # Validate every key
-    all_keys_result = await db.execute(
-        select(DashboardWidget.key).where(
-            DashboardWidget.is_active.is_(True),
-            DashboardWidget.surface == panel_key,
+    """Validates all keys exist in the panel's catalog, then upserts the layout."""
+    # For system panels: valid keys are those with matching surface.
+    # For custom panels: valid keys are all active widgets.
+    if panel.is_system:
+        all_keys_result = await db.execute(
+            select(DashboardWidget.key).where(
+                DashboardWidget.is_active.is_(True),
+                DashboardWidget.surface == panel.key,
+            )
         )
-    )
+    else:
+        all_keys_result = await db.execute(
+            select(DashboardWidget.key).where(DashboardWidget.is_active.is_(True))
+        )
     valid_keys = {row[0] for row in all_keys_result.fetchall()}
 
     bad_keys = [item.key for item in items if item.key not in valid_keys]
@@ -254,7 +271,7 @@ async def _validate_and_save_layout(
         await db.execute(
             select(DashboardLayout).where(
                 DashboardLayout.tenant_id == tenant_id,
-                DashboardLayout.panel_key == panel_key,
+                DashboardLayout.panel_key == panel.key,
                 DashboardLayout.scope == scope,
             )
         )
@@ -266,7 +283,7 @@ async def _validate_and_save_layout(
     else:
         db.add(DashboardLayout(
             tenant_id=tenant_id,
-            panel_key=panel_key,
+            panel_key=panel.key,
             scope=scope,
             items=items_data,
         ))
@@ -300,13 +317,11 @@ async def create_panel(
     db: AsyncSession = Depends(get_db),
 ) -> PanelOut:
     """Creates a personal custom panel for the current user."""
-    # Slug = lowercase alphanum + hyphens
     key = re.sub(r"[^a-z0-9]+", "-", body.name.lower().strip()).strip("-")
     if not key:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail="El nombre no produce una clave válida")
 
-    # Check for duplicate within this user's custom panels
     conflict = (
         await db.execute(
             select(DashboardPanel).where(
@@ -343,7 +358,7 @@ async def delete_panel(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Deletes a custom panel. Only the creator can delete it; system panels and panels owned by others are protected."""
+    """Deletes a custom panel. Only the creator can delete it; system panels are protected."""
     panel = await db.get(DashboardPanel, panel_id)
     if panel is None or panel.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Panel no encontrado")
@@ -368,9 +383,9 @@ async def list_widgets_catalog(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[WidgetOut]:
-    """Returns all active widgets visible to the current user's role."""
-    await _get_panel_or_404(current_user.tenant_id, panel, current_user, db)
-    widgets = await _get_active_visible_widgets(current_user, db, panel_key=panel)
+    """Returns all active widgets visible to the current user's role for a given panel."""
+    resolved_panel = await _get_panel_or_404(current_user.tenant_id, panel, current_user, db)
+    widgets = await _get_active_visible_widgets(current_user, db, panel=resolved_panel)
     return [WidgetOut.model_validate(w) for w in widgets]
 
 
@@ -381,8 +396,8 @@ async def get_resolved_layout(
     db: AsyncSession = Depends(get_db),
 ) -> list[ResolvedLayoutItem]:
     """Returns the effective layout for the current user after cascading scopes."""
-    await _get_panel_or_404(current_user.tenant_id, panel, current_user, db)
-    return await _resolve_layout(current_user, db, panel_key=panel)
+    resolved_panel = await _get_panel_or_404(current_user.tenant_id, panel, current_user, db)
+    return await _resolve_layout(current_user, db, panel=resolved_panel)
 
 
 @widgets_router.put("/layout", status_code=204)
@@ -398,7 +413,7 @@ async def save_layout(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    await _get_panel_or_404(current_user.tenant_id, panel, current_user, db)
+    resolved_panel = await _get_panel_or_404(current_user.tenant_id, panel, current_user, db)
 
     if scope == "user":
         resolved_scope = f"user:{current_user.id}"
@@ -426,7 +441,7 @@ async def save_layout(
     await _validate_and_save_layout(
         tenant_id=current_user.tenant_id,
         scope=resolved_scope,
-        panel_key=panel,
+        panel=resolved_panel,
         items=body.items,
         db=db,
     )

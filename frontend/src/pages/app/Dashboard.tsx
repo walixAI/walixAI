@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { useDashboardKpis } from "@/lib/queries/dashboard";
 import { Sparkles, AlertTriangle, X, Settings2 } from "lucide-react";
 import { LayoutRenderer } from "@/components/dashboard/LayoutRenderer";
 import { CustomizeSheet } from "@/components/dashboard/CustomizeSheet";
+import { PanelSwitcher } from "@/components/dashboard/PanelSwitcher";
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -17,6 +19,13 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [showAlert, setShowAlert] = useState(true);
   const [customizeOpen, setCustomizeOpen] = useState(false);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedPanel = searchParams.get("panel") ?? "principal";
+
+  function handlePanelChange(key: string) {
+    setSearchParams(key === "principal" ? {} : { panel: key });
+  }
 
   const { data: kpis } = useDashboardKpis();
   const atRiskDealsCount = kpis?.staleDeals ?? 0;
@@ -80,14 +89,17 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Selector de paneles */}
+      <PanelSwitcher activePanel={selectedPanel} onPanelChange={handlePanelChange} />
+
       {/* Widgets dinámicos — orden y visibilidad desde el backend */}
-      <LayoutRenderer panelKey="principal" />
+      <LayoutRenderer panelKey={selectedPanel} />
 
       <CustomizeSheet
         open={customizeOpen}
         onOpenChange={setCustomizeOpen}
         scope="user"
-        panelKey="principal"
+        panelKey={selectedPanel}
       />
     </div>
   );
