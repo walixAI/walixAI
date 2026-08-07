@@ -128,15 +128,20 @@ async def qualify_lead(
                 qdata[field["name"]] = value
         lead.qualification_data = qdata
 
-        # Sync lead.name from the configured name field
+        # Sync lead.name from the configured name field.
+        # Only overwrite if the extracted value is a real name (not a placeholder).
+        _PLACEHOLDERS = {"no especificado", "desconocido", "sin nombre", "n/a", "none", "null", ""}
         name_field = qual.get("name_field")
-        if name_field and result.get(name_field):
-            lead.name = result[name_field]
+        extracted_name = (result.get(name_field) or "").strip()
+        if name_field and extracted_name and extracted_name.lower() not in _PLACEHOLDERS:
+            lead.name = extracted_name
 
-        # Sync lead.contact_phone from the configured phone field (if any)
+        # Sync lead.contact_phone from the configured phone field (if any).
+        # Same guard: skip placeholders so existing numbers aren't erased.
         phone_field = qual.get("phone_field")
-        if phone_field and result.get(phone_field):
-            lead.contact_phone = result[phone_field]
+        extracted_phone = (result.get(phone_field) or "").strip()
+        if phone_field and extracted_phone and extracted_phone.lower() not in _PLACEHOLDERS:
+            lead.contact_phone = extracted_phone
 
         lead.qualification_score = result.get("qualification_score")
 
