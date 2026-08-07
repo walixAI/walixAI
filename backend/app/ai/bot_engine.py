@@ -320,12 +320,16 @@ async def _process_message_inner(
         anthropic_messages = history + [{"role": "user", "content": message_body}]
 
         # 8. RAG: retrieve relevant KB chunks.
+        # Build query from last 3 user turns so short follow-ups like "hola"
+        # still carry prior topic context into the vector search.
+        recent_user_msgs = [m["content"] for m in history[-4:] if m.get("role") == "user"]
+        rag_query = " ".join(recent_user_msgs + [message_body])
         rag_chunks: list[dict] = []
         try:
-            rag_chunks = await retrieve_context(message_body, str(tenant_id))
+            rag_chunks = await retrieve_context(rag_query, str(tenant_id))
             if rag_chunks:
                 lead.last_rag_context = {
-                    "query": message_body,
+                    "query": rag_query,
                     "chunks": [
                         {
                             "id": c["id"],
