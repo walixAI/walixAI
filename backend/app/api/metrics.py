@@ -8,7 +8,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -21,6 +21,10 @@ from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.metrics import DailyMetric, SentimentSnapshot
 from app.models.pipeline import PipelineStage
 from app.models.pipeline_group import resolve_default_pipeline_id
+from app.models.activity import Activity
+from app.models.conversation import Message
+from app.models.deal import Deal
+from app.models.deal_stage_history import DealStageHistory
 from app.models.scoring import LeadScore
 from app.models.tenant import Branch, Tenant
 from app.models.user import User, UserRole
@@ -688,4 +692,259 @@ async def get_roi(
             "qualification_threshold": f"qualification_score >= {_QUALIFY_SCORE_THRESHOLD}",
             "response_wait_threshold": f"{_RESPONSE_WAIT_MINUTES} min para considerar lead sin respuesta",
         },
+    )
+
+
+# ── Desempeño extra — embudo, fuentes, pérdidas, heatmap ─────────────────────
+
+class FunnelStageOut(BaseModel):
+    stage_name: str
+    stage_order: int
+    deals_reached: int
+    conversion_from_prev: float | None  # % vs stage anterior; None en la primera
+
+
+class LeadSourceOut(BaseModel):
+    source: str
+    count: int
+    revenue: float
+
+
+class LostReasonOut(BaseModel):
+    reason: str
+    count: int
+    lost_amount: float
+
+
+class ActivityHeatmapCellOut(BaseModel):
+    user_id: uuid.UUID
+    user_name: str
+    day: str           # ISO date YYYY-MM-DD
+    whatsapp_count: int
+    activity_count: int
+    # DealStageHistory has no changed_by → always 0; documented gap.
+    deals_moved_count: int
+
+
+class ReportsExtraOut(BaseModel):
+    period_days: int
+    funnel: list[FunnelStageOut]
+    lead_sources: list[LeadSourceOut]
+    lost_reasons: list[LostReasonOut]
+    activity_heatmap: list[ActivityHeatmapCellOut]
+
+
+@router.get("/desempeno-extra", response_model=ReportsExtraOut)
+async def get_desempeno_extra(
+    period: int = Query(30, ge=7, le=90),
+    branch_id: uuid.UUID | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReportsExtraOut:
+    """Aggregated analytics for the Desempeño panel: funnel, sources, losses, activity heatmap.
+
+    Endpoint added to metrics.py to keep all analytics in one place (no new router needed).
+
+    Known gap: ActivityHeatmapCellOut.deals_moved_count is always 0 because
+    DealStageHistory has no changed_by column — there is no attribution of who
+    moved a deal between stages.
+    """
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=period)
+    tenant_id = current_user.tenant_id
+
+    # Resolve branches
+    if branch_id:
+        branch_ids = [str(branch_id)]
+    else:
+        br = await db.execute(
+            select(Branch.id).where(
+                Branch.tenant_id == tenant_id, Branch.is_active.is_(True)
+            )
+        )
+        branch_ids = [str(bid) for bid in br.scalars().all()]
+
+    # ── 1. Funnel ─────────────────────────────────────────────────────────────
+    # A deal "reached" stage S if:
+    #   a) DealStageHistory has to_stage_id = S AND changed_at >= since   (was moved here)
+    #   b) Deal.pipeline_stage_id = S AND created_at >= since AND no history rows exist yet
+    #      (created directly in this stage, never moved — DealStageHistory is not written on creation)
+    funnel_sql = text("""
+        WITH period_history AS (
+            SELECT DISTINCT dsh.deal_id, dsh.to_stage_id AS stage_id
+            FROM deal_stage_history dsh
+            WHERE dsh.tenant_id = :tenant_id
+              AND dsh.changed_at >= :since
+        ),
+        period_new AS (
+            SELECT d.id AS deal_id, d.pipeline_stage_id AS stage_id
+            FROM deals d
+            WHERE d.tenant_id = :tenant_id
+              AND d.created_at >= :since
+              AND NOT EXISTS (
+                  SELECT 1 FROM deal_stage_history h
+                  WHERE h.deal_id = d.id AND h.tenant_id = :tenant_id
+              )
+        ),
+        combined AS (
+            SELECT deal_id, stage_id FROM period_history
+            UNION
+            SELECT deal_id, stage_id FROM period_new
+        )
+        SELECT ps.id::text, ps.name, ps.order_index, COUNT(DISTINCT c.deal_id) AS deals_reached
+        FROM pipeline_stages ps
+        LEFT JOIN combined c ON c.stage_id = ps.id
+        WHERE ps.branch_id = ANY(:branch_ids)
+          AND ps.is_active = true
+        GROUP BY ps.id, ps.name, ps.order_index
+        ORDER BY ps.order_index
+    """)
+    funnel_rows = (
+        await db.execute(funnel_sql, {
+            "tenant_id": str(tenant_id),
+            "since": since,
+            "branch_ids": branch_ids or ["00000000-0000-0000-0000-000000000000"],
+        })
+    ).fetchall()
+
+    funnel: list[FunnelStageOut] = []
+    prev_count: int | None = None
+    for row in funnel_rows:
+        reached = int(row.deals_reached)
+        conv = None if prev_count is None or prev_count == 0 else round(reached / prev_count * 100, 1)
+        funnel.append(FunnelStageOut(
+            stage_name=row.name,
+            stage_order=row.order_index,
+            deals_reached=reached,
+            conversion_from_prev=conv,
+        ))
+        prev_count = reached
+
+    # ── 2. Lead sources ───────────────────────────────────────────────────────
+    # Uses Deal.source (string, set on deal creation). Lead.source is a separate
+    # enum (whatsapp_inbound/meta_ads/manual) and not linked to deal revenue.
+    sources_rows = (
+        await db.execute(
+            select(
+                func.coalesce(Deal.source, "Sin especificar").label("source"),
+                func.count(Deal.id).label("cnt"),
+                func.coalesce(
+                    func.sum(Deal.amount).filter(Deal.is_won.is_(True)),
+                    0,
+                ).label("revenue"),
+            )
+            .where(
+                Deal.tenant_id == tenant_id,
+                Deal.created_at >= since,
+            )
+            .group_by(func.coalesce(Deal.source, "Sin especificar"))
+            .order_by(func.count(Deal.id).desc())
+        )
+    ).fetchall()
+
+    lead_sources: list[LeadSourceOut] = [
+        LeadSourceOut(source=r.source, count=int(r.cnt), revenue=float(r.revenue or 0))
+        for r in sources_rows
+    ]
+
+    # ── 3. Lost reasons ───────────────────────────────────────────────────────
+    # No explicit lost_at field → use Deal.updated_at as proxy for when the deal
+    # was marked as lost (that's the last time the record changed).
+    lost_rows = (
+        await db.execute(
+            select(
+                func.coalesce(Deal.lost_reason, "Sin especificar").label("reason"),
+                func.count(Deal.id).label("cnt"),
+                func.coalesce(func.sum(Deal.amount), 0).label("lost_amount"),
+            )
+            .where(
+                Deal.tenant_id == tenant_id,
+                Deal.is_lost.is_(True),
+                Deal.updated_at >= since,
+            )
+            .group_by(func.coalesce(Deal.lost_reason, "Sin especificar"))
+            .order_by(func.count(Deal.id).desc())
+        )
+    ).fetchall()
+
+    lost_reasons: list[LostReasonOut] = [
+        LostReasonOut(reason=r.reason, count=int(r.cnt), lost_amount=float(r.lost_amount or 0))
+        for r in lost_rows
+    ]
+
+    # ── 4. Activity heatmap ───────────────────────────────────────────────────
+    # WA messages sent by humans (sent_by_user_id IS NOT NULL)
+    wa_rows = (
+        await db.execute(
+            select(
+                Message.sent_by_user_id.label("user_id"),
+                func.date_trunc("day", Message.created_at).label("day"),
+                func.count(Message.id).label("cnt"),
+            )
+            .where(
+                Message.sent_by_user_id.isnot(None),
+                Message.created_at >= since,
+            )
+            .group_by(Message.sent_by_user_id, func.date_trunc("day", Message.created_at))
+        )
+    ).fetchall()
+
+    # Activities (exclude system events), grouped by creator + day
+    act_rows = (
+        await db.execute(
+            select(
+                Activity.created_by.label("user_id"),
+                func.date_trunc("day", Activity.created_at).label("day"),
+                func.count(Activity.id).label("cnt"),
+            )
+            .where(
+                Activity.tenant_id == tenant_id,
+                Activity.created_by.isnot(None),
+                Activity.activity_type != "system",
+                Activity.created_at >= since,
+            )
+            .group_by(Activity.created_by, func.date_trunc("day", Activity.created_at))
+        )
+    ).fetchall()
+
+    # Merge into {(user_id, day): {wa, act}}
+    heatmap_dict: dict[tuple[uuid.UUID, str], dict[str, int]] = {}
+
+    for r in wa_rows:
+        key = (r.user_id, r.day.date().isoformat())
+        heatmap_dict.setdefault(key, {"wa": 0, "act": 0})["wa"] += int(r.cnt)
+
+    for r in act_rows:
+        key = (r.user_id, r.day.date().isoformat())
+        heatmap_dict.setdefault(key, {"wa": 0, "act": 0})["act"] += int(r.cnt)
+
+    # Fetch user names in one query
+    user_ids = list({uid for uid, _ in heatmap_dict})
+    users_map: dict[uuid.UUID, str] = {}
+    if user_ids:
+        urows = (
+            await db.execute(
+                select(User.id, User.name).where(User.id.in_(user_ids))
+            )
+        ).fetchall()
+        users_map = {r.id: (r.name or r.id) for r in urows}
+
+    activity_heatmap: list[ActivityHeatmapCellOut] = [
+        ActivityHeatmapCellOut(
+            user_id=uid,
+            user_name=users_map.get(uid, str(uid)),
+            day=day,
+            whatsapp_count=counts["wa"],
+            activity_count=counts["act"],
+            deals_moved_count=0,  # DealStageHistory has no changed_by — no user attribution available
+        )
+        for (uid, day), counts in sorted(heatmap_dict.items(), key=lambda x: (x[0][1], str(x[0][0])))
+    ]
+
+    return ReportsExtraOut(
+        period_days=period,
+        funnel=funnel,
+        lead_sources=lead_sources,
+        lost_reasons=lost_reasons,
+        activity_heatmap=activity_heatmap,
     )

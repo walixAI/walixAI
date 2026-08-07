@@ -10,6 +10,10 @@ import { DealsClosedTimelineChart } from "./DealsClosedTimelineChart";
 import { TeamPerformanceSummary } from "./TeamPerformanceSummary";
 import { AiRoiSummary } from "./AiRoiSummary";
 import { LeadQualityForecastSummary } from "./LeadQualityForecastSummary";
+import { SalesFunnelChart } from "./SalesFunnelChart";
+import { LeadSourcesChart } from "./LeadSourcesChart";
+import { LostDealsChart } from "./LostDealsChart";
+import { TeamActivityHeatmap } from "./TeamActivityHeatmap";
 
 export const widgetRegistry: Record<string, ComponentType> = {
   // Panel: principal
@@ -25,4 +29,8 @@ export const widgetRegistry: Record<string, ComponentType> = {
   team_performance_summary:    TeamPerformanceSummary,
   ai_roi_summary:              AiRoiSummary,
   lead_quality_forecast:       LeadQualityForecastSummary,
+  sales_funnel_chart:          SalesFunnelChart,
+  lead_sources_chart:          LeadSourcesChart,
+  lost_deals_chart:            LostDealsChart,
+  team_activity_heatmap:       TeamActivityHeatmap,
 };
