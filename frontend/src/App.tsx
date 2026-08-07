@@ -31,7 +31,6 @@ const ContactDetailPage = lazy(() => import("@/pages/contacts/[id]"));
 const BillingPage = lazy(() => import("@/pages/billing/BillingPage"));
 const BillingSuccess = lazy(() => import("@/pages/billing/BillingSuccess"));
 const ROIDashboard = lazy(() => import("@/pages/roi/ROIDashboard"));
-const DesempenoPage = lazy(() => import("@/pages/app/Desempeno"));
 const MiDiaPage = lazy(() => import("@/pages/app/MiDia"));
 const TasksPage = lazy(() => import("@/pages/app/Tasks"));
 const FinancePage = lazy(() => import("@/pages/app/Finance"));
@@ -98,7 +97,7 @@ const AppRoutes = () => {
             <Route path="/whatsapp" element={<Whatsapp />} />
             <Route path="/contacts" element={<ContactsPage />} />
             <Route path="/contacts/:id" element={<ContactDetailPage />} />
-            <Route path="/reports" element={<DesempenoPage />} />
+            <Route path="/reports" element={<Navigate to="/dashboard?panel=desempeno" replace />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/team" element={<TeamPage />} />
             <Route path="/pipeline" element={<PipelinePage />} />

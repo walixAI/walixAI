@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard, Kanban, Users, MessageCircle, BarChart3,
+  LayoutDashboard, Kanban, Users, MessageCircle,
   Settings, Zap, ClipboardList, ListTodo,
 } from "lucide-react";
 import {
@@ -38,7 +38,6 @@ export function CommandPalette() {
     { label: deals,               path: "/pipeline",     icon: Kanban },
     { label: entities,            path: "/contacts",     icon: Users },
     { label: "WhatsApp",          path: "/whatsapp",     icon: MessageCircle },
-    { label: "Reportes",          path: "/reports",      icon: BarChart3 },
     { label: "Automatizaciones",  path: "/automations",  icon: Zap },
     { label: "Configuración",     path: "/settings",     icon: Settings },
   ];

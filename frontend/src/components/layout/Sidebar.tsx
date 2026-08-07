@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, Users, Users2, MessageCircle, BarChart3,
+  LayoutDashboard, Users, Users2, MessageCircle,
   Settings, Kanban, Zap, CreditCard, Bot, BookOpen, ClipboardList, ListTodo,
   Wallet,
 } from "lucide-react";
@@ -28,7 +28,6 @@ export function Sidebar() {
     { to: "/finance",     label: "Finanzas",          icon: Wallet },
     { to: "/automations", label: "Automatizaciones", icon: Zap },
     { to: "/whatsapp",    label: "WhatsApp",         icon: MessageCircle, badge: true },
-    { to: "/reports",     label: "Reportes",         icon: BarChart3 },
   ];
   const expanded = hovered;
   const collapsed = !expanded;
