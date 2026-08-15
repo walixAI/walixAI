@@ -19,6 +19,12 @@ from pathlib import Path
 # Make `app.*` importable when running this file directly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# La consola de Windows suele usar cp1252 por default, que no soporta el "→"
+# de los prints de abajo — evita un UnicodeEncodeError a mitad del script.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 import httpx
 
 from app.core.config import settings
