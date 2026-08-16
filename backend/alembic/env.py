@@ -41,7 +41,10 @@ def _async_url(url: str) -> str:
     return url
 
 
-config.set_main_option("sqlalchemy.url", _async_url(settings.effective_database_url))
+# Alembic corre DDL (CREATE POLICY, ALTER TABLE, etc.) — necesita el rol
+# admin/superuser, nunca el walix_app de runtime (sin permisos de DDL a
+# propósito). Ver Settings.effective_alembic_database_url en app/core/config.py.
+config.set_main_option("sqlalchemy.url", _async_url(settings.effective_alembic_database_url))
 
 target_metadata = Base.metadata
 

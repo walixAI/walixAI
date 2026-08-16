@@ -8,12 +8,12 @@ from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.ai.bot_engine import process_message
 from app.api.internal_wa import handle_internal_command
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.core.redis import redis_client
 from app.models.agent import AgentSuggestion
 from app.models.conversation import Conversation, ConversationHandler, ConversationStatus
@@ -56,12 +56,12 @@ def _verify_signature(body: bytes, header: str | None, secret: str) -> bool:
     return hmac.compare_digest(expected, received)
 
 
-async def _bg_execute_suggestion(suggestion_id: uuid.UUID) -> None:
+async def _bg_execute_suggestion(suggestion_id: uuid.UUID, tenant_id: uuid.UUID) -> None:
     """Background wrapper — opens its own DB session."""
     try:
         from app.agents.executor import execute_suggestion
         async with AsyncSessionLocal() as db:
-            await execute_suggestion(suggestion_id, db)
+            await execute_suggestion(suggestion_id, tenant_id, db)
     except Exception:
         logger.exception("webhook: bg execute failed for suggestion=%s", suggestion_id)
 
@@ -83,6 +83,10 @@ async def _try_confirm_suggestion(
     normalized = _normalize_mx_phone(wa_phone)
 
     async with AsyncSessionLocal() as db:
+        # Sesión nueva — users/agent_suggestions tienen RLS. branch.tenant_id
+        # ya lo conocemos (viene de _try_confirm_suggestion), así que no hace
+        # falta ningún lookup pre-tenant acá.
+        await set_tenant_context(db, branch.tenant_id)
         user_result = await db.execute(
             select(User).where(
                 User.tenant_id == branch.tenant_id,
@@ -109,7 +113,7 @@ async def _try_confirm_suggestion(
         await db.commit()
         suggestion_id = suggestion.id
 
-    background_tasks.add_task(_bg_execute_suggestion, suggestion_id)
+    background_tasks.add_task(_bg_execute_suggestion, suggestion_id, branch.tenant_id)
     logger.info(
         "webhook: suggestion %s confirmed via WA from %s", suggestion_id, wa_phone
     )
@@ -187,13 +191,31 @@ async def receive_whatsapp_webhook(
 
             # Resolve the branch this WhatsApp number belongs to. One lookup per
             # `change` since all its messages share the same metadata.
+            #
+            # Pre-tenant lookup: at this point all we have is the phone number
+            # ID from Meta's payload — no tenant is known yet, so a plain
+            # `SELECT branches WHERE wa_phone_number_id = ...` would never see
+            # a row under RLS with a non-bypass runtime role (walix_app).
+            # fn_lookup_tenant_by_wa_phone_id (SECURITY DEFINER, migración
+            # l7m8n9o0p1q2) resolves just the tenant_id first; once we have
+            # it, set_tenant_context unlocks the real SELECT for the full row.
             async with AsyncSessionLocal() as db:
-                result = await db.execute(
-                    select(Branch).where(
-                        Branch.wa_phone_number_id == wa_phone_number_id
+                tenant_id = (
+                    await db.execute(
+                        text("SELECT fn_lookup_tenant_by_wa_phone_id(:pid)"),
+                        {"pid": wa_phone_number_id},
                     )
-                )
-                branch = result.scalar_one_or_none()
+                ).scalar_one_or_none()
+
+                branch = None
+                if tenant_id is not None:
+                    await set_tenant_context(db, tenant_id)
+                    result = await db.execute(
+                        select(Branch).where(
+                            Branch.wa_phone_number_id == wa_phone_number_id
+                        )
+                    )
+                    branch = result.scalar_one_or_none()
 
             if branch is None:
                 logger.warning(
@@ -275,9 +297,12 @@ async def _fetch_lead_fields(leadgen_id: str, access_token: str) -> dict[str, st
     }
 
 
-async def _send_meta_lead_welcome(lead_id: uuid.UUID, branch_id: uuid.UUID) -> None:
+async def _send_meta_lead_welcome(
+    lead_id: uuid.UUID, branch_id: uuid.UUID, tenant_id: uuid.UUID
+) -> None:
     """Background task: sends the welcome WhatsApp message to a Meta Ads lead."""
     async with AsyncSessionLocal() as db:
+        await set_tenant_context(db, tenant_id)
         lead = await db.get(Lead, lead_id)
         branch = await db.get(Branch, branch_id)
         if not lead or not branch or not branch.wa_phone_number_id or not branch.wa_token:
@@ -360,15 +385,18 @@ async def receive_meta_leads_webhook(
                 logger.info("meta_leads: duplicate leadgen_id=%s — skipping", leadgen_id)
                 continue
 
-            # Look up the config for this page + form
+            # Look up the config for this page + form. Pre-tenant lookup:
+            # page_id es un identificador externo de Meta, sin tenant
+            # conocido todavía — fn_lookup_meta_lead_configs_by_page_id
+            # (SECURITY DEFINER, migración o0p1q2r3s4t5) devuelve las mismas
+            # columnas que el ORM ya leía sin restricción de tenant; la
+            # desambiguación final por form_id sigue igual, en Python.
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
-                    select(MetaLeadConfig).where(
-                        MetaLeadConfig.page_id == page_id,
-                        MetaLeadConfig.is_active.is_(True),
-                    )
+                    text("SELECT * FROM fn_lookup_meta_lead_configs_by_page_id(:pid)"),
+                    {"pid": page_id},
                 )
-                configs = result.scalars().all()
+                configs = result.fetchall()
 
             config = next(
                 (c for c in configs if form_id in [str(f) for f in (c.form_ids or [])]),
@@ -409,8 +437,10 @@ async def receive_meta_leads_webhook(
                 )
                 continue
 
-            # Create Lead + Conversation in a single transaction
+            # Create Lead + Conversation in a single transaction. config.tenant_id
+            # ya lo resolvió fn_lookup_meta_lead_configs_by_page_id arriba.
             async with AsyncSessionLocal() as db:
+                await set_tenant_context(db, config.tenant_id)
                 lead = Lead(
                     branch_id=config.branch_id,
                     tenant_id=config.tenant_id,
@@ -436,6 +466,7 @@ async def receive_meta_leads_webhook(
                 await db.commit()
                 lead_id_captured = lead.id
                 branch_id_captured = config.branch_id
+                tenant_id_captured = config.tenant_id
 
             logger.info(
                 "meta_leads: created lead=%s from leadgen_id=%s page=%s form=%s",
@@ -449,6 +480,7 @@ async def receive_meta_leads_webhook(
                 _send_meta_lead_welcome,
                 lead_id=lead_id_captured,
                 branch_id=branch_id_captured,
+                tenant_id=tenant_id_captured,
             )
 
     return {"status": "ok"}

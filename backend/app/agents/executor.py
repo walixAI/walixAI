@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import set_tenant_context
 from app.models.activity import ActivityType, LeadActivity
 from app.models.agent import AgentSuggestion
 from app.models.lead import Lead
@@ -20,12 +21,21 @@ _whatsapp = WhatsAppService()
 
 
 async def execute_suggestion(
-    suggestion_id: uuid.UUID, db: AsyncSession
+    suggestion_id: uuid.UUID, tenant_id: uuid.UUID, db: AsyncSession
 ) -> dict[str, Any]:
     """Execute the action for an AgentSuggestion and update its status.
 
     Raises ValueError for invalid state. Updates status=executed or status=failed.
+
+    tenant_id: callers (app/api/automations.py, app/api/webhooks.py,
+    app/tasks/agent_tasks.py::execute_suggestion_task) all have it available
+    at their own call sites — ver cada uno para de dónde sale. Se agregó acá
+    en vez de resolverlo por separado porque `db` es una sesión que el
+    caller ya abrió (a veces la misma que la del request HTTP), así que
+    set_tenant_context() tiene que aplicarse antes de la primera query de
+    ESTA función, no asumir que el caller ya lo hizo.
     """
+    await set_tenant_context(db, tenant_id)
     suggestion = await db.get(AgentSuggestion, suggestion_id)
     if suggestion is None:
         raise ValueError(f"AgentSuggestion {suggestion_id} not found")

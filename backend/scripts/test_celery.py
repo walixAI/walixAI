@@ -193,7 +193,7 @@ def check_e() -> None:
     if NEED_WORKER:
         # Ejecución real en el worker
         try:
-            r = execute_suggestion_task.delay(fake_id)
+            r = execute_suggestion_task.delay(fake_id, str(uuid.uuid4()))
             report(f"Tarea encolada (id={r.id[:16]}...)", True)
         except Exception as exc:
             report("Tarea encolada con UUID falso", False, str(exc))

@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Reexporta engine/db/client/tenant/company/branch/*_user/*_token/auth_*/contact
@@ -26,6 +28,22 @@ from app.models.pipeline import PipelineStage
 from app.models.pipeline_group import Pipeline
 from app.models.tenant import Branch, Company, Tenant, TenantPlan
 from app.models.user import User, UserRole
+
+
+# ── Impersonación de walix_app para probar RLS de verdad ─────────────────────
+# Compartido entre test_multi_tenancy.py y test_pretenant_lookups.py — ver el
+# docstring de test_multi_tenancy.py ("Cómo se prueba RLS de verdad") para el
+# razonamiento completo de por qué se usa SET LOCAL ROLE en vez de repuntar
+# el DATABASE_URL de toda la suite.
+async def impersonate_walix_app_or_skip(db: AsyncSession) -> None:
+    try:
+        await db.execute(text("SET LOCAL ROLE walix_app"))
+    except Exception as e:  # noqa: BLE001 — cualquier error acá es "rol no disponible"
+        pytest.skip(
+            "El rol walix_app no existe en este entorno todavía — correr "
+            "scripts/setup_db_user.py y aplicar el SQL impreso en la consola "
+            f"de Railway antes de que este test pueda verificar RLS de verdad ({e})."
+        )
 
 
 # ── Pipeline / Deal fixtures ──────────────────────────────────────────────────

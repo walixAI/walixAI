@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.prompts import CLOSING_AGENT_PROMPT
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.models.activity import ActivityType, LeadActivity
 from app.models.agent import AgentSuggestion
 from app.models.conversation import Conversation, Message
@@ -40,6 +40,7 @@ async def run_closing_agent(lead_id: uuid.UUID, tenant_id: uuid.UUID) -> bool:
     """Evaluate a high-score lead and suggest a closing proposal if appropriate."""
     try:
         async with AsyncSessionLocal() as db:
+            await set_tenant_context(db, tenant_id)
             return await _run_closing(lead_id, tenant_id, db)
     except Exception:
         logger.exception("closing_agent: unhandled error lead=%s", lead_id)

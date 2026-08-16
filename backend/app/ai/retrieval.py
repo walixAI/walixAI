@@ -21,7 +21,7 @@ from openai import AsyncOpenAI
 from sqlalchemy import text
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,12 @@ async def retrieve_context(
     tenant_str = str(tenant_id)
 
     async with AsyncSessionLocal() as db:
+        # Sesión nueva — sin esto, bajo walix_app real las queries de abajo
+        # (knowledge_chunks/knowledge_documents, con RLS) devuelven 0 filas
+        # pese al WHERE tenant_id explícito en el SQL: RLS se evalúa además
+        # del WHERE, no en su lugar.
+        await set_tenant_context(db, tenant_id)
+
         # 2. Vector search
         vec_rows = (
             await db.execute(

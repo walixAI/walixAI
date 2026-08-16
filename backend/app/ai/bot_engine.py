@@ -15,7 +15,7 @@ from app.ai import config_loader
 from app.ai.qualifier import qualify_lead
 from app.ai.retrieval import format_rag_context, retrieve_context
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.core.redis import redis_client
 from app.models.conversation import (
     Conversation,
@@ -192,6 +192,25 @@ async def _process_message_inner(
     message_id: str,
 ) -> None:
     async with AsyncSessionLocal() as db:
+        # tenant_id ya llega como parámetro (branch.tenant_id, columna NOT
+        # NULL — el único caller es app/api/webhooks.py) pero esta sesión es
+        # nueva (AsyncSessionLocal() directo, no pasa por get_db()/el
+        # middleware HTTP) y arranca sin contexto de tenant seteado. Bajo el
+        # rol admin (bypass de RLS) esto era inofensivo; bajo walix_app real,
+        # CUALQUIER query de acá en adelante contra una tabla con RLS
+        # (branches, leads, conversations, agent_suggestions...) fallaba o no
+        # veía filas — confirmado en vivo: "invalid input syntax for type
+        # uuid" en el SELECT de Branch del paso 14.
+        #
+        # is_local=FALSE (no TRUE): esta función hace varios db.commit()
+        # dentro del mismo `async with` (pasos 4a, 4b, 5, 11) — con
+        # is_local=TRUE el contexto se borraría en el primer commit y el
+        # resto de las queries de la función volverían a fallar. FALSE
+        # persiste a nivel sesión, que es exactamente lo que dura este
+        # `async with` — mismo criterio que ya usa get_db() en
+        # app/core/database.py.
+        await set_tenant_context(db, tenant_id)
+
         # 1. Load branch AI config (custom or industry default)
         cfg = await config_loader.get_branch_config(branch_id, db)
         logger.info("process_message: config loaded for branch=%s", branch_id)
@@ -419,7 +438,7 @@ async def _process_message_inner(
     #     process_message is already a background task, so awaiting here is safe.
     logger.info("process_message: calling qualify_lead for lead=%s", lead.id)
     try:
-        await qualify_lead(updated_history, lead.id, branch_id, config=cfg)
+        await qualify_lead(updated_history, lead.id, branch_id, tenant_id, config=cfg)
         logger.info("process_message: qualify_lead done for lead=%s", lead.id)
     except Exception:
         logger.exception("process_message: qualify_lead raised for lead %s", lead.id)

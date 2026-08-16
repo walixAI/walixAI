@@ -11,8 +11,8 @@ import logging
 from datetime import date, timedelta
 
 from app.celery_app import celery_app
-from app.core.database import AsyncSessionLocal
-from app.tasks._helpers import get_active_branch_ids, run_async
+from app.core.database import AsyncSessionLocal, set_tenant_context
+from app.tasks._helpers import get_active_branch_tenant_pairs, run_async
 
 logger = logging.getLogger(__name__)
 
@@ -34,17 +34,19 @@ def aggregate_all_metrics() -> dict:
     target_date = date.today() - timedelta(days=1)
 
     async def _run() -> dict:
-        branch_ids = await get_active_branch_ids()
+        pairs = await get_active_branch_tenant_pairs()
         results = {
-            "branches": len(branch_ids),
+            "branches": len(pairs),
             "target_date": str(target_date),
             "errors": 0,
         }
-        logger.info("[metrics] aggregating for %d branches, date=%s", len(branch_ids), target_date)
+        logger.info("[metrics] aggregating for %d branches, date=%s", len(pairs), target_date)
 
-        for bid in branch_ids:
+        for bid, tid in pairs:
             try:
                 async with AsyncSessionLocal() as db:
+                    # daily_metrics tiene RLS desde h4i5j6k7l8m9.
+                    await set_tenant_context(db, tid)
                     await aggregate_daily_metrics(bid, target_date, db)
                     await db.commit()
             except Exception:
@@ -70,13 +72,15 @@ def calculate_all_sentiment() -> dict:
     from app.services.sentiment_aggregator import calculate_sentiment_snapshot
 
     async def _run() -> dict:
-        branch_ids = await get_active_branch_ids()
-        results = {"branches": len(branch_ids), "errors": 0}
-        logger.info("[sentiment] computing for %d branches", len(branch_ids))
+        pairs = await get_active_branch_tenant_pairs()
+        results = {"branches": len(pairs), "errors": 0}
+        logger.info("[sentiment] computing for %d branches", len(pairs))
 
-        for bid in branch_ids:
+        for bid, tid in pairs:
             try:
                 async with AsyncSessionLocal() as db:
+                    # sentiment_snapshots tiene RLS desde h4i5j6k7l8m9.
+                    await set_tenant_context(db, tid)
                     await calculate_sentiment_snapshot(bid, db)
                     await db.commit()
             except Exception:

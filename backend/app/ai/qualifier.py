@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.config_loader import build_qualification_json_schema, get_default_config
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.services.alert_generator import detect_risk
 from app.models.conversation import (
     Conversation,
@@ -65,12 +65,17 @@ async def qualify_lead(
     conversation_history: list[dict],
     lead_id: uuid.UUID,
     branch_id: uuid.UUID,
+    tenant_id: uuid.UUID,
     config: dict[str, Any] | None = None,
 ) -> dict:
     """Evaluates qualification criteria and updates the lead record.
 
     Creates its own DB session — safe to call via asyncio.create_task().
     Returns the parsed qualification dict, or {} on failure.
+
+    tenant_id: el único caller (bot_engine.py::_process_message_inner) ya lo
+    tiene disponible como parámetro — se agregó explícitamente en vez de
+    resolverlo acá para no necesitar un lookup "pre-tenant" adicional.
     """
     if not conversation_history:
         return {}
@@ -115,6 +120,14 @@ async def qualify_lead(
 
     # 2. Persist updates in a fresh session
     async with AsyncSessionLocal() as db:
+        # Sesión nueva (AsyncSessionLocal directo, no pasa por get_db()) — sin
+        # esto, bajo walix_app real (sin BYPASSRLS) ninguna query de acá en
+        # adelante ve filas de leads/pipeline_stages/users/branches/
+        # conversations. is_local=FALSE: esta función hace varios db.commit()
+        # más abajo (líneas ~164, ~222, ~247, ~297 en advance_lead_stage/
+        # notify_assistant/escalate_to_human) dentro de la MISMA sesión.
+        await set_tenant_context(db, tenant_id)
+
         lead = await db.get(Lead, lead_id)
         if lead is None:
             logger.warning("qualify_lead: lead %s not found", lead_id)

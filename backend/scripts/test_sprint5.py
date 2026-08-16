@@ -322,7 +322,7 @@ async def _test_alerts(branch_id: uuid.UUID, tenant_id: uuid.UUID) -> None:
 
     print("\n[3a] send_daily_summary(branch_id)")
     try:
-        await send_daily_summary(branch_id)
+        await send_daily_summary(branch_id, tenant_id)
         ok("send_daily_summary sin excepción")
     except Exception as exc:
         fail("send_daily_summary", str(exc)[:120])

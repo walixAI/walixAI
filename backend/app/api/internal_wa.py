@@ -18,12 +18,13 @@ import re
 from datetime import datetime, timezone
 
 from anthropic import AsyncAnthropic
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text as sql_text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.command_interpreter import build_interpreter_prompt, enrich_context
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.models.lead import Lead, LeadStatus
 from app.models.pipeline import PipelineStage
 from app.models.user import User
@@ -57,16 +58,63 @@ _ROUTE_URLS: dict[str, str] = {
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
+async def _resolve_tenant_by_wa_phone(db: AsyncSession, wa_phone: str) -> object | None:
+    """Envuelve fn_lookup_tenant_by_user_wa_phone + su manejo de ambigüedad.
+
+    Separado de handle_internal_command para poder probarlo directamente con
+    una sesión impersonada de walix_app en tests (ver
+    tests/regression/test_grupo_d_rls.py) sin la limitación de aislamiento de
+    sesión de AsyncSessionLocal() propio — este helper recibe `db` como
+    parámetro en vez de abrir su propia conexión.
+
+    users.wa_phone NO tiene constraint de unicidad (ni global ni compuesto
+    con tenant_id — verificado contra app/models/user.py y el catálogo real
+    de Postgres). DECISIÓN CONFIRMADA: un mismo wa_phone en más de un User
+    activo (del mismo tenant o de tenants distintos) es SIEMPRE un error de
+    datos — no existe ningún escenario legítimo de "un empleado trabajando
+    para 2 clínicas" a soportar acá. fn_lookup_tenant_by_user_wa_phone
+    (SECURITY DEFINER, migración o0p1q2r3s4t5) lanza RAISE EXCEPTION
+    (SQLSTATE 23505 → IntegrityError en SQLAlchemy) en ese caso, en vez de
+    resolver un tenant arbitrario con LIMIT 1.
+    """
+    try:
+        return (
+            await db.execute(
+                sql_text("SELECT fn_lookup_tenant_by_user_wa_phone(:phone)"),
+                {"phone": wa_phone},
+            )
+        ).scalar_one_or_none()
+    except IntegrityError:
+        await db.rollback()
+        logger.error(
+            "internal_wa: wa_phone=%s coincide con más de un usuario activo "
+            "— dato inconsistente entre tenants, requiere revisión manual. "
+            "No se enruta a ningún tenant.",
+            wa_phone,
+        )
+        return None
+
+
 async def handle_internal_command(wa_phone: str, message_body: str) -> None:
     """Background task: find the Walix user, dispatch command, reply via WA."""
+    # Pre-tenant lookup: cualquier empleado de CUALQUIER tenant puede
+    # escribirle a este número interno — no hay tenant conocido hasta
+    # encontrar al usuario por su teléfono. fn_lookup_tenant_by_user_wa_phone
+    # (SECURITY DEFINER, migración o0p1q2r3s4t5) resuelve solo el tenant_id;
+    # recién con eso seteado el SELECT completo del User pasa por RLS normal.
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(User).where(
-                User.wa_phone == wa_phone,
-                User.is_active.is_(True),
+        tenant_id = await _resolve_tenant_by_wa_phone(db, wa_phone)
+
+        user = None
+        if tenant_id is not None:
+            await set_tenant_context(db, tenant_id)
+            result = await db.execute(
+                select(User).where(
+                    User.wa_phone == wa_phone,
+                    User.is_active.is_(True),
+                )
             )
-        )
-        user = result.scalar_one_or_none()
+            user = result.scalar_one_or_none()
 
     if user is None:
         await _send_reply(
@@ -82,6 +130,7 @@ async def handle_internal_command(wa_phone: str, message_body: str) -> None:
     )
 
     async with AsyncSessionLocal() as db:
+        await set_tenant_context(db, user.tenant_id)
         text = await _dispatch(message_body.strip(), user, db)
 
     await _send_reply(wa_phone, text)

@@ -45,10 +45,14 @@ Ejecuta estos comandos en la Railway SQL console (o via psql como admin):
 ─── PASO 5: Verificar que walix_app NO tiene privilegios de admin ────────────
 
   -- walix_app NO debe poder: ALTER TABLE, DROP TABLE, TRUNCATE, CREATE TABLE.
-  -- Comprueba los privilegios con:
-  \\du walix_app
+  -- \\du es un meta-comando de psql — la consola SQL web de Railway no lo
+  -- entiende. Usa esta query SQL portable en su lugar:
 
-  -- Debe mostrar NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOREPLICATION.
+  SELECT rolname, rolsuper, rolbypassrls, rolcreatedb, rolcreaterole
+    FROM pg_roles WHERE rolname = 'walix_app';
+
+  -- Debe imprimir exactamente:
+  --   walix_app | false | false | false | false
 
 ─── PASO 6: Actualizar DATABASE_URL para el servidor FastAPI ────────────────
 

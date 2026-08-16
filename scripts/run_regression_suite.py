@@ -7,14 +7,17 @@ Corre, EN ORDEN, y acumula resultado sin abortar entre pasos:
      incluso si 1 o 2 fallaron — es el ancla que confirma que la clínica sigue
      funcionando pase lo que pase)
 
-Distingue FAILs "conocidos y documentados" de FAILs nuevos:
-  - El único FAIL conocido hoy es
-    test_rls_bypass_leaks_cross_tenant_lead_when_querying_unfiltered
-    (rol `postgres` de Railway con rolbypassrls=TRUE — ver el docstring de
-    backend/tests/regression/test_multi_tenancy.py líneas 20-43). Esperado
-    que falle en este entorno; no bloquea el exit code.
-  - Cualquier otro FAIL (en pytest, en Playwright, o en test_webhook.py) es
-    "nuevo" y hace que el script termine con sys.exit(1).
+Distingue FAILs "conocidos y documentados" (_KNOWN_BACKEND_FAILURES, abajo)
+de FAILs nuevos:
+  - Hoy _KNOWN_BACKEND_FAILURES está vacío: el hallazgo de RLS que vivía acá
+    (rol postgres con rolbypassrls=TRUE) se resolvió con el rol walix_app +
+    la migración k6l7m8n9o0p1 — ver backend/tests/regression/test_multi_tenancy.py.
+    El mecanismo se deja andando (no se borra) para futuros hallazgos del
+    mismo tipo: un FAIL esperado y documentado en un entorno dado, que no
+    debería bloquear el exit code de la suite.
+  - Cualquier FAIL no listado en _KNOWN_BACKEND_FAILURES (en pytest, en
+    Playwright, o en test_webhook.py) es "nuevo" y hace que el script
+    termine con sys.exit(1).
 
 Requiere backend (uvicorn) y frontend (vite) corriendo en background antes
 de invocar este script — ver docstring de scripts/run_regression_suite.py /
@@ -42,15 +45,11 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
-# Sustrings de nodeid/nombre de test que cuentan como FAIL conocido y documentado.
-_KNOWN_BACKEND_FAILURES = {
-    "test_rls_bypass_leaks_cross_tenant_lead_when_querying_unfiltered",
-}
-
-_KNOWN_FAILURES_NOTE = (
-    "  - test_rls_bypass_leaks_cross_tenant_lead_when_querying_unfiltered\n"
-    "    (rol postgres con rolbypassrls=TRUE, ver test_multi_tenancy.py líneas 20-43)"
-)
+# Sustrings de nodeid/nombre de test que cuentan como FAIL conocido y
+# documentado — vacío hoy. Agregar acá (nodeid, motivo) cuando aparezca un
+# nuevo hallazgo esperado-a-fallar en un entorno dado, en vez de dejarlo
+# fallar la suite entera silenciosamente.
+_KNOWN_BACKEND_FAILURES: set[str] = set()
 
 
 def _backend_python() -> str:
@@ -175,8 +174,12 @@ def main() -> int:
     print(f"frontend/playwright  : {frontend_line}")
     print(f"test_webhook.py      : {webhook_line}")
     print("-----------------------------------")
-    print("FAILS CONOCIDOS Y DOCUMENTADOS (no bloqueantes para este resumen):")
-    print(_KNOWN_FAILURES_NOTE)
+    if _KNOWN_BACKEND_FAILURES:
+        print("FAILS CONOCIDOS Y DOCUMENTADOS (no bloqueantes para este resumen):")
+        for nid in sorted(_KNOWN_BACKEND_FAILURES):
+            print(f"  - {nid}")
+    else:
+        print("FAILS CONOCIDOS Y DOCUMENTADOS: ninguno registrado actualmente.")
 
     any_new_failure = bool(backend_new_failures) or not frontend_result.ok or not webhook_result.ok
 

@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.auth import get_current_user
-from app.core.database import AsyncSessionLocal, get_db
+from app.core.database import AsyncSessionLocal, get_db, set_tenant_context
 from app.core.redis import redis_client
 from app.services.activity_service import create_field_change_activity, create_system_activity
 from app.models.activity import Activity
@@ -369,6 +369,7 @@ async def _process_csv_import(
         existing_phones: set[str] = set()
 
         async with AsyncSessionLocal() as db:
+            await set_tenant_context(db, tenant_id)
             if real_phones:
                 existing_phones = set(
                     (

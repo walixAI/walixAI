@@ -18,7 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.celery_app import celery_app
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.models.agent import AgentSuggestion
 from app.models.ai_memory import AIEntityContext, AIMemoryEvent
 from app.tasks._helpers import run_async
@@ -159,7 +159,14 @@ def update_entity_context_task(self, memory_event_id: str) -> dict:
 
     async def _run() -> dict:
         async with AsyncSessionLocal() as db:
-            # 1. Load triggering event
+            # 1. Load triggering event. ai_memory_events NO tiene RLS hoy
+            # (verificado 2026-08-15 contra pg_class.relrowsecurity — hallazgo
+            # aparte, documentado para decidir en un prompt separado, no
+            # resuelto acá) — así que este db.get() funciona sin importar el
+            # contexto de tenant. Ídem ai_entity_context (el upsert de más
+            # abajo). Pero agent_suggestions y users SÍ tienen RLS, y esas
+            # queries están más abajo — por eso el set_tenant_context() se
+            # aplica de todos modos, en cuanto se conoce tenant_id.
             event = await db.get(AIMemoryEvent, uuid.UUID(memory_event_id))
             if event is None:
                 logger.warning("[ai_memory] event %s not found — skip", memory_event_id)
@@ -168,6 +175,7 @@ def update_entity_context_task(self, memory_event_id: str) -> dict:
             tenant_id = event.tenant_id
             entity_type = event.entity_type
             entity_id = event.entity_id
+            await set_tenant_context(db, tenant_id)
 
             # 2. Current context (may not exist yet)
             current_ctx: AIEntityContext | None = (await db.execute(

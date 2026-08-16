@@ -5,13 +5,23 @@ session factory (patched in by celery_app.worker_process_init) ensures fresh
 DB connections per asyncio.run() call.
 
 Session ownership rules (derived from agent signatures):
-  run_follow_up_agent(branch_id)           — agent opens its own session
-  run_pipeline_agent(branch_id)            — agent opens its own session
-  run_config_agent(branch_id)              — agent opens its own session
-  run_closing_agent(lead_id, tenant_id)    — agent opens its own session
+  run_follow_up_agent(branch_id, tenant_id)   — agent opens its own session
+  run_pipeline_agent(branch_id, tenant_id)    — agent opens its own session
+  run_config_agent(branch_id, tenant_id)      — agent opens its own session
+  run_closing_agent(lead_id, tenant_id)       — agent opens its own session
   run_reactivation_agent(tenant_id, db)    — caller must supply session
   run_profile_enrichment_agent(tenant_id, db) — caller must supply session
   execute_suggestion(suggestion_id: UUID, db) — caller must supply session
+
+tenant_id ahora es obligatorio en los agentes por-branch porque cada uno
+abre su propia sesión con AsyncSessionLocal() y necesita
+set_tenant_context(db, tenant_id) antes de la primera query — bajo RLS real
+(walix_app, sin BYPASSRLS) ninguna query contra una tabla protegida ve filas
+sin ese contexto. branch_id/tenant_id se obtienen juntos de
+get_active_branch_tenant_pairs() (app/tasks/_helpers.py), que a su vez usa
+fn_list_active_branch_tenant_pairs() (SECURITY DEFINER, migración
+m8n9o0p1q2r3) porque enumerar branches activas cruza tenants a propósito —
+ningún set_tenant_context() de un solo tenant puede resolver esa query.
 """
 
 from __future__ import annotations
@@ -21,7 +31,11 @@ import uuid
 
 from app.celery_app import celery_app
 from app.core.database import AsyncSessionLocal
-from app.tasks._helpers import get_active_branch_ids, get_active_tenant_ids, run_async
+from app.tasks._helpers import (
+    get_active_branch_tenant_pairs,
+    get_active_tenant_ids,
+    run_async,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +53,12 @@ def run_follow_up_all_branches(self) -> dict:
     from app.agents.follow_up_agent import run_follow_up_agent
 
     async def _run() -> dict:
-        branch_ids = await get_active_branch_ids()
-        results = {"branches": len(branch_ids), "suggestions_created": 0, "errors": 0}
-        logger.info("[follow_up] running for %d branches", len(branch_ids))
-        for bid in branch_ids:
+        pairs = await get_active_branch_tenant_pairs()
+        results = {"branches": len(pairs), "suggestions_created": 0, "errors": 0}
+        logger.info("[follow_up] running for %d branches", len(pairs))
+        for bid, tid in pairs:
             try:
-                count = await run_follow_up_agent(bid)
+                count = await run_follow_up_agent(bid, tid)
                 results["suggestions_created"] += count or 0
             except Exception:
                 logger.exception("[follow_up] branch %s failed", bid)
@@ -68,12 +82,12 @@ def run_pipeline_all_branches(self) -> dict:
     from app.agents.pipeline_agent import run_pipeline_agent
 
     async def _run() -> dict:
-        branch_ids = await get_active_branch_ids()
-        results = {"branches": len(branch_ids), "suggestions_created": 0, "errors": 0}
-        logger.info("[pipeline] running for %d branches", len(branch_ids))
-        for bid in branch_ids:
+        pairs = await get_active_branch_tenant_pairs()
+        results = {"branches": len(pairs), "suggestions_created": 0, "errors": 0}
+        logger.info("[pipeline] running for %d branches", len(pairs))
+        for bid, tid in pairs:
             try:
-                created = await run_pipeline_agent(bid)
+                created = await run_pipeline_agent(bid, tid)
                 results["suggestions_created"] += int(bool(created))
             except Exception:
                 logger.exception("[pipeline] branch %s failed", bid)
@@ -97,12 +111,12 @@ def run_config_all_branches(self) -> dict:
     from app.agents.config_agent import run_config_agent
 
     async def _run() -> dict:
-        branch_ids = await get_active_branch_ids()
-        results = {"branches": len(branch_ids), "suggestions_created": 0, "errors": 0}
-        logger.info("[config] running for %d branches", len(branch_ids))
-        for bid in branch_ids:
+        pairs = await get_active_branch_tenant_pairs()
+        results = {"branches": len(pairs), "suggestions_created": 0, "errors": 0}
+        logger.info("[config] running for %d branches", len(pairs))
+        for bid, tid in pairs:
             try:
-                created = await run_config_agent(bid)
+                created = await run_config_agent(bid, tid)
                 results["suggestions_created"] += int(bool(created))
             except Exception:
                 logger.exception("[config] branch %s failed", bid)
@@ -130,38 +144,46 @@ def run_closing_all_branches(self) -> dict:
     """
     from sqlalchemy import select
     from app.agents.closing_agent import run_closing_agent
+    from app.core.database import set_tenant_context
     from app.models.lead import Lead, LeadStatus
 
     _TERMINAL = [LeadStatus.PERDIDO, LeadStatus.CALIFICADO]
     _MIN_SCORE = 70
 
     async def _run() -> dict:
-        branch_ids = await get_active_branch_ids()
-        results = {"branches": len(branch_ids), "suggestions_created": 0, "errors": 0}
-        logger.info("[closing] running for %d branches", len(branch_ids))
+        pairs = await get_active_branch_tenant_pairs()
+        results = {"branches": len(pairs), "suggestions_created": 0, "errors": 0}
+        logger.info("[closing] running for %d branches", len(pairs))
 
-        for bid in branch_ids:
-            # Short-lived session only for the candidate query
+        for bid, tid in pairs:
+            # Short-lived session only for the candidate query. tenant_id ya
+            # viene de get_active_branch_tenant_pairs() — antes esta query
+            # intentaba DESCUBRIR tenant_id vía SELECT Lead.tenant_id sin
+            # contexto todavía seteado, lo cual RLS bloquea (mismo problema
+            # que branch_id-only en los otros agentes, solo que acá se
+            # camuflaba como "seleccionar una columna" en vez de "no ver
+            # filas").
             try:
                 async with AsyncSessionLocal() as db:
+                    await set_tenant_context(db, tid)
                     rows = await db.execute(
-                        select(Lead.id, Lead.tenant_id).where(
+                        select(Lead.id).where(
                             Lead.branch_id == bid,
                             Lead.deleted_at.is_(None),
                             Lead.status.notin_(_TERMINAL),
                             Lead.current_score >= _MIN_SCORE,
                         ).limit(10)
                     )
-                    candidates = rows.all()
+                    candidate_ids = rows.scalars().all()
             except Exception:
                 logger.exception("[closing] candidate query failed for branch=%s", bid)
                 results["errors"] += 1
                 continue
 
             # Agent opens its own session per lead
-            for lead_id, tenant_id in candidates:
+            for lead_id in candidate_ids:
                 try:
-                    created = await run_closing_agent(lead_id, tenant_id)
+                    created = await run_closing_agent(lead_id, tid)
                     results["suggestions_created"] += int(bool(created))
                 except Exception:
                     logger.exception("[closing] lead %s failed", lead_id)
@@ -279,18 +301,20 @@ def run_aprendiz_all_tenants(self) -> dict:
     max_retries=2,
     default_retry_delay=30,
 )
-def execute_suggestion_task(suggestion_id: str) -> dict:
+def execute_suggestion_task(suggestion_id: str, tenant_id: str) -> dict:
     """Execute a confirmed AgentSuggestion by ID (enqueued from the /confirm endpoint).
 
-    suggestion_id arrives as str (JSON-serializable); converted to UUID before
-    passing to execute_suggestion(suggestion_id: UUID, db).
+    suggestion_id/tenant_id arrive as str (Celery args must be
+    JSON-serializable); converted to UUID before passing to
+    execute_suggestion(suggestion_id, tenant_id, db).
     """
     from app.agents.executor import execute_suggestion
 
     async def _run() -> dict:
         sid = uuid.UUID(suggestion_id)
+        tid = uuid.UUID(tenant_id)
         async with AsyncSessionLocal() as db:
-            return await execute_suggestion(sid, db)
+            return await execute_suggestion(sid, tid, db)
 
     try:
         return run_async(_run())

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.prompts import PIPELINE_AGENT_PROMPT
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.models.activity import ActivityType, LeadActivity
 from app.models.agent import AgentSuggestion
 from app.models.lead import Lead, LeadStatus
@@ -37,10 +37,15 @@ def _extract_json(text: str) -> dict[str, Any]:
     return json.loads(match.group())
 
 
-async def run_pipeline_agent(branch_id: uuid.UUID) -> bool:
-    """Analyze pipeline health and create a suggestion for the manager if needed."""
+async def run_pipeline_agent(branch_id: uuid.UUID, tenant_id: uuid.UUID) -> bool:
+    """Analyze pipeline health and create a suggestion for the manager if needed.
+
+    tenant_id: el caller (app/tasks/agent_tasks.py) lo obtiene de
+    get_active_branch_tenant_pairs() — ver app/tasks/_helpers.py.
+    """
     try:
         async with AsyncSessionLocal() as db:
+            await set_tenant_context(db, tenant_id)
             return await _run_pipeline(branch_id, db)
     except Exception:
         logger.exception("pipeline_agent: unhandled error branch=%s", branch_id)

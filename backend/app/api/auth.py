@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_db, set_tenant_context
 from app.core.security import (
     create_access_token,
     hash_password,  # re-exported for callers that need to seed users
@@ -22,6 +22,20 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 v2_router = APIRouter(prefix="/v2/auth", tags=["auth"])
 
 _bearer_scheme = HTTPBearer(auto_error=True)
+
+
+async def _resolve_tenant_by_email(db: AsyncSession, email: str) -> uuid.UUID | None:
+    """Pre-tenant lookup: which tenant (if any) owns a user with this email.
+
+    Uses fn_lookup_tenant_by_email (SECURITY DEFINER, migration
+    l7m8n9o0p1q2) instead of `SELECT * FROM users WHERE email = ...`
+    directly, because at this point in the flow there is no tenant context
+    set yet — under RLS with a non-bypass runtime role (walix_app), a plain
+    SELECT would never see any row, no matter which tenant the email
+    belongs to. The function returns ONLY tenant_id, never the row itself.
+    """
+    result = await db.execute(text("SELECT fn_lookup_tenant_by_email(:email)"), {"email": email})
+    return result.scalar_one_or_none()
 
 
 class LoginRequest(BaseModel):
@@ -122,8 +136,7 @@ async def register(
     body: RegisterRequest,
     db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
-    existing = await db.execute(select(User).where(User.email == body.email))
-    if existing.scalar_one_or_none() is not None:
+    if await _resolve_tenant_by_email(db, body.email) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Este correo ya está registrado",
@@ -140,6 +153,10 @@ async def register(
     )
     db.add(tenant)
     await db.flush()
+    # El tenant recién se creó en esta misma transacción — a partir de acá
+    # SÍ lo conocemos, así que las siguientes filas (RLS-protegidas) pueden
+    # insertarse normalmente contra ese contexto.
+    await set_tenant_context(db, tenant.id)
 
     company = Company(
         tenant_id=tenant.id,
@@ -179,8 +196,12 @@ async def login(
     body: LoginRequest,
     db: AsyncSession = Depends(get_db),
 ) -> LoginResponse:
-    result = await db.execute(select(User).where(User.email == body.email))
-    user = result.scalar_one_or_none()
+    user = None
+    tenant_id = await _resolve_tenant_by_email(db, body.email)
+    if tenant_id is not None:
+        await set_tenant_context(db, tenant_id)
+        result = await db.execute(select(User).where(User.email == body.email))
+        user = result.scalar_one_or_none()
 
     # Same response for unknown email and wrong password — avoids leaking which
     # emails exist via timing or message differences.
@@ -236,9 +257,8 @@ async def check_email(
     db: AsyncSession = Depends(get_db),
 ) -> CheckEmailResponse:
     """Return {available: true} if the email is not yet registered."""
-    result = await db.execute(select(User).where(User.email == body.email.strip().lower()))
-    available = result.scalar_one_or_none() is None
-    return CheckEmailResponse(available=available)
+    tenant_id = await _resolve_tenant_by_email(db, body.email.strip().lower())
+    return CheckEmailResponse(available=tenant_id is None)
 
 
 # ── POST /v2/auth/register ────────────────────────────────────────────────────
@@ -290,8 +310,7 @@ async def register_v2(
     """
     email = body.email.strip().lower()
 
-    existing = await db.execute(select(User).where(User.email == email))
-    if existing.scalar_one_or_none() is not None:
+    if await _resolve_tenant_by_email(db, email) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Este correo ya está registrado",
@@ -311,6 +330,8 @@ async def register_v2(
     )
     db.add(tenant)
     await db.flush()
+    # Idem register(): recién acá conocemos el tenant nuevo.
+    await set_tenant_context(db, tenant.id)
 
     company = Company(
         tenant_id=tenant.id,

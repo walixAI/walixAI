@@ -17,7 +17,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.models.knowledge import KnowledgeChunk, KnowledgeDocument
 
 logger = logging.getLogger(__name__)
@@ -117,6 +117,9 @@ async def _ingest_file(
     filename = file_path.name
 
     async with AsyncSessionLocal() as db:
+        # Sesión nueva — knowledge_documents/knowledge_chunks tienen RLS.
+        await set_tenant_context(db, tenant_id)
+
         existing_doc = (
             await db.execute(
                 select(KnowledgeDocument).where(

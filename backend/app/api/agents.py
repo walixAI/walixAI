@@ -116,7 +116,7 @@ async def confirm_suggestion(
     await db.commit()
     await db.refresh(suggestion)
 
-    execute_suggestion_task.delay(str(suggestion.id))
+    execute_suggestion_task.delay(str(suggestion.id), str(current_user.tenant_id))
     logger.info(
         "agents: confirmed suggestion=%s agent_type=%s by user=%s",
         suggestion_id, suggestion.agent_type, current_user.id,

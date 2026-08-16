@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.prompts import FOLLOW_UP_AGENT_PROMPT
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.models.agent import AgentSuggestion
 from app.models.conversation import (
     Conversation,
@@ -41,10 +41,15 @@ def _extract_json(text: str) -> dict[str, Any]:
     return json.loads(match.group())
 
 
-async def run_follow_up_agent(branch_id: uuid.UUID) -> int:
-    """Scan branch for stale leads and create follow-up suggestions. Returns count created."""
+async def run_follow_up_agent(branch_id: uuid.UUID, tenant_id: uuid.UUID) -> int:
+    """Scan branch for stale leads and create follow-up suggestions. Returns count created.
+
+    tenant_id: el caller (app/tasks/agent_tasks.py) lo obtiene de
+    get_active_branch_tenant_pairs() — ver app/tasks/_helpers.py.
+    """
     try:
         async with AsyncSessionLocal() as db:
+            await set_tenant_context(db, tenant_id)
             return await _run_follow_up(branch_id, db)
     except Exception:
         logger.exception("follow_up_agent: unhandled error branch=%s", branch_id)

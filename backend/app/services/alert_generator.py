@@ -1,9 +1,18 @@
 """Walix proactive alert generator.
 
 Three entry points:
-  send_daily_summary(branch_id)    — called by the hourly scheduler job
-  send_no_response_alert(lead_id, rule_id) — called by the 30-min unresponded job
+  send_daily_summary(branch_id, tenant_id)    — called by the hourly scheduler job
+  send_no_response_alert(lead_id, rule_id, tenant_id) — called by the 30-min unresponded job
   detect_risk(lead, qualification_result, db) — called by qualifier.py after each turn
+
+tenant_id parameters (added 2026-08-15): each of these opens its own
+AsyncSessionLocal() and calls set_tenant_context(db, tenant_id) before any
+query — required under RLS with a non-bypass runtime role (walix_app). The
+caller (app/tasks/alerts_tasks.py) resolves tenant_id via
+app/tasks/_helpers.py::get_active_alert_rules() / get_active_branch_tenant_pairs(),
+which cross tenants on purpose via SECURITY DEFINER functions (migrations
+m8n9o0p1q2r3, n9o0p1q2r3s4) — see their docstrings for why a single
+set_tenant_context() can't replace that enumeration step.
 """
 
 import logging
@@ -17,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.models.alert import AlertRule
 from app.models.conversation import Message
 from app.models.lead import Lead, LeadStatus
@@ -117,9 +126,15 @@ async def _send_wa(
 
 # ── Daily summary ─────────────────────────────────────────────────────────────
 
-async def send_daily_summary(branch_id: uuid.UUID) -> None:
-    """Computes yesterday's stats and sends a personalized summary to each asesor."""
+async def send_daily_summary(branch_id: uuid.UUID, tenant_id: uuid.UUID) -> None:
+    """Computes yesterday's stats and sends a personalized summary to each asesor.
+
+    tenant_id: el caller (app/tasks/alerts_tasks.py) lo obtiene de
+    get_active_alert_rules() — ver app/tasks/_helpers.py.
+    """
     async with AsyncSessionLocal() as db:
+        # Sesión nueva — branches/leads/messages/users tienen RLS.
+        await set_tenant_context(db, tenant_id)
         branch = await db.get(Branch, branch_id)
         if not branch or not branch.is_active:
             return
@@ -199,9 +214,16 @@ async def send_daily_summary(branch_id: uuid.UUID) -> None:
 
 # ── No-response alert ─────────────────────────────────────────────────────────
 
-async def send_no_response_alert(lead_id: uuid.UUID, rule_id: uuid.UUID) -> None:
-    """Alerts the assigned user about a lead that hasn't responded."""
+async def send_no_response_alert(
+    lead_id: uuid.UUID, rule_id: uuid.UUID, tenant_id: uuid.UUID
+) -> None:
+    """Alerts the assigned user about a lead that hasn't responded.
+
+    tenant_id: el caller (app/tasks/alerts_tasks.py) lo obtiene de
+    get_active_alert_rules() — ver app/tasks/_helpers.py.
+    """
     async with AsyncSessionLocal() as db:
+        await set_tenant_context(db, tenant_id)
         lead = await db.get(Lead, lead_id)
         rule = await db.get(AlertRule, rule_id)
         if not lead or not rule:
@@ -264,9 +286,14 @@ async def send_no_response_alert(lead_id: uuid.UUID, rule_id: uuid.UUID) -> None
 
 # ── Monthly summary ───────────────────────────────────────────────────────────
 
-async def send_monthly_summary(branch_id: uuid.UUID) -> None:
-    """Sends a monthly performance summary to all active asesores."""
+async def send_monthly_summary(branch_id: uuid.UUID, tenant_id: uuid.UUID) -> None:
+    """Sends a monthly performance summary to all active asesores.
+
+    tenant_id: el caller (app/tasks/alerts_tasks.py) lo obtiene de
+    get_active_branch_tenant_pairs() — ver app/tasks/_helpers.py.
+    """
     async with AsyncSessionLocal() as db:
+        await set_tenant_context(db, tenant_id)
         branch = await db.get(Branch, branch_id)
         if not branch or not branch.is_active:
             return

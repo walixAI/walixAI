@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.prompts import CONFIG_AGENT_PROMPT
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.models.activity import ActivityType, LeadActivity
 from app.models.agent import AgentSuggestion
 from app.models.lead import Lead
@@ -36,10 +36,17 @@ def _extract_json(text: str) -> dict[str, Any]:
     return json.loads(match.group())
 
 
-async def run_config_agent(branch_id: uuid.UUID) -> bool:
-    """Detect inactive stages and suggest pipeline cleanup to the owner."""
+async def run_config_agent(branch_id: uuid.UUID, tenant_id: uuid.UUID) -> bool:
+    """Detect inactive stages and suggest pipeline cleanup to the owner.
+
+    tenant_id: el caller (app/tasks/agent_tasks.py) lo obtiene de
+    get_active_branch_tenant_pairs() — ver app/tasks/_helpers.py.
+    """
     try:
         async with AsyncSessionLocal() as db:
+            # Sesión nueva — branches/pipeline_stages/leads/lead_activities/
+            # users tienen RLS.
+            await set_tenant_context(db, tenant_id)
             return await _run_config(branch_id, db)
     except Exception:
         logger.exception("config_agent: unhandled error branch=%s", branch_id)

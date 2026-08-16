@@ -57,11 +57,11 @@ class AutomationPatchBody(BaseModel):
 
 # ── Background task wrapper ────────────────────────────────────────────────────
 
-async def _bg_execute_suggestion(suggestion_id: uuid.UUID) -> None:
+async def _bg_execute_suggestion(suggestion_id: uuid.UUID, tenant_id: uuid.UUID) -> None:
     try:
         from app.agents.executor import execute_suggestion
         async with AsyncSessionLocal() as db:
-            await execute_suggestion(suggestion_id, db)
+            await execute_suggestion(suggestion_id, tenant_id, db)
     except Exception:
         logger.exception("automations: bg execute failed for suggestion=%s", suggestion_id)
 
@@ -158,7 +158,7 @@ async def re_execute_automation(
     await db.commit()
     await db.refresh(suggestion)
 
-    background_tasks.add_task(_bg_execute_suggestion, suggestion.id)
+    background_tasks.add_task(_bg_execute_suggestion, suggestion.id, current_user.tenant_id)
     logger.info(
         "automations: re-execute queued suggestion=%s by owner=%s",
         suggestion_id, current_user.id,

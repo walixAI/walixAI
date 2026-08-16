@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.prompts import SCORING_SYSTEM_PROMPT
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.models.activity import ActivityType, LeadActivity
 from app.models.conversation import Conversation, Message
 from app.models.lead import Lead
@@ -87,6 +87,7 @@ async def _score_inner(
     output_tokens: int = 0
 
     async with AsyncSessionLocal() as db:
+        await set_tenant_context(db, tenant_id)
         # 1. Load lead
         lead = await db.get(Lead, lead_id)
         if lead is None:

@@ -299,7 +299,7 @@ async def _test_follow_up_agent(
     print("\n[2b] Llamar a run_follow_up_agent(branch_id)")
     try:
         from app.agents.follow_up_agent import run_follow_up_agent
-        created = await run_follow_up_agent(branch_id)
+        created = await run_follow_up_agent(branch_id, tenant_id)
         if created == 0:
             info("run_follow_up_agent devolvió 0 — branch sin WA creds o sin convs elegibles")
             info("Esto es esperado en desarrollo local sin WhatsApp configurado")
