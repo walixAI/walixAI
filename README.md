@@ -343,3 +343,31 @@ backend/scripts/test_handoff.py       # handoff → reply → asignación → re
 backend/scripts/test_meta_leads.py    # HMAC validation + lead con source=meta_ads
 backend/scripts/ingest_kb.py          # indexa backend/scripts/walix_kb/*.md en pgvector
 ```
+
+## Notas de infraestructura
+
+### REDIS_URL — Upstash
+
+Si `REDIS_URL` apunta a una instancia de Upstash que fue borrada, expiró, o
+se recreó con otro hostname, el fallo se manifiesta como `/health` en
+`"status": "degraded"`, con el componente `redis` en error de resolución
+DNS (`Name or service not known`) mientras `postgres` sigue `ok`. Hay que
+actualizar `REDIS_URL` en Railway Variables con el hostname vigente de la
+instancia de Upstash.
+
+Además, el broker de Celery (Kombu) exige que la propia URL `rediss://`
+traiga el parámetro `ssl_cert_reqs` en el query string — el
+`broker_use_ssl={"ssl_cert_reqs": None}` ya configurado en
+`app/celery_app.py` no alcanza para satisfacer esa validación por sí solo.
+Sin el parámetro en la URL, el cliente Redis directo (`app/core/redis.py`,
+el que usa `/health`) puede conectar sin problema mientras Celery falla al
+usar el broker. `REDIS_URL` debe incluir `?ssl_cert_reqs=CERT_NONE`
+(Upstash free tier usa certificado self-signed):
+
+```
+REDIS_URL=rediss://default:<password>@<host>.upstash.io:6379?ssl_cert_reqs=CERT_NONE
+```
+
+Verificado funcionando (2026-08-16) tanto para el cliente Redis directo
+(`/health`) como para el broker de Celery
+(`backend/scripts/diagnostics/test_celery_beat_walixapp.py`, 11/11 PASS).
