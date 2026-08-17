@@ -54,6 +54,15 @@ from tests.regression.conftest import impersonate_walix_app_or_skip
 # ── Permisos de las funciones SECURITY DEFINER nuevas ─────────────────────────
 
 async def test_grupo_d_pretenant_functions_have_no_public_grant(db: AsyncSession) -> None:
+    """Igual criterio que test_pretenant_functions_have_no_public_grant en
+    test_pretenant_lookups.py: el GRANT explícito a walix_app solo se
+    aplica cuando ese rol ya existe en el entorno (ver la migración
+    correspondiente) — en un Postgres fresco de CI sin walix_app, la
+    migración no le otorga el privilegio a nadie más."""
+    walix_app_exists = (
+        await db.execute(text("SELECT 1 FROM pg_roles WHERE rolname = 'walix_app'"))
+    ).scalar_one_or_none() is not None
+
     rows = (
         await db.execute(
             text(
@@ -68,8 +77,9 @@ async def test_grupo_d_pretenant_functions_have_no_public_grant(db: AsyncSession
     assert not any(grantee == "PUBLIC" for _name, grantee in grantees), (
         f"PUBLIC no debería tener EXECUTE sobre estas funciones — grants actuales: {grantees}"
     )
-    assert ("fn_lookup_meta_lead_configs_by_page_id", "walix_app") in grantees
-    assert ("fn_lookup_tenant_by_user_wa_phone", "walix_app") in grantees
+    if walix_app_exists:
+        assert ("fn_lookup_meta_lead_configs_by_page_id", "walix_app") in grantees
+        assert ("fn_lookup_tenant_by_user_wa_phone", "walix_app") in grantees
 
 
 # ── Meta Lead Ads: lookup de config por page_id ────────────────────────────────

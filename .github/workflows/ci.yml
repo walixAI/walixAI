@@ -112,6 +112,7 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
       SECRET_KEY: ci-secret-key-not-used-in-prod
       APP_ENV: test
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_TEST }}
       META_VERIFY_TOKEN: ci-verify-token
       META_APP_SECRET: ci-app-secret
       LANGFUSE_PUBLIC_KEY: ci-langfuse-public

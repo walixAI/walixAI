@@ -108,7 +108,14 @@ async def test_check_email_reports_taken_and_available_under_rls(
 async def test_pretenant_functions_have_no_public_grant(db: AsyncSession) -> None:
     """REVOKE ALL ... FROM PUBLIC en l7m8n9o0p1q2 — confirma contra el
     catálogo real de permisos que ningún rol sin GRANT EXECUTE explícito
-    puede invocar estas funciones, y que walix_app sí lo tiene."""
+    puede invocar estas funciones, y que walix_app sí lo tiene (cuando el
+    rol existe en este entorno — la migración deja el GRANT explícito sin
+    aplicar, y solo el owner conserva su privilegio implícito, si walix_app
+    todavía no se creó — ver el bloque if/else en la migración misma)."""
+    walix_app_exists = (
+        await db.execute(text("SELECT 1 FROM pg_roles WHERE rolname = 'walix_app'"))
+    ).scalar_one_or_none() is not None
+
     rows = (
         await db.execute(
             text(
@@ -123,8 +130,9 @@ async def test_pretenant_functions_have_no_public_grant(db: AsyncSession) -> Non
     assert not any(grantee == "PUBLIC" for _name, grantee in grantees), (
         f"PUBLIC no debería tener EXECUTE sobre estas funciones — grants actuales: {grantees}"
     )
-    assert ("fn_lookup_tenant_by_email", "walix_app") in grantees
-    assert ("fn_lookup_tenant_by_wa_phone_id", "walix_app") in grantees
+    if walix_app_exists:
+        assert ("fn_lookup_tenant_by_email", "walix_app") in grantees
+        assert ("fn_lookup_tenant_by_wa_phone_id", "walix_app") in grantees
 
 
 # ── Webhook: mecanismo de resolución de Branch ────────────────────────────────
