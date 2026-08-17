@@ -33,7 +33,9 @@ from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal
 from app.core.security import hash_password
+from app.industry_templates.catalog import get_template
 from app.models.pipeline import PipelineStage
+from app.models.pipeline_group import Pipeline
 from app.models.tenant import AssignmentMode, Branch, Company, Tenant, TenantPlan
 from app.models.user import User, UserRole
 
@@ -63,6 +65,25 @@ DEMO_STAGES = [
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
+def _apply_industry_fields(tenant: Tenant, industry_key: str) -> None:
+    """Puebla los campos semánticos de nomenclatura dinámica (Sprint 8B).
+
+    seed_ci.py crea las pipeline_stages directamente en vez de vía
+    TenantSetupService.apply_industry_template() (que también archiva
+    stages previas — innecesario acá, tenant nuevo), así que replica solo
+    la parte de campos del tenant. Sin esto, industry_key/entity_name/
+    entity_plural/contact_statuses_config se quedan en su server_default
+    ("generico"/"Contacto"/"Contactos"/[]) y test_nomenclatura.py falla
+    porque contact_statuses_config queda vacío.
+    """
+    template = get_template(industry_key)
+    tenant.industry_key = industry_key
+    tenant.industry_label = template["label"]
+    tenant.entity_name = template["entity_name"]
+    tenant.entity_plural = template["entity_plural"]
+    tenant.contact_statuses_config = template["contact_statuses"]
+
+
 async def _branch_needs_stages(db, branch_id: uuid.UUID) -> bool:
     """True si el branch no tiene al menos una etapa won Y una lost."""
     stages = (await db.execute(
@@ -79,7 +100,30 @@ async def _create_stages(
     branch_id: uuid.UUID,
     stage_specs: list[dict],
 ) -> int:
-    """Crea stages evitando violar la constraint (tenant_id, stage_key)."""
+    """Crea stages evitando violar la constraint (tenant_id, stage_key).
+
+    pipeline_id es NOT NULL en pipeline_stages — resuelve o crea el Pipeline
+    default del branch antes de crear las stages (mismo patrón que
+    app/models/pipeline.py, donde se resuelve/crea "Pipeline Principal").
+    """
+    pipeline_result = await db.execute(
+        select(Pipeline).where(
+            Pipeline.branch_id == branch_id,
+            Pipeline.is_default.is_(True),
+        ).limit(1)
+    )
+    pipeline = pipeline_result.scalar_one_or_none()
+    if pipeline is None:
+        pipeline = Pipeline(
+            tenant_id=tenant_id,
+            branch_id=branch_id,
+            name="Pipeline Principal",
+            is_default=True,
+            position=0,
+        )
+        db.add(pipeline)
+        await db.flush()
+
     existing_tenant_keys = {
         row[0]
         for row in (await db.execute(
@@ -96,6 +140,7 @@ async def _create_stages(
         db.add(PipelineStage(
             tenant_id=tenant_id,
             branch_id=branch_id,
+            pipeline_id=pipeline.id,
             name=spec["label"],
             slug=spec["key"],
             stage_key=spec["key"],
@@ -129,6 +174,7 @@ async def seed_clinica() -> None:
                 plan=TenantPlan.ENTERPRISE,
                 industry="salud",
             )
+            _apply_industry_fields(tenant, "salud")
             db.add(tenant)
             await db.flush()
 
@@ -145,7 +191,14 @@ async def seed_clinica() -> None:
                 company_id=company.id,
                 tenant_id=tenant.id,
                 name="Condesa CDMX",
-                wa_phone_number_id="PENDIENTE_CON",
+                # PENDIENTE_MTY (no _CON) a propósito: es el phone_number_id
+                # que scripts/test_webhook.py y test_qualification.py tienen
+                # hardcodeado (mismo valor que usa scripts/seed.py para la
+                # branch Monterrey en dev local) — sin este match, el
+                # webhook de CI nunca resuelve una branch y el lead nunca
+                # se crea, dejando a este tenant sin leads para los tests
+                # de deals/pipeline que corren después.
+                wa_phone_number_id="PENDIENTE_MTY",
                 wa_token=None,
                 assignment_mode=AssignmentMode.EQUITATIVA,
             )
@@ -210,6 +263,7 @@ async def seed_demo_tenant() -> None:
                 email="admin@demo.walix",
                 plan=TenantPlan.STARTER,
             )
+            _apply_industry_fields(tenant, "generico")
             db.add(tenant)
             await db.flush()
 

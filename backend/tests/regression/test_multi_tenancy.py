@@ -69,7 +69,7 @@ tests/regression/test_pretenant_lookups.py (login/check-email/webhook, que
 además dependen de las funciones SECURITY DEFINER de la migración
 l7m8n9o0p1q2 para resolver el tenant antes de conocerlo).
 
-`scripts/test_rls_role.py` es el complemento de esto: un script standalone
+`scripts/diagnostics/test_rls_role.py` es el complemento de esto: un script standalone
 que sí abre una conexión REAL como walix_app (con su password real, nunca
 hardcodeada) para validar que las credenciales/permisos end-to-end funcionan
 una vez que Walix termine el setup — ese es el momento en que se prueba la

@@ -217,23 +217,18 @@ def check_e() -> None:
         )
     else:
         # Sin worker: ejecutar síncronamente para verificar manejo de excepciones
-        # apply() corre la task en el proceso actual, sin broker
-        try:
-            execute_suggestion_task.apply(args=[fake_id])
-            # Si llegamos aquí sin excepción, la task no propagó el error correctamente
-            report(
-                "Error propagado correctamente (ValueError esperado para UUID inexistente)",
-                False,
-                "La task terminó sin lanzar excepción — la DB probablemente no está accesible",
-            )
-        except Exception as exc:
-            # ValueError: AgentSuggestion {uuid} not found — comportamiento correcto
-            # El worker loggea y relanza; no crashea el proceso, solo marca la task FAILURE
-            report(
-                "Error manejado gracefully (excepción controlada, proceso no cae)",
-                True,
-                f"{type(exc).__name__}: {str(exc)[:120]}",
-            )
+        # apply() corre la task en el proceso actual, sin broker. Por default
+        # (task_eager_propagates no está seteado en celery_app.conf) apply()
+        # NUNCA re-lanza la excepción al caller — la captura y la guarda en
+        # el EagerResult como estado FAILURE, igual que con un worker real.
+        # Un try/except acá nunca vería la excepción; hay que chequear el
+        # resultado, no esperar que .apply() explote.
+        r = execute_suggestion_task.apply(args=[fake_id, str(uuid.uuid4())])
+        report(
+            "Error manejado gracefully (FAILURE, sin crash del proceso)",
+            r.state == "FAILURE",
+            f"estado={r.state}" + (f" — {r.result}" if r.state == "FAILURE" else ""),
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -119,11 +119,14 @@ async def test_create_contact_name_optional(client: AsyncClient, user_asesor: di
     assert r.json()["name"] is None
 
 
-async def test_create_contact_phone_required(client: AsyncClient, user_asesor: dict) -> None:
-    """Crear contacto sin wa_phone debe fallar con 422."""
+async def test_create_contact_requires_name_or_phone(client: AsyncClient, user_asesor: dict) -> None:
+    """Crear contacto sin nombre NI wa_phone debe fallar con 422 — ver
+    app/api/contacts.py::create_contact, que solo exige al menos uno de los
+    dos (test_create_contact_name_optional y test_create_contact_phone_only
+    cubren el caso de que cualquiera de los dos por sí solo alcanza)."""
     r = await client.post(
         "/api/v1/contacts",
-        json={"name": "Sin Teléfono"},
+        json={"company": "ACME S.A."},
         headers=auth(user_asesor),
     )
     assert r.status_code == 422

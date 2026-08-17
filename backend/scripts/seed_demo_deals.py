@@ -116,7 +116,7 @@ async def main(tenant_id: str, email: str, password: str) -> None:
             branch_id = branches[0]["id"]
 
         # ── Pipeline stages del tenant ────────────────────────────────────────
-        board = (await c.get(f"{BASE}/opportunities/board?branch_id={branch_id}", headers=h)).json()
+        board = (await c.get(f"{BASE}/pipeline/board?branch_id={branch_id}", headers=h)).json()
         stages = sorted(board.get("stages", []), key=lambda s: s["order_index"])
         open_stages = [s for s in stages if not s["is_won"] and not s["is_lost"]]
         won_stage   = next((s for s in stages if s["is_won"]),  None)

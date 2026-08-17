@@ -16,7 +16,7 @@ Corré esto DESPUÉS de:
 
 Uso:
     WALIX_APP_DATABASE_URL="postgresql://walix_app:TU_PASSWORD@host:puerto/railway" \\
-      .venv/Scripts/python.exe scripts/test_rls_role.py
+      .venv/Scripts/python.exe scripts/diagnostics/test_rls_role.py
 
 Verificaciones:
   A. Sin app.current_tenant_id seteado, un SELECT sin WHERE en `leads`
@@ -35,7 +35,7 @@ import sys
 import uuid
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
@@ -83,7 +83,7 @@ async def main() -> int:
             "     consola de Railway del entorno que quieras probar.\n"
             "  2. Volvé a correr esto con:\n\n"
             "     WALIX_APP_DATABASE_URL=\"postgresql://walix_app:TU_PASSWORD@host:puerto/railway\" \\\n"
-            "       .venv/Scripts/python.exe scripts/test_rls_role.py\n"
+            "       .venv/Scripts/python.exe scripts/diagnostics/test_rls_role.py\n"
         )
         return 1
 

@@ -360,14 +360,26 @@ traiga el parámetro `ssl_cert_reqs` en el query string — el
 `broker_use_ssl={"ssl_cert_reqs": None}` ya configurado en
 `app/celery_app.py` no alcanza para satisfacer esa validación por sí solo.
 Sin el parámetro en la URL, el cliente Redis directo (`app/core/redis.py`,
-el que usa `/health`) puede conectar sin problema mientras Celery falla al
-usar el broker. `REDIS_URL` debe incluir `?ssl_cert_reqs=CERT_NONE`
-(Upstash free tier usa certificado self-signed):
+el que usa `/health` y toda la app en runtime) puede conectar sin problema
+mientras Celery falla al usar el broker. `REDIS_URL` debe incluir
+`?ssl_cert_reqs=none` (Upstash free tier usa certificado self-signed):
 
 ```
-REDIS_URL=rediss://default:<password>@<host>.upstash.io:6379?ssl_cert_reqs=CERT_NONE
+REDIS_URL=rediss://default:<password>@<host>.upstash.io:6379?ssl_cert_reqs=none
 ```
 
-Verificado funcionando (2026-08-16) tanto para el cliente Redis directo
-(`/health`) como para el broker de Celery
+**Ojo con el casing:** tiene que ser el string en minúsculas `none`
+(también válidos: `optional`, `required`) — **no** `CERT_NONE`. Kombu
+acepta `CERT_NONE` sin quejarse, pero `redis.asyncio` (la librería que usa
+`app/core/redis.py` para todo el tráfico real de Redis de la app, no solo
+`/health`) lo rechaza con `RedisError: Invalid SSL Certificate
+Requirements Flag`. Ver `redis.asyncio.connection`: el dict de valores
+válidos es `{"none": ssl.CERT_NONE, "optional": ..., "required": ...}`,
+sensible a mayúsculas. Es fácil no darse cuenta en producción porque una
+versión de `redis-py` vieja puede resolver el valor sin validarlo tan
+estricto — hasta que se reinstalen dependencias y deje de funcionar.
+
+Verificado funcionando (2026-08-16) con el valor correcto (`none`) tanto
+para el cliente Redis directo (`/health` y `pytest tests/sprint7/`) como
+para el broker de Celery
 (`backend/scripts/diagnostics/test_celery_beat_walixapp.py`, 11/11 PASS).

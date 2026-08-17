@@ -173,7 +173,7 @@ async def test_agent_execution_creates_system_activity(
     await db.flush()
 
     # Ejecutar directamente con la sesión de prueba (el commit queda en SAVEPOINT)
-    await execute_suggestion(sugg.id, db)
+    await execute_suggestion(sugg.id, tenant.id, db)
 
     r = await client.get(
         f"/api/v1/contacts/{contact_full['id']}/activities",

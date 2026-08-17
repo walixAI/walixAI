@@ -283,9 +283,11 @@ export function CopilotDrawer() {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "/") {
         e.preventDefault();
-        useCopilotStore.getState().open
-          ? useCopilotStore.getState().closeDrawer()
-          : useCopilotStore.getState().openDrawer();
+        if (useCopilotStore.getState().open) {
+          useCopilotStore.getState().closeDrawer();
+        } else {
+          useCopilotStore.getState().openDrawer();
+        }
       }
     };
     window.addEventListener("keydown", handler);

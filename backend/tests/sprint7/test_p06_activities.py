@@ -344,7 +344,9 @@ async def test_patch_task_complete(
     now_iso = datetime.now(timezone.utc).isoformat()
     r = await client.patch(
         f"{activities_url(contact_full['id'])}/{act_id}",
-        json={"completed_at": now_iso},
+        # Cerrar una tarea (activity_type=task, completed_at None -> valor)
+        # requiere closed_via — ver app/api/activities.py::update_activity.
+        json={"completed_at": now_iso, "closed_via": "manual"},
         headers=auth(user_asesor),
     )
     assert r.status_code == 200

@@ -175,11 +175,18 @@ def check_b(client: httpx.Client, token: str, branch_id: str) -> dict | None:
     ok_questions = isinstance(cfg.get("qualification_questions"), list) and len(cfg["qualification_questions"]) > 0
     ok_auto      = cfg.get("is_auto_generated") is True
 
-    report("(b.2) system_prompt persistido", ok_prompt,
-           f"chars={len(cfg.get('system_prompt') or '')}")
-    report("(b.3) tone persistido", ok_tone, f"tone={cfg.get('tone')}")
-    report("(b.4) qualification_questions persistidas", ok_questions,
-           f"count={len(cfg.get('qualification_questions') or [])}")
+    if CI_MODE:
+        # (a.2) confirm quedó skipeado — nunca se generó bot_config, así que
+        # b.2/b.3/b.4 fallarían siempre por diseño, no por un bug real.
+        report("(b.2) system_prompt persistido", None, "omitido en CI (confirm skipped)")
+        report("(b.3) tone persistido", None, "omitido en CI (confirm skipped)")
+        report("(b.4) qualification_questions persistidas", None, "omitido en CI (confirm skipped)")
+    else:
+        report("(b.2) system_prompt persistido", ok_prompt,
+               f"chars={len(cfg.get('system_prompt') or '')}")
+        report("(b.3) tone persistido", ok_tone, f"tone={cfg.get('tone')}")
+        report("(b.4) qualification_questions persistidas", ok_questions,
+               f"count={len(cfg.get('qualification_questions') or [])}")
     if CI_MODE:
         report("(b.5) is_auto_generated = true", None, "omitido en CI (confirm skipped)")
     else:
@@ -205,8 +212,13 @@ def check_c(client: httpx.Client, token: str) -> str | None:
     docs = r.json()
     auto_docs = [d for d in docs if d.get("is_auto_generated") is True]
     ok_auto = len(auto_docs) >= 1
-    report("(c.2) Existe al menos 1 doc con is_auto_generated=true", ok_auto,
-           f"auto_docs={len(auto_docs)}, total={len(docs)}")
+    if CI_MODE:
+        # confirm quedó skipeado — nunca se generó el doc auto-generado.
+        report("(c.2) Existe al menos 1 doc con is_auto_generated=true", None,
+               "omitido en CI (confirm skipped)")
+    else:
+        report("(c.2) Existe al menos 1 doc con is_auto_generated=true", ok_auto,
+               f"auto_docs={len(auto_docs)}, total={len(docs)}")
 
     if auto_docs:
         doc = auto_docs[0]
