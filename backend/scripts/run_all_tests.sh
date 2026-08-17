@@ -17,19 +17,27 @@ set -o pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(dirname "$SCRIPTS_DIR")"
-PYTHON="${BACKEND_DIR}/.venv/bin/python"
+
+# Prefiere el venv de backend/ (dev local); si no existe, cae al python del
+# PATH — el job "Backend — scripts de integración" de CI instala las deps
+# directo sobre el Python del runner, sin crear .venv.
+if [ -x "${BACKEND_DIR}/.venv/bin/python" ]; then
+    PYTHON="${BACKEND_DIR}/.venv/bin/python"
+elif command -v python3 &>/dev/null; then
+    PYTHON="$(command -v python3)"
+elif command -v python &>/dev/null; then
+    PYTHON="$(command -v python)"
+else
+    echo "ERROR: no se encontró ningún intérprete de Python (ni .venv/bin/python ni python3/python en el PATH)"
+    echo "       Local: cd backend && python -m venv .venv && .venv/bin/pip install -r requirements.txt"
+    exit 1
+fi
 
 # ── Colores ────────────────────────────────────────────────────────────────────
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'  # No Color
-
-if [ ! -x "$PYTHON" ]; then
-    echo "ERROR: Python no encontrado en $PYTHON"
-    echo "       Corre: cd backend && python -m venv .venv && .venv/bin/pip install -r requirements.txt"
-    exit 1
-fi
 
 # ── Descubrir tests ────────────────────────────────────────────────────────────
 # Orden estable: primero infraestructura, luego sprints en orden cronológico
