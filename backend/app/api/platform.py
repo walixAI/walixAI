@@ -17,16 +17,15 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
-from app.core.database import get_db
+from app.core.database import get_db, set_tenant_context
 from app.core.security import create_access_token
 from app.models.ai_log import AICommandLog
 from app.models.conversation import Conversation, Message
 from app.models.lead import Lead
-from app.models.subscription import FailedPayment, Subscription
 from app.models.tenant import Branch, Tenant, TenantPlan
 from app.models.user import User, UserRole
 
@@ -107,26 +106,23 @@ async def _ai_tokens_by_tenant(
     from_dt: datetime,
     to_dt: datetime,
 ) -> dict[uuid.UUID, int]:
-    """Returns {tenant_id: total_tokens} from both messages and ai_command_logs."""
-    # Messages: join messages → conversations → branches for tenant_id
+    """Returns {tenant_id: total_tokens} from both messages and ai_command_logs.
+
+    messages/conversations/branches/ai_command_logs ya tienen RLS desde el
+    cutover original — esto es un dashboard cross-tenant (Platform Owner),
+    así que usa las funciones SECURITY DEFINER de agregación en vez de
+    consultar las tablas directo (que bajo RLS real solo verían el tenant
+    del rol runtime, que no es ninguno). Ver migración p1q2r3s4t5u6.
+    """
     msg_rows = await db.execute(
-        select(Branch.tenant_id, func.coalesce(func.sum(Message.tokens_used), 0).label("tok"))
-        .join(Conversation, Message.conversation_id == Conversation.id)
-        .join(Branch, Conversation.branch_id == Branch.id)
-        .where(Message.created_at >= from_dt, Message.created_at < to_dt, Message.tokens_used.isnot(None))
-        .group_by(Branch.tenant_id)
+        text("SELECT * FROM fn_platform_message_tokens_by_tenant(:from_dt, :to_dt)"),
+        {"from_dt": from_dt, "to_dt": to_dt},
     )
     totals: dict[uuid.UUID, int] = {row[0]: int(row[1]) for row in msg_rows.fetchall()}
 
-    # AI command logs: direct tenant_id
     log_rows = await db.execute(
-        select(AICommandLog.tenant_id, func.coalesce(func.sum(AICommandLog.tokens_used), 0).label("tok"))
-        .where(
-            AICommandLog.created_at >= from_dt,
-            AICommandLog.created_at < to_dt,
-            AICommandLog.tokens_used.isnot(None),
-        )
-        .group_by(AICommandLog.tenant_id)
+        text("SELECT * FROM fn_platform_command_tokens_by_tenant(:from_dt, :to_dt)"),
+        {"from_dt": from_dt, "to_dt": to_dt},
     )
     for row in log_rows.fetchall():
         totals[row[0]] = totals.get(row[0], 0) + int(row[1])
@@ -287,15 +283,17 @@ async def platform_stats(
     # Sprint 10 — Stripe billing stats
     STRIPE_PLAN_MRR_MXN = {"starter": 699, "growth": 1499, "business": 2999}
 
-    active_subs_result = await db.execute(
-        select(Subscription).where(Subscription.status == "active")
+    # subscriptions/failed_payments tienen RLS (migración p1q2r3s4t5u6) — cross-
+    # tenant por diseño acá, vía las funciones SECURITY DEFINER de agregación.
+    active_plans_result = await db.execute(
+        text("SELECT * FROM fn_platform_list_active_subscription_plans()")
     )
-    active_subs = active_subs_result.scalars().all()
-    stripe_mrr_mxn = sum(STRIPE_PLAN_MRR_MXN.get(s.plan, 0) for s in active_subs)
+    stripe_mrr_mxn = sum(STRIPE_PLAN_MRR_MXN.get(row[0], 0) for row in active_plans_result.fetchall())
 
     failed_cutoff = now - timedelta(days=30)
     failed_count_result = await db.execute(
-        select(func.count(FailedPayment.id)).where(FailedPayment.created_at >= failed_cutoff)
+        text("SELECT fn_platform_count_failed_payments_since(:cutoff)"),
+        {"cutoff": failed_cutoff},
     )
     failed_payments_30d = failed_count_result.scalar_one() or 0
 
@@ -353,13 +351,12 @@ async def list_tenants(
     if not tenant_ids:
         return []
 
-    # Batch leads count per tenant
-    leads_rows = await db.execute(
-        select(Lead.tenant_id, func.count(Lead.id).label("c"))
-        .where(Lead.tenant_id.in_(tenant_ids))
-        .group_by(Lead.tenant_id)
-    )
-    leads_map: dict[uuid.UUID, int] = {row.tenant_id: row.c for row in leads_rows.fetchall()}
+    # Batch leads count per tenant — leads tiene RLS desde el cutover
+    # original; cross-tenant acá vía función de agregación (ver
+    # migración p1q2r3s4t5u6). Devuelve TODOS los tenants, no solo
+    # tenant_ids — se descartan las de más abajo con .get(t.id, 0).
+    leads_rows = await db.execute(text("SELECT * FROM fn_platform_lead_counts_by_tenant()"))
+    leads_map: dict[uuid.UUID, int] = {row[0]: row[1] for row in leads_rows.fetchall()}
 
     # Batch AI costs per tenant this month
     token_map = await _ai_tokens_by_tenant(db, month_start, now)
@@ -389,6 +386,12 @@ async def get_tenant_detail(
     tenant = await db.get(Tenant, tenant_id)
     if tenant is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+
+    # A diferencia de /stats y /tenants (agregados cross-tenant), este
+    # endpoint mira UN tenant conocido — set_tenant_context alcanza, igual
+    # que cualquier endpoint estándar. branches/leads/conversations/messages
+    # tienen RLS desde el cutover original.
+    await set_tenant_context(db, tenant_id)
 
     now = datetime.now(timezone.utc)
     last_month_start = (now - timedelta(days=30)).replace(hour=0, minute=0, second=0, microsecond=0)

@@ -9,6 +9,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import set_tenant_context
 from app.models.deal import Deal
 from app.models.finance import Expense, ExpenseRule, RecurringExpense
 
@@ -80,10 +81,17 @@ async def generate_recurring_expenses(
 ) -> int:
     """Generate monthly Expense records from active RecurringExpense templates.
 
-    If tenant_id is None, processes all tenants (global job use case).
-    Idempotent: skips a template if an Expense with that recurring_id already
-    exists for the current month.
+    If tenant_id is None, processes all tenants (global job use case — Celery
+    beat, run_generate_recurring_expenses). Idempotent: skips a template if an
+    Expense with that recurring_id already exists for the current month.
     Commits at the end of the function.
+
+    expenses tiene RLS (migración p1q2r3s4t5u6) — recurring_expenses no, así
+    que enumerar las plantillas cross-tenant no necesita función SECURITY
+    DEFINER, pero cada lectura/escritura de Expense sí necesita
+    set_tenant_context() con el tenant correcto primero. Cuando tenant_id ya
+    viene fijo (llamado desde un endpoint, con la sesión ya scopeada a ese
+    tenant por el flujo normal) el set_tenant_context es un no-op idempotente.
     """
     today = date.today()
     first_day = today.replace(day=1)
@@ -94,35 +102,42 @@ async def generate_recurring_expenses(
         q = q.where(RecurringExpense.tenant_id == tenant_id)
     templates = (await db.execute(q)).scalars().all()
 
-    count = 0
+    templates_by_tenant: dict[uuid.UUID, list[RecurringExpense]] = {}
     for rec in templates:
-        # Idempotency check: skip if already generated this month
-        existing = (await db.execute(
-            select(Expense).where(
-                Expense.recurring_id == rec.id,
-                Expense.incurred_at.between(first_day, last_day),
+        templates_by_tenant.setdefault(rec.tenant_id, []).append(rec)
+
+    count = 0
+    for tid, recs in templates_by_tenant.items():
+        await set_tenant_context(db, tid)
+
+        for rec in recs:
+            # Idempotency check: skip if already generated this month
+            existing = (await db.execute(
+                select(Expense).where(
+                    Expense.recurring_id == rec.id,
+                    Expense.incurred_at.between(first_day, last_day),
+                )
+            )).scalar_one_or_none()
+            if existing is not None:
+                continue
+
+            incurred_at = date(today.year, today.month, rec.day_of_month)
+
+            expense = Expense(
+                tenant_id=rec.tenant_id,
+                branch_id=None,
+                category_id=rec.category_id,
+                amount=rec.amount,
+                kind="fijo",
+                currency="MXN",
+                incurred_at=incurred_at,
+                status="confirmed",
+                source="recurring",
+                recurring_id=rec.id,
+                description=rec.description or "Gasto mensual recurrente",
             )
-        )).scalar_one_or_none()
-        if existing is not None:
-            continue
-
-        incurred_at = date(today.year, today.month, rec.day_of_month)
-
-        expense = Expense(
-            tenant_id=rec.tenant_id,
-            branch_id=None,
-            category_id=rec.category_id,
-            amount=rec.amount,
-            kind="fijo",
-            currency="MXN",
-            incurred_at=incurred_at,
-            status="confirmed",
-            source="recurring",
-            recurring_id=rec.id,
-            description=rec.description or "Gasto mensual recurrente",
-        )
-        db.add(expense)
-        count += 1
+            db.add(expense)
+            count += 1
 
     if count:
         await db.commit()

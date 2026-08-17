@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.models.subscription import FailedPayment, Subscription
 from app.models.tenant import Tenant, TenantPlan
 
@@ -113,6 +113,10 @@ async def _handle_checkout_completed(data: dict, db: AsyncSession) -> None:
         logger.error("checkout.session.completed: tenant %s not found", tenant_id)
         return
 
+    # subscriptions tiene RLS (migración p1q2r3s4t5u6) — tenants no, así que
+    # el db.get() de arriba no depende de esto, pero todo lo que sigue sí.
+    await set_tenant_context(db, tenant_id)
+
     # Update Tenant
     if stripe_customer_id and not tenant.stripe_customer_id:
         tenant.stripe_customer_id = stripe_customer_id
@@ -148,20 +152,26 @@ async def _handle_sub_updated(data: dict, db: AsyncSession) -> None:
     if not stripe_sub_id:
         return
 
+    # Resuelve el tenant PRIMERO vía Tenant.stripe_customer_id (tenants no
+    # tiene RLS, siempre disponible en el payload de un subscription) —
+    # subscriptions sí tiene RLS (migración p1q2r3s4t5u6), así que no se
+    # puede buscar por stripe_subscription_id antes de saber el tenant.
+    customer_id = data.get("customer", "")
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.stripe_customer_id == customer_id)
+    )
+    tenant = tenant_result.scalar_one_or_none()
+    if tenant is None:
+        logger.warning("sub.updated: no tenant for customer=%s", customer_id)
+        return
+    await set_tenant_context(db, tenant.id)
+
     sub = (await db.execute(
         select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id)
     )).scalar_one_or_none()
 
     if sub is None:
         # Sub created externally (e.g. Stripe CLI test) — create a stub
-        customer_id = data.get("customer", "")
-        tenant_result = await db.execute(
-            select(Tenant).where(Tenant.stripe_customer_id == customer_id)
-        )
-        tenant = tenant_result.scalar_one_or_none()
-        if tenant is None:
-            logger.warning("sub.updated: no tenant for customer=%s", customer_id)
-            return
         sub = Subscription(
             tenant_id=tenant.id,
             stripe_customer_id=customer_id,
@@ -202,6 +212,18 @@ async def _handle_sub_deleted(data: dict, db: AsyncSession) -> None:
     if not stripe_sub_id:
         return
 
+    # Mismo motivo que _handle_sub_updated: resolver el tenant vía
+    # stripe_customer_id ANTES de tocar subscriptions (RLS).
+    customer_id = data.get("customer", "")
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.stripe_customer_id == customer_id)
+    )
+    tenant_for_ctx = tenant_result.scalar_one_or_none()
+    if tenant_for_ctx is None:
+        logger.warning("sub.deleted: no tenant for customer=%s", customer_id)
+        return
+    await set_tenant_context(db, tenant_for_ctx.id)
+
     sub = (await db.execute(
         select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id)
     )).scalar_one_or_none()
@@ -231,6 +253,9 @@ async def _handle_payment_failed(data: dict, db: AsyncSession) -> None:
     )
     tenant = tenant_result.scalar_one_or_none()
     tenant_id = tenant.id if tenant else uuid.UUID(int=0)
+
+    # failed_payments tiene RLS (migración p1q2r3s4t5u6).
+    await set_tenant_context(db, tenant_id)
 
     db.add(FailedPayment(
         tenant_id=tenant_id,

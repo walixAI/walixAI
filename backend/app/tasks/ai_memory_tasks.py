@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from anthropic import AsyncAnthropic
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.celery_app import celery_app
@@ -159,23 +159,26 @@ def update_entity_context_task(self, memory_event_id: str) -> dict:
 
     async def _run() -> dict:
         async with AsyncSessionLocal() as db:
-            # 1. Load triggering event. ai_memory_events NO tiene RLS hoy
-            # (verificado 2026-08-15 contra pg_class.relrowsecurity — hallazgo
-            # aparte, documentado para decidir en un prompt separado, no
-            # resuelto acá) — así que este db.get() funciona sin importar el
-            # contexto de tenant. Ídem ai_entity_context (el upsert de más
-            # abajo). Pero agent_suggestions y users SÍ tienen RLS, y esas
-            # queries están más abajo — por eso el set_tenant_context() se
-            # aplica de todos modos, en cuanto se conoce tenant_id.
-            event = await db.get(AIMemoryEvent, uuid.UUID(memory_event_id))
-            if event is None:
+            # 1. Resolve tenant_id via SECURITY DEFINER lookup — ai_memory_events
+            # tiene RLS desde la migración p1q2r3s4t5u6, así que un db.get()
+            # directo no vería la fila sin tenant context, y todavía no lo
+            # conocemos (es justo lo que estamos por descubrir). Ver
+            # fn_lookup_ai_memory_event_tenant.
+            event_id = uuid.UUID(memory_event_id)
+            tenant_id = (await db.execute(
+                text("SELECT fn_lookup_ai_memory_event_tenant(:id)"), {"id": event_id}
+            )).scalar_one_or_none()
+            if tenant_id is None:
                 logger.warning("[ai_memory] event %s not found — skip", memory_event_id)
                 return {"status": "skipped", "reason": "event_not_found"}
 
-            tenant_id = event.tenant_id
+            await set_tenant_context(db, tenant_id)
+
+            # Ahora sí, bajo el tenant correcto — agent_suggestions y users
+            # también tienen RLS, y esas queries están más abajo.
+            event = await db.get(AIMemoryEvent, event_id)
             entity_type = event.entity_type
             entity_id = event.entity_id
-            await set_tenant_context(db, tenant_id)
 
             # 2. Current context (may not exist yet)
             current_ctx: AIEntityContext | None = (await db.execute(
