@@ -83,7 +83,13 @@ IFS=',' read -ra SKIP_LIST <<< "${SKIP_TESTS:-}"
 
 should_skip() {
     local name="$1"
+    local s
     for s in "${SKIP_LIST[@]}"; do
+        # Trim whitespace — el bloque `>-` en ci.yml junta líneas con un
+        # espacio, así que entradas después de un salto de línea le llegan
+        # acá como " test_x.py" en vez de "test_x.py".
+        s="${s#"${s%%[![:space:]]*}"}"
+        s="${s%"${s##*[![:space:]]}"}"
         [ "$s" = "$name" ] && return 0
     done
     return 1

@@ -328,6 +328,21 @@ def check_e(client: httpx.Client, token: str, branch_id: str) -> None:
 def check_f(client: httpx.Client, token: str) -> None:
     auth = {"Authorization": f"Bearer {token}"}
 
+    if not _os.environ.get("OPENAI_API_KEY"):
+        # POST /kb/documents genera embeddings con OpenAI — mismo motivo por
+        # el que test_rag.py está en SKIP_TESTS de ci.yml.
+        for label in (
+            "(f.1) POST /kb/documents → 201",
+            "(f.2) Nuevo doc aparece en GET /kb/documents",
+            "(f.3) GET /kb/documents/{id} retorna contenido",
+            "(f.4) PATCH /kb/documents/{id} actualiza título",
+            "(f.5) DELETE /kb/documents/{id} → deleted=true",
+            "(f.6) Doc eliminado ya no existe (404)",
+            "(f.7) DELETE auto-generated warning check",
+        ):
+            report(label, None, "omitido en CI (sin OPENAI_API_KEY)")
+        return
+
     # f.1: POST /api/kb/documents
     doc_title   = "Test Sprint 12 — horarios de atención"
     doc_content = (
