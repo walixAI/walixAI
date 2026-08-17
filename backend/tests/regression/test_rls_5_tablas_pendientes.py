@@ -163,6 +163,44 @@ async def test_fn_lookup_ai_memory_event_tenant_returns_null_for_unknown_id(
     assert resolved is None
 
 
+# ── Caso pre-tenant: fn_lookup_tenant_by_stripe_subscription_id ───────────────
+# (migración q2r3s4t5u6v7 — corrige una regresión de billing_webhook.py
+# introducida en p1q2r3s4t5u6, ver docstring de esa migración.)
+
+async def test_fn_lookup_tenant_by_stripe_subscription_id_resolves_under_real_rls(
+    db: AsyncSession, tenant: Tenant,
+) -> None:
+    sub = Subscription(
+        tenant_id=tenant.id, stripe_customer_id=f"cus_{uuid.uuid4().hex[:14]}",
+        stripe_subscription_id=f"sub_{uuid.uuid4().hex[:14]}", plan="growth", status="active",
+    )
+    db.add(sub)
+    await db.flush()
+
+    await impersonate_walix_app_or_skip(db)
+
+    resolved = (
+        await db.execute(
+            text("SELECT fn_lookup_tenant_by_stripe_subscription_id(:sid)"),
+            {"sid": sub.stripe_subscription_id},
+        )
+    ).scalar_one_or_none()
+    assert resolved == tenant.id
+
+
+async def test_fn_lookup_tenant_by_stripe_subscription_id_returns_null_for_unknown_id(
+    db: AsyncSession,
+) -> None:
+    await impersonate_walix_app_or_skip(db)
+    resolved = (
+        await db.execute(
+            text("SELECT fn_lookup_tenant_by_stripe_subscription_id(:sid)"),
+            {"sid": f"sub_{uuid.uuid4().hex[:14]}"},
+        )
+    ).scalar_one_or_none()
+    assert resolved is None
+
+
 # ── Funciones de agregación cross-tenant para app/api/platform.py ─────────────
 
 async def test_fn_platform_lead_counts_by_tenant_sees_all_tenants_under_real_rls(

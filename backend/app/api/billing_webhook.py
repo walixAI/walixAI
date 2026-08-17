@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 import stripe
 from fastapi import APIRouter, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -212,17 +212,20 @@ async def _handle_sub_deleted(data: dict, db: AsyncSession) -> None:
     if not stripe_sub_id:
         return
 
-    # Mismo motivo que _handle_sub_updated: resolver el tenant vía
-    # stripe_customer_id ANTES de tocar subscriptions (RLS).
-    customer_id = data.get("customer", "")
-    tenant_result = await db.execute(
-        select(Tenant).where(Tenant.stripe_customer_id == customer_id)
-    )
-    tenant_for_ctx = tenant_result.scalar_one_or_none()
-    if tenant_for_ctx is None:
-        logger.warning("sub.deleted: no tenant for customer=%s", customer_id)
+    # A diferencia de _handle_sub_updated (que puede necesitar crear un stub
+    # y por eso sí depende de customer_id), una suscripción a BORRAR siempre
+    # existe ya en `subscriptions`, con su propio tenant_id — no hace falta
+    # (ni conviene) depender de que el payload de Stripe traiga `customer`.
+    # fn_lookup_tenant_by_stripe_subscription_id resuelve el tenant SIN pasar
+    # por RLS (todavía no lo conocemos).
+    tenant_id = (await db.execute(
+        text("SELECT fn_lookup_tenant_by_stripe_subscription_id(:sub_id)"),
+        {"sub_id": stripe_sub_id},
+    )).scalar_one_or_none()
+    if tenant_id is None:
+        logger.warning("sub.deleted: no subscription found for stripe_sub_id=%s", stripe_sub_id)
         return
-    await set_tenant_context(db, tenant_for_ctx.id)
+    await set_tenant_context(db, tenant_id)
 
     sub = (await db.execute(
         select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id)
