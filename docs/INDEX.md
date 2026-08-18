@@ -22,6 +22,7 @@
 | [AI_AGENTS_INVENTORY.md](AI_AGENTS_INVENTORY.md) | Inventario detallado de agentes IA (shapes y payloads) |
 | [API_AGENTS_SHAPE.md](API_AGENTS_SHAPE.md) | Shape de la API de agentes (request/response) |
 | [OPPORTUNITY_VS_DEAL_AUDIT.md](OPPORTUNITY_VS_DEAL_AUDIT.md) | Auditoría: diferencia entre modelos Opportunity y Deal |
+| [SCHEMA_DRIFT_BACKLOG.md](SCHEMA_DRIFT_BACKLOG.md) | Backlog: drift entre modelos ORM y schema real (tablas no importadas en env.py, discrepancias de índices/constraints) |
 | [CI_SETUP.md](CI_SETUP.md) | Configuración de CI/CD |
 
 ---
