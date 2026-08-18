@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,8 +16,15 @@ class PlatformAIModelConfig(Base):
     """
 
     __tablename__ = "platform_ai_model_config"
+    __table_args__ = (
+        # Nombre explícito para que coincida con el constraint real creado
+        # por la migración r3s4t5u6v7w8 — con unique=True a nivel de
+        # columna, SQLAlchemy autogenera un nombre distinto y
+        # --autogenerate lo vería como drift (rename).
+        UniqueConstraint("tier", name="uq_platform_ai_model_config_tier"),
+    )
 
-    tier: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    tier: Mapped[str] = mapped_column(String(20), nullable=False)
     model_name: Mapped[str] = mapped_column(String(100), nullable=False)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

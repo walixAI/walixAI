@@ -24,6 +24,8 @@ from app.models import contact_activity  # noqa: F401
 from app.models import ai_memory  # noqa: F401  # Etapa 6: AI entity memory
 from app.models import finance  # noqa: F401  # Metas/Finanzas
 from app.models import goals  # noqa: F401  # Metas Gen2
+from app.models import platform_ai_config  # noqa: F401  # Copiloto Fase 1, Parte B
+from app.models import ai_token_usage  # noqa: F401  # Copiloto Fase 1, Parte C
 
 config = context.config
 
