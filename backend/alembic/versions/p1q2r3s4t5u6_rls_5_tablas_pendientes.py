@@ -101,12 +101,6 @@ _NEW_FUNCTIONS_NO_ARGS = (
 )
 
 
-def _role_exists(conn, role: str) -> bool:
-    return conn.execute(
-        text("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :r)"), {"r": role}
-    ).scalar()
-
-
 def upgrade() -> None:
     conn = op.get_bind()
 
@@ -291,15 +285,31 @@ def upgrade() -> None:
         p1q2r3s4t5u6.'
     """))
 
-    if _role_exists(conn, _GRANTEE):
-        for fn in _NEW_FUNCTIONS_NO_ARGS:
-            conn.execute(text(f"GRANT EXECUTE ON FUNCTION {fn} TO {_GRANTEE}"))
-    else:
-        grants = "\n".join(f"  GRANT EXECUTE ON FUNCTION {fn} TO {_GRANTEE};" for fn in _NEW_FUNCTIONS_NO_ARGS)
-        print(
-            f"[p1q2r3s4t5u6] AVISO: el rol '{_GRANTEE}' no existe todavía en este entorno — "
-            f"las funciones se crearon pero sin GRANT EXECUTE. Correr scripts/setup_db_user.py y luego:\n{grants}"
-        )
+    # GRANT condicional resuelto en SQL, no en Python — un `if _role_exists(...)`
+    # Python-side necesita conn.execute(...).scalar() con un resultado REAL,
+    # que solo existe en modo online. En modo `alembic upgrade ... --sql`
+    # (offline), op.get_bind() da una conexión simulada que solo imprime SQL:
+    # conn.execute(...) devuelve None y `.scalar()` revienta el dry-run
+    # (AttributeError). No afectó la aplicación real a producción — el rol ya
+    # existía y el upgrade corrió en modo online, donde .scalar() sí resuelve
+    # — pero rompe cualquier intento de generar el SQL con --sql. El bloque
+    # DO de abajo corre entero dentro de Postgres (chequea pg_roles en tiempo
+    # de EJECUCIÓN, no de generación), así que es válido tanto online como
+    # impreso tal cual en modo --sql. Ver hallazgo 2026-08-18 en s4t5u6v7w8x9.
+    _grant_stmts = "\n                ".join(
+        f"EXECUTE 'GRANT EXECUTE ON FUNCTION {fn} TO {_GRANTEE}';" for fn in _NEW_FUNCTIONS_NO_ARGS
+    )
+    conn.execute(text(f"""
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{_GRANTEE}') THEN
+                {_grant_stmts}
+            ELSE
+                RAISE NOTICE '[p1q2r3s4t5u6] rol % no existe todavía en este entorno — funciones creadas sin GRANT EXECUTE. Correr scripts/setup_db_user.py.', '{_GRANTEE}';
+            END IF;
+        END
+        $$;
+    """))
 
 
 def downgrade() -> None:
