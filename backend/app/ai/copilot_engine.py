@@ -22,6 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.copilot_tools import COPILOT_TOOLS, execute_tool, _serial
+from app.core.ai_config import get_model_for_tier
 from app.core.config import settings
 from app.models.agent import AgentSuggestion
 from app.models.ai_memory import AIConversationMessage
@@ -32,7 +33,12 @@ from app.services.profitability import get_current_month_goal
 
 logger = logging.getLogger(__name__)
 
+# Fallback / valor histórico — sigue exportado porque app/api/walix_builder.py
+# lo reusa directo ("reusar cliente y modelo"). El loop de este módulo ya NO
+# lo usa: resuelve el modelo real por tier vía get_model_for_tier (Fase 1,
+# Parte B) en cada turno, así platform_owner puede cambiarlo sin deploy.
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
+_MODEL_TIER = "simple"
 _HISTORY_LIMIT = 20   # max turns loaded from DB per session
 _MAX_TOKENS = 2048    # higher than single-shot endpoints — tool results take space
 
@@ -363,12 +369,13 @@ async def run_copilot_turn(
 
     tool_calls_made: list[str] = []
     iteration = 0
+    model_name = await get_model_for_tier(_MODEL_TIER, db)
 
     while iteration < max_iterations:
         # ── Call Claude ───────────────────────────────────────────────────────
         try:
             response = await _anthropic.messages.create(
-                model=CLAUDE_MODEL,
+                model=model_name,
                 max_tokens=_MAX_TOKENS,
                 system=system,
                 tools=COPILOT_TOOLS,

@@ -48,10 +48,6 @@ from app.services.profitability import (
 
 logger = logging.getLogger(__name__)
 
-# ── Role guard ────────────────────────────────────────────────────────────────
-
-_OWNER_ROLES = (UserRole.OWNER, UserRole.PLATFORM_OWNER)
-
 _VALID_TASK_KINDS = (
     "cobro", "cotizacion", "servicio", "seguimiento",
     "queja", "refaccion", "facturacion", "devolucion", "otro",
@@ -682,7 +678,11 @@ async def execute_tool(
         return {"year": year, "month": month, "goal_set": True, "amount_mxn": float(goal.amount), "is_draft": goal.is_draft}
 
     if name == "get_team_performance":
-        if user.role not in _OWNER_ROLES:
+        from app.copilot.actions_catalog import ACTIONS
+        from app.copilot.permissions import check_permission
+
+        allowed, _reason = check_permission(user, ACTIONS["get_team_performance"])
+        if not allowed:
             return {"error": "Sin acceso. Solo el propietario puede ver el rendimiento individual del equipo."}
         team_users = (
             await db.execute(

@@ -49,7 +49,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 WALIX_APP_URL = os.environ.get("WALIX_APP_DATABASE_URL")
 
 # Todas las tablas con RLS a esta fecha — leads (cutover original, 832e6af)
-# + las 5 pendientes cerradas en la migración p1q2r3s4t5u6.
+# + las 5 pendientes cerradas en la migración p1q2r3s4t5u6
+# + ai_token_usage (Copiloto Fase 1, Parte C — migración s4t5u6v7w8x9).
 RLS_TABLES = [
     "leads",
     "ai_memory_events",
@@ -57,6 +58,7 @@ RLS_TABLES = [
     "expenses",
     "subscriptions",
     "failed_payments",
+    "ai_token_usage",
 ]
 
 
