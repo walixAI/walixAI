@@ -30,7 +30,7 @@ import logging
 import uuid
 
 from app.celery_app import celery_app
-from app.core.database import AsyncSessionLocal
+from app.core import database as _database
 from app.tasks._helpers import (
     get_active_branch_tenant_pairs,
     get_active_tenant_ids,
@@ -164,7 +164,7 @@ def run_closing_all_branches(self) -> dict:
             # camuflaba como "seleccionar una columna" en vez de "no ver
             # filas").
             try:
-                async with AsyncSessionLocal() as db:
+                async with _database.AsyncSessionLocal() as db:
                     await set_tenant_context(db, tid)
                     rows = await db.execute(
                         select(Lead.id).where(
@@ -215,7 +215,7 @@ def run_reactivation_all_tenants(self) -> dict:
         logger.info("[reactivation] running for %d tenants", len(tenant_ids))
         for tid in tenant_ids:
             try:
-                async with AsyncSessionLocal() as db:
+                async with _database.AsyncSessionLocal() as db:
                     count = await run_reactivation_agent(tid, db)
                     await db.commit()
                     results["suggestions_created"] += count or 0
@@ -246,7 +246,7 @@ def run_profile_enrichment_all_tenants(self) -> dict:
         logger.info("[enrichment] running for %d tenants", len(tenant_ids))
         for tid in tenant_ids:
             try:
-                async with AsyncSessionLocal() as db:
+                async with _database.AsyncSessionLocal() as db:
                     count = await run_profile_enrichment_agent(tid, db)
                     await db.commit()
                     results["suggestions_created"] += count or 0
@@ -277,7 +277,7 @@ def run_aprendiz_all_tenants(self) -> dict:
         logger.info("[aprendiz] running for %d tenants", len(tenant_ids))
         for tid in tenant_ids:
             try:
-                async with AsyncSessionLocal() as db:
+                async with _database.AsyncSessionLocal() as db:
                     count = await run_aprendiz_agent(tid, db)
                     profiles_updated = await update_user_profiles(tid, db)
                     await db.commit()
@@ -313,7 +313,7 @@ def execute_suggestion_task(suggestion_id: str, tenant_id: str) -> dict:
     async def _run() -> dict:
         sid = uuid.UUID(suggestion_id)
         tid = uuid.UUID(tenant_id)
-        async with AsyncSessionLocal() as db:
+        async with _database.AsyncSessionLocal() as db:
             return await execute_suggestion(sid, tid, db)
 
     try:

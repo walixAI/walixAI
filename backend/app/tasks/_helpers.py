@@ -19,7 +19,7 @@ from typing import Any, Coroutine
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import AsyncSessionLocal
+from app.core import database as _database
 from app.models.tenant import Branch
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 async def get_active_branch_tenant_pairs() -> list[tuple[uuid.UUID, uuid.UUID]]:
     """Returns (branch_id, tenant_id) for every active branch, across ALL tenants."""
-    async with AsyncSessionLocal() as db:
+    async with _database.AsyncSessionLocal() as db:
         rows = await db.execute(
             text("SELECT branch_id, tenant_id FROM fn_list_active_branch_tenant_pairs()")
         )
@@ -114,7 +114,7 @@ class ActiveAlertRule:
 async def get_active_alert_rules() -> list[ActiveAlertRule]:
     """Returns every active AlertRule, across ALL tenants, via the
     SECURITY DEFINER enumeration function."""
-    async with AsyncSessionLocal() as db:
+    async with _database.AsyncSessionLocal() as db:
         rows = await db.execute(text("SELECT * FROM fn_list_active_alert_rules()"))
         return [
             ActiveAlertRule(

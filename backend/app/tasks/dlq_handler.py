@@ -22,7 +22,7 @@ from celery import signals
 from sqlalchemy import text
 
 from app.celery_app import celery_app
-from app.core.database import AsyncSessionLocal
+from app.core import database as _database
 from app.tasks._helpers import run_async
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def handle_failed_task(task_id: str, task_name: str, error: str) -> None:
     created_at is omitted — the column has server_default=now().
     """
     async def _run() -> None:
-        async with AsyncSessionLocal() as db:
+        async with _database.AsyncSessionLocal() as db:
             await db.execute(
                 text(
                     "INSERT INTO failed_tasks (id, task_id, task_name, error)"

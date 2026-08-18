@@ -17,8 +17,9 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.celery_app import celery_app
+from app.core import database as _database
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal, set_tenant_context
+from app.core.database import set_tenant_context
 from app.models.agent import AgentSuggestion
 from app.models.ai_memory import AIEntityContext, AIMemoryEvent
 from app.tasks._helpers import run_async
@@ -158,7 +159,12 @@ def update_entity_context_task(self, memory_event_id: str) -> dict:
     """Recalculate AIEntityContext using Claude Haiku after a memory event."""
 
     async def _run() -> dict:
-        async with AsyncSessionLocal() as db:
+        # _database.AsyncSessionLocal (no un import directo) — el import
+        # directo se resuelve al importar el módulo, ANTES de que
+        # worker_process_init (celery_app.py) reemplace la sessionmaker por
+        # la versión NullPool del worker; con el atributo del módulo, cada
+        # llamada relee el valor actual. Ver hallazgo del 2026-08-17.
+        async with _database.AsyncSessionLocal() as db:
             # 1. Resolve tenant_id via SECURITY DEFINER lookup — ai_memory_events
             # tiene RLS desde la migración p1q2r3s4t5u6, así que un db.get()
             # directo no vería la fila sin tenant context, y todavía no lo

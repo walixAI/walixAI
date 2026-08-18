@@ -11,7 +11,8 @@ import logging
 from datetime import date, timedelta
 
 from app.celery_app import celery_app
-from app.core.database import AsyncSessionLocal, set_tenant_context
+from app.core import database as _database
+from app.core.database import set_tenant_context
 from app.tasks._helpers import get_active_branch_tenant_pairs, run_async
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ def aggregate_all_metrics() -> dict:
 
         for bid, tid in pairs:
             try:
-                async with AsyncSessionLocal() as db:
+                async with _database.AsyncSessionLocal() as db:
                     # daily_metrics tiene RLS desde h4i5j6k7l8m9.
                     await set_tenant_context(db, tid)
                     await aggregate_daily_metrics(bid, target_date, db)
@@ -78,7 +79,7 @@ def calculate_all_sentiment() -> dict:
 
         for bid, tid in pairs:
             try:
-                async with AsyncSessionLocal() as db:
+                async with _database.AsyncSessionLocal() as db:
                     # sentiment_snapshots tiene RLS desde h4i5j6k7l8m9.
                     await set_tenant_context(db, tid)
                     await calculate_sentiment_snapshot(bid, db)
