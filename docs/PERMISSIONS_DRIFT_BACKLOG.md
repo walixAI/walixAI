@@ -212,6 +212,70 @@ incorrectos en el estado actual.
 
 ---
 
+## 7. `confirm_suggestion`/`dismiss_suggestion` sin validación de ownership
+
+**Archivo(s):**
+- `backend/app/api/agents.py:162-171` — `_get_suggestion_for_user`, el helper que usan ambos endpoints:
+  ```python
+  async def _get_suggestion_for_user(
+      suggestion_id: uuid.UUID,
+      user: User,
+      db: AsyncSession,
+  ) -> AgentSuggestion:
+      """Load suggestion and verify it belongs to the user's tenant."""
+      suggestion = await db.get(AgentSuggestion, suggestion_id)
+      if suggestion is None or suggestion.tenant_id != user.tenant_id:
+          raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Suggestion not found")
+      return suggestion
+  ```
+- `backend/app/api/agents.py:100-124` — `confirm_suggestion`, llama al helper en la línea 106
+- `backend/app/api/agents.py:131-157` — `dismiss_suggestion`, llama al helper en la línea 138
+- Contraste — `backend/app/api/agents.py:53-92` — `list_suggestions`, que SÍ filtra por ownership (líneas 82-86):
+  ```python
+  or_(
+      AgentSuggestion.target_user_id == current_user.id,
+      (AgentSuggestion.target_user_id.is_(None))
+      & (AgentSuggestion.target_role == current_user.role.value),
+  ),
+  ```
+
+**Problema:** `_get_suggestion_for_user` solo valida `tenant_id` — pese a que
+su propio docstring dice "verify it belongs to the user's tenant" (línea 167),
+no valida que la sugerencia esté dirigida al usuario (`target_user_id`) ni a
+su rol (`target_role`), a diferencia de `list_suggestions`, que sí aplica
+ese filtro antes de devolver la lista. El resultado: `confirm_suggestion` y
+`dismiss_suggestion` aceptan cualquier `suggestion_id` que pertenezca al
+tenant del usuario, sin importar a quién estaba dirigida.
+
+No es "cualquiera puede confirmar cualquier sugerencia sin saber nada" — el
+UUID no aparece en ningún listado si la sugerencia no es del usuario que
+consulta (`list_suggestions` ya la filtra fuera). Pero sigue siendo un hueco
+real: un miembro del equipo que vea el UUID en logs del servidor, en la URL
+de otro usuario, o por fuerza bruta de un UUID conocido de otra fuente,
+podría confirmar o descartar una sugerencia ajena — y confirmarla dispara
+`execute_suggestion_task.delay(...)` (`agents.py:119`), es decir, ejecución
+real del `agent_type` correspondiente (puede incluir enviar un WhatsApp a un
+lead, mover un deal de etapa, u otras acciones dependiendo del agente que la
+generó).
+
+**Relevante para el trabajo en curso:** este hallazgo salió justo al auditar
+cómo conectar `confirm_suggestion`/`dismiss_suggestion` al catálogo del
+Copiloto. Si se conectan tal cual, el catálogo heredaría el mismo hueco de
+ownership — conviene corregirlo antes o en paralelo a esa conexión, no
+después.
+
+**Fix sugerido (no implementar ahora):** agregar dentro de
+`_get_suggestion_for_user` el mismo filtro de `target_user_id`/`target_role`
+que ya usa `list_suggestions`, en vez de duplicar la condición `or_(...)` en
+cada endpoint que necesite cargar una sugerencia por ID.
+
+**Riesgo si no se corrige:** medio — no es explotable sin conocer un UUID
+específico (no hay enumeración trivial vía la API), pero si se conoce uno,
+la consecuencia es ejecución real de una acción de negocio ajena, no solo
+lectura de datos.
+
+---
+
 ## Resumen para priorizar
 
 | # | Hallazgo | Archivo(s) | Riesgo | Esfuerzo estimado |
@@ -222,3 +286,4 @@ incorrectos en el estado actual.
 | 4 | `automations.py::_OWNER_PLUS` vs `_OWNER_TIER` | automations.py, actions_catalog.py | Bajo | Mediano (requiere decisión de producto, no solo código) |
 | 5 | `delete_deal` sin restricción de rol | deals.py | **Alto** | Chico |
 | 6 | `set_monthly_goal` duplicado (Copiloto vs REST) | copilot_tools.py, goals.py | Bajo | Mediano (requiere decisión de arquitectura) |
+| 7 | `confirm_suggestion`/`dismiss_suggestion` sin ownership | agents.py | Medio | Chico |
