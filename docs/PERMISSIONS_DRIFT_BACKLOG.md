@@ -286,6 +286,45 @@ lectura de datos.
 
 ---
 
+## 8. Tools de finanzas del Copiloto sin validar `FinancePermission`
+
+**Archivo(s):**
+- `backend/app/ai/copilot_tools.py::execute_tool`, ramas `"get_profitability"`
+  (antes de este fix, ~línea 659), `"get_run_rate"` (~línea 668) y
+  `"get_expenses_summary"` (~línea 677) — ejecutaban directo, sin ningún
+  chequeo de acceso.
+- Contraste — `backend/app/api/finance.py:29-47` (`_require_finance_access`)
+  y `backend/app/api/profitability.py:91,108,188` — los endpoints REST
+  equivalentes SÍ exigen `_require_finance_access` antes de responder.
+
+**Problema:** el Copiloto mostraba rentabilidad, run-rate y resumen de
+gastos a cualquier usuario autenticado del tenant, incluso a alguien a
+quien el Owner le negó explícitamente acceso a finanzas (sin fila en
+`FinancePermission`) — mismo dato que el endpoint REST equivalente le
+habría bloqueado con 403.
+
+**✅ RESUELTO** (2026-08-21, ver commit de este cambio): se creó
+`app/copilot/finance_access.py::require_finance_access`, que replica
+`_require_finance_access` exactamente (OWNER/PLATFORM_OWNER siempre
+permitido; el resto requiere una fila en `FinancePermission` para su
+tenant con `branch_id` igual al solicitado o `branch_id IS NULL`), pero
+retorna `(allowed, reason)` en vez de levantar `HTTPException` — mismo
+contrato que `app/copilot/permissions.py::check_permission`, ya que
+`execute_tool` nunca levanta excepciones crudas. Las 3 ramas ahora llaman
+`require_finance_access(user, None, db)` (mismo `branch_id=None` que usan
+sus endpoints REST equivalentes) antes de ejecutar, devolviendo
+`{"error": "No tienes acceso a finanzas"}` si no hay acceso. Tests en
+`backend/tests/regression/test_copilot_finance_access.py`. No se conectó
+ninguna acción nueva de finanzas en este cambio — solo se cerró el gap de
+las 3 tools ya wireadas.
+
+**Riesgo si no se corrige:** alto — exposición directa de datos
+financieros del tenant (rentabilidad, gastos) a usuarios explícitamente
+sin acceso, saltándose un control de acceso que el resto de la app sí
+respeta.
+
+---
+
 ## Resumen para priorizar
 
 | # | Hallazgo | Archivo(s) | Riesgo | Esfuerzo estimado | Estado |
@@ -297,3 +336,4 @@ lectura de datos.
 | 5 | `delete_deal` sin restricción de rol | deals.py | **Alto** | Chico | **✅ Resuelto (2026-08-20)** |
 | 6 | `set_monthly_goal` duplicado (Copiloto vs REST) | copilot_tools.py, goals.py | Bajo | Mediano (requiere decisión de arquitectura) | Abierto |
 | 7 | `confirm_suggestion`/`dismiss_suggestion` sin ownership | agents.py | Medio | Chico | Abierto |
+| 8 | Tools de finanzas del Copiloto sin `FinancePermission` | copilot_tools.py, finance_access.py | **Alto** | Chico | **✅ Resuelto (2026-08-21)** |

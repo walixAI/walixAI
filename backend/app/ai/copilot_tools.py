@@ -21,6 +21,12 @@ de docs/PERMISSIONS_DRIFT_BACKLOG.md). confirm_suggestion queda como stub
 sin conectar en app/copilot/actions_catalog.py — dispara ejecución real vía
 Celery (puede incluir envío de WhatsApp a un lead), eso es Fase 6.
 
+get_profitability, get_run_rate y get_expenses_summary (hallazgo #8 de
+docs/PERMISSIONS_DRIFT_BACKLOG.md) ahora validan acceso a finanzas vía
+app/copilot/finance_access.py::require_finance_access antes de ejecutar —
+mismo criterio OWNER/PLATFORM_OWNER-o-FinancePermission que ya exigían sus
+endpoints REST equivalentes (app/api/finance.py, app/api/profitability.py).
+
 Tool-use format: nativo Anthropic SDK 0.104.x
   name, description, input_schema (JSON Schema)
 """
@@ -36,6 +42,7 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.copilot.finance_access import require_finance_access
 from app.models.activity import Activity
 from app.models.agent import AgentSuggestion
 from app.models.ai_memory import AIDraftEdit, AIEntityContext, AIMemoryEvent
@@ -657,6 +664,9 @@ async def execute_tool(
         return {"deals": deals, "count": len(deals), "active_pipeline_value_mxn": active_value}
 
     if name == "get_profitability":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
         scope = str(args.get("scope", "tenant"))
         result = (
             await get_user_profitability(tenant, user.id, year, month, db)
@@ -666,6 +676,9 @@ async def execute_tool(
         return _jsonable(result)
 
     if name == "get_run_rate":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
         scope = str(args.get("scope", "tenant"))
         result = (
             await get_user_run_rate(tenant, user.id, year, month, db)
@@ -675,6 +688,9 @@ async def execute_tool(
         return _jsonable(result)
 
     if name == "get_expenses_summary":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
         kind_rows = (
             await db.execute(
                 select(Expense.kind, func.sum(Expense.amount).label("total"))
