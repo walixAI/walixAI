@@ -1,16 +1,25 @@
 """C2/C3 — Copiloto: definición y dispatcher de tools (lectura + escritura).
 
 C2: 11 tools de lectura (sin side-effects).
-C3: 7 tools de escritura ejecutables por el modelo.
+C3: 8 tools de escritura ejecutables por el modelo.
 
 Política de confirmación:
-  create_contact, create_deal, move_deal_stage, add_note, create_task
+  create_contact, create_deal, move_deal_stage, add_note, create_task,
+  dismiss_suggestion
     → ejecutan de inmediato cuando el modelo las llama.
   prepare_whatsapp_message
     → guarda borrador en AIDraftEdit (Etapa 7.2); NUNCA envía nada.
   set_monthly_goal
     → requiere confirmed=True en el input; si confirmed=False devuelve
       mensaje de confirmación para que Claude lo presente al usuario.
+
+dismiss_suggestion (Copiloto Fase 1, ronda de agents.py) valida ownership
+real (target_user_id/target_role, mismo patrón que
+agents.py::list_suggestions) — a propósito NO reutiliza
+agents.py::_get_suggestion_for_user, que solo valida tenant_id (hallazgo #7
+de docs/PERMISSIONS_DRIFT_BACKLOG.md). confirm_suggestion queda como stub
+sin conectar en app/copilot/actions_catalog.py — dispara ejecución real vía
+Celery (puede incluir envío de WhatsApp a un lead), eso es Fase 6.
 
 Tool-use format: nativo Anthropic SDK 0.104.x
   name, description, input_schema (JSON Schema)
@@ -369,6 +378,22 @@ COPILOT_TOOLS: list[dict[str, Any]] = [
                 },
             },
             "required": ["total", "confirmed"],
+        },
+    },
+    {
+        "name": "dismiss_suggestion",
+        "description": (
+            "Dismisses an active AI suggestion addressed to the current user, with an "
+            "optional reason. Use when the user wants to discard, ignore, or reject a "
+            "suggested action (from get_my_suggestions) instead of confirming it."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "suggestion_id": {"type": "string", "format": "uuid", "description": "UUID of the suggestion to dismiss"},
+                "reason": {"type": "string", "description": "Optional reason for dismissing (optional)"},
+            },
+            "required": ["suggestion_id"],
         },
     },
 ]
@@ -1173,6 +1198,51 @@ async def execute_tool(
             "year": goal_year,
             "month": goal_month,
             "action": "created",
+        }
+
+    if name == "dismiss_suggestion":
+        try:
+            suggestion_id = uuid.UUID(str(args.get("suggestion_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "suggestion_id inválido"}
+
+        # Ownership real (mismo patrón que agents.py::list_suggestions,
+        # líneas 82-86) — a propósito NO se usa el helper
+        # agents.py::_get_suggestion_for_user, que solo valida tenant_id y
+        # no target_user_id/target_role (ver hallazgo #7 de
+        # docs/PERMISSIONS_DRIFT_BACKLOG.md). Código nuevo, construido bien
+        # desde el inicio en vez de heredar ese gap.
+        suggestion = (
+            await db.execute(
+                select(AgentSuggestion).where(
+                    AgentSuggestion.id == suggestion_id,
+                    AgentSuggestion.tenant_id == user.tenant_id,
+                    or_(
+                        AgentSuggestion.target_user_id == user.id,
+                        (AgentSuggestion.target_user_id.is_(None))
+                        & (AgentSuggestion.target_role == user.role.value),
+                    ),
+                )
+            )
+        ).scalar_one_or_none()
+        if suggestion is None:
+            return {"error": "Sugerencia no encontrada o no dirigida a este usuario"}
+
+        if suggestion.status not in ("suggested", "accepted"):
+            return {"error": f"La sugerencia ya está en estado '{suggestion.status}'"}
+
+        suggestion.status = "dismissed"
+        suggestion.responded_at = datetime.now(timezone.utc)
+        reason = args.get("reason")
+        if reason:
+            suggestion.execution_result = {"dismissed_reason": str(reason)}
+
+        await db.commit()
+
+        return {
+            "dismissed": True,
+            "suggestion_id": str(suggestion_id),
+            "reason": str(reason) if reason else None,
         }
 
     return {"error": f"Tool '{name}' no reconocida"}

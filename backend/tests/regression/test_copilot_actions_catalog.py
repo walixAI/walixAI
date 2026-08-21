@@ -55,7 +55,7 @@ def test_catalog_wired_actions_have_execute_tool_handler() -> None:
     from app.ai.copilot_tools import execute_tool
 
     wired = [a for a in ACTIONS_LIST if a.handler is not None]
-    assert len(wired) == 18  # las 18 tools ya existentes en copilot_tools.py
+    assert len(wired) == 19  # 18 tools previas + dismiss_suggestion
     assert all(a.handler is execute_tool for a in wired)
 
 
@@ -63,6 +63,7 @@ def test_catalog_stub_actions_have_no_handler_yet() -> None:
     stubs = [a for a in ACTIONS_LIST if a.handler is None]
     assert {a.name for a in stubs} == {
         "assign_lead", "delete_deal", "send_whatsapp_message", "cancel_subscription",
+        "confirm_suggestion",
     }
 
 

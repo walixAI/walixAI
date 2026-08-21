@@ -181,6 +181,13 @@ _LOW_RISK: list[ActionDefinition] = [
         "Use when the user wants to schedule an activity: follow-up, quote, collection, service, etc.",
         "low",
     ),
+    _wired(
+        "dismiss_suggestion",
+        "Dismisses an active AI suggestion addressed to the current user, with an "
+        "optional reason. Use when the user wants to discard, ignore, or reject a "
+        "suggested action (from get_my_suggestions) instead of confirming it.",
+        "low",
+    ),
 ]
 
 # ── Acciones de riesgo medio (escritura sobre datos propios del tenant) ───────
@@ -264,6 +271,20 @@ _HIGH_RISK: list[ActionDefinition] = [
         "Use only when the user explicitly asks to cancel their subscription and confirms.",
         "high",
         required_role=_OWNER_TIER,
+    ),
+    # Representativa, NO conectada al Copiloto — mapea a
+    # POST /agents/suggestions/{id}/confirm (app/api/agents.py::confirm_suggestion).
+    # No se conecta hasta que Fase 6 aplique requires_confirmation de verdad:
+    # confirmar dispara execute_suggestion_task.delay() (ejecución real vía
+    # Celery), que puede terminar enviando un WhatsApp real a un lead según
+    # agent_type — mismo criterio de riesgo que send_whatsapp_message, arriba.
+    _stub(
+        "confirm_suggestion",
+        "Confirms an active AI suggestion, queuing its real execution (may send a "
+        "WhatsApp message to a lead, move a deal stage, or trigger other business "
+        "actions depending on the suggestion's agent_type). Use only after explicit "
+        "user confirmation.",
+        "high",
     ),
 ]
 
