@@ -183,6 +183,16 @@ correcto en el chat antes de tocar el endpoint.
 riesgo real de daño: un `asesor` puede borrar deals de otros vendedores o
 del owner sin ninguna restricción, de forma irreversible.
 
+**✅ RESUELTO** (2026-08-20, ver commit de este cambio): `delete_deal` ahora
+exige `current_user.role in _MANAGER_ROLES` (`OWNER`, `GERENTE`, `IT`) O
+`deal.owner_id == current_user.id` — mismo criterio que
+`contacts.py::delete_contact` (`_MANAGER_ROLES` + ownership), definido
+localmente en `deals.py` porque `_MANAGER_ROLES` es privada de
+`contacts.py`. Si no cumple ninguna condición: `403` con detalle "No tienes
+permiso para eliminar este deal". `create_deal` y `update_deal` quedan
+fuera de alcance a propósito. Tests en
+`backend/tests/regression/test_deals_delete_permission.py`.
+
 ---
 
 ## 6. `set_monthly_goal` del Copiloto y `goals.py::create_or_update_monthly_goal` son implementaciones paralelas, no el mismo camino de código
@@ -278,12 +288,12 @@ lectura de datos.
 
 ## Resumen para priorizar
 
-| # | Hallazgo | Archivo(s) | Riesgo | Esfuerzo estimado |
-|---|---|---|---|---|
-| 1 | `_MULTI_BRANCH_ROLES` divergente | leads.py, pipeline.py, pipelines.py, users.py, metrics.py | Bajo-medio | Chico |
-| 2 | `users.py::_require_owner` sin PLATFORM_OWNER | users.py | Bajo | Chico |
-| 3 | `industry_onboarding.py::_OWNER_ROLES` = (OWNER,) | industry_onboarding.py | Bajo | Chico |
-| 4 | `automations.py::_OWNER_PLUS` vs `_OWNER_TIER` | automations.py, actions_catalog.py | Bajo | Mediano (requiere decisión de producto, no solo código) |
-| 5 | `delete_deal` sin restricción de rol | deals.py | **Alto** | Chico |
-| 6 | `set_monthly_goal` duplicado (Copiloto vs REST) | copilot_tools.py, goals.py | Bajo | Mediano (requiere decisión de arquitectura) |
-| 7 | `confirm_suggestion`/`dismiss_suggestion` sin ownership | agents.py | Medio | Chico |
+| # | Hallazgo | Archivo(s) | Riesgo | Esfuerzo estimado | Estado |
+|---|---|---|---|---|---|
+| 1 | `_MULTI_BRANCH_ROLES` divergente | leads.py, pipeline.py, pipelines.py, users.py, metrics.py | Bajo-medio | Chico | Abierto |
+| 2 | `users.py::_require_owner` sin PLATFORM_OWNER | users.py | Bajo | Chico | Abierto |
+| 3 | `industry_onboarding.py::_OWNER_ROLES` = (OWNER,) | industry_onboarding.py | Bajo | Chico | Abierto |
+| 4 | `automations.py::_OWNER_PLUS` vs `_OWNER_TIER` | automations.py, actions_catalog.py | Bajo | Mediano (requiere decisión de producto, no solo código) | Abierto |
+| 5 | `delete_deal` sin restricción de rol | deals.py | **Alto** | Chico | **✅ Resuelto (2026-08-20)** |
+| 6 | `set_monthly_goal` duplicado (Copiloto vs REST) | copilot_tools.py, goals.py | Bajo | Mediano (requiere decisión de arquitectura) | Abierto |
+| 7 | `confirm_suggestion`/`dismiss_suggestion` sin ownership | agents.py | Medio | Chico | Abierto |

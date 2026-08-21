@@ -26,7 +26,7 @@ from app.models.deal import Deal
 from app.models.deal_stage_history import DealStageHistory
 from app.models.lead import Lead
 from app.models.pipeline import PipelineStage
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.deal import DealCreate, DealListResponse, DealRead, DealUpdate
 
 
@@ -45,6 +45,10 @@ _UNSET = object()  # sentinel para distinguir owner_id=None explícito vs no env
 router = APIRouter(prefix="/deals", tags=["deals"])
 
 PAGE_SIZE = 25
+
+# Mismo criterio que contacts.py::_MANAGER_ROLES (privada de ese módulo) —
+# ver hallazgo #5 de docs/PERMISSIONS_DRIFT_BACKLOG.md.
+_MANAGER_ROLES = frozenset({UserRole.OWNER, UserRole.GERENTE, UserRole.IT})
 
 
 async def _get_deal_or_404(
@@ -397,5 +401,12 @@ async def delete_deal(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     deal = await _get_deal_or_404(deal_id, current_user.tenant_id, db)
+
+    if current_user.role not in _MANAGER_ROLES and deal.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permiso para eliminar este deal",
+        )
+
     await db.delete(deal)
     await db.commit()
