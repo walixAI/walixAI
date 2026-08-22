@@ -2,11 +2,12 @@
 
 Este módulo NO reimplementa ejecución — el Copiloto conversacional
 (app/ai/copilot_engine.py + app/ai/copilot_tools.py, ya en producción desde
-C2/C3/C4) ya tiene 18 tools nativas de Claude con su propio dispatcher
-(copilot_tools.execute_tool). Este catálogo formaliza esas 18 tools con la
-metadata declarativa que hoy vive dispersa o no existe en absoluto:
-risk_tier, requires_confirmation y required_role centralizados, en vez de
-checks de rol sueltos dentro de execute_tool (ver el que reemplaza en
+C2/C3/C4) tiene sus tools nativas de Claude con su propio dispatcher
+(copilot_tools.execute_tool). Este catálogo formaliza esas tools (26
+wireadas al día de la Ronda 1 de Finanzas/Gastos) con la metadata
+declarativa que hoy vive dispersa o no existe en absoluto: risk_tier,
+requires_confirmation y required_role centralizados, en vez de checks de
+rol sueltos dentro de execute_tool (ver el que reemplaza en
 get_team_performance).
 
 description de cada ActionDefinition = la misma string que ya se manda hoy
@@ -14,7 +15,7 @@ a Claude vía COPILOT_TOOLS (copilot_tools.py) — no se reescriben, son
 literalmente lo que el modelo ya lee para decidir cuándo llamar cada tool.
 
 handler:
-  - Para las 18 acciones ya wireadas: copilot_tools.execute_tool — el
+  - Para las acciones ya wireadas: copilot_tools.execute_tool — el
     dispatcher real. Se invoca con el `name` de esta acción como primer
     argumento (execute_tool(action.name, args, user, tenant, db)).
   - Para las 4 acciones representativas TODAVÍA NO conectadas al Copiloto
@@ -187,6 +188,74 @@ _LOW_RISK: list[ActionDefinition] = [
         "optional reason. Use when the user wants to discard, ignore, or reject a "
         "suggested action (from get_my_suggestions) instead of confirming it.",
         "low",
+    ),
+    # Expansión Finanzas/Gastos, Ronda 1 — las 6 de abajo (todas menos
+    # list_finance_permissions) validan acceso real vía
+    # app/copilot/finance_access.py::require_finance_access dentro del
+    # dispatcher, no vía required_role acá — mismo patrón que
+    # get_profitability/get_run_rate/get_expenses_summary (hallazgo #8).
+    _wired(
+        "list_expenses",
+        "Lists individual expense records with full detail (id, category, amount, kind, "
+        "currency, status, date, description, etc.), with optional filters by month, kind "
+        "(fijo/variable), category_id, status (draft/confirmed), and branch_id. Unlike "
+        "get_expenses_summary (which only returns totals grouped by kind), this returns "
+        "the actual list of expense rows. Use when the user wants to see, review, or "
+        "filter individual gastos, not just a total.",
+        "low",
+    ),
+    _wired(
+        "list_expense_categories",
+        "Lists expense categories (name, kind, icon, active flag) configured for the "
+        "tenant. Use when the user asks what expense categories exist, or before "
+        "creating/filtering an expense by category.",
+        "low",
+    ),
+    _wired(
+        "list_recurring_expenses",
+        "Lists recurring (monthly) expense definitions: category, amount, day of month, "
+        "description, active flag. Use when asked about gastos recurrentes or fixed "
+        "monthly charges configured for the tenant.",
+        "low",
+    ),
+    _wired(
+        "list_expense_rules",
+        "Lists automatic expense generation rules tied to deals (percent_of_deal, "
+        "fixed_per_deal, percent_of_cost), including their category, value, deal type "
+        "filter, and auto-confirm flag. Use when asked how expenses are auto-generated "
+        "from won deals, or what rules exist.",
+        "low",
+    ),
+    _wired(
+        "list_product_categories",
+        "Lists product categories used to segment monthly goals by product line. "
+        "Use when asked what product categories exist, or before setting a "
+        "product-category-scoped monthly goal.",
+        "low",
+    ),
+    _wired(
+        "list_goal_assignments",
+        "Lists how a specific monthly goal is split across team members: each assigned "
+        "user, their share percent, and their resulting amount. Requires goal_id. Use "
+        "when asked who a monthly goal is assigned to, or how it's distributed across "
+        "the team.",
+        "low",
+    ),
+    # list_finance_permissions SÍ usa required_role acá (_OWNER_TIER) — su
+    # endpoint REST real (app/api/finance.py::list_finance_permissions) usa
+    # _require_owner, no _require_finance_access: ver quién tiene acceso a
+    # finanzas es una acción de owner, no de cualquiera con acceso de
+    # lectura a finanzas. El dispatcher (execute_tool) valida esto vía
+    # check_permission + ACTIONS["list_finance_permissions"], mismo patrón
+    # que get_team_performance.
+    _wired(
+        "list_finance_permissions",
+        "Lists which users have been granted access to financial reports, and whether "
+        "that access is tenant-wide or scoped to a specific branch. Only for OWNER and "
+        "PLATFORM_OWNER roles. Use when asked who can see finanzas, or to audit finance "
+        "access grants.",
+        "low",
+        required_role=_OWNER_TIER,
     ),
 ]
 

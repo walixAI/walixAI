@@ -2,6 +2,10 @@
 
 C2: 11 tools de lectura (sin side-effects).
 C3: 8 tools de escritura ejecutables por el modelo.
+Expansión Finanzas/Gastos, Ronda 1: 7 tools de lectura adicionales
+  (list_expenses, list_expense_categories, list_recurring_expenses,
+  list_expense_rules, list_product_categories, list_goal_assignments,
+  list_finance_permissions) — ver más abajo.
 
 Política de confirmación:
   create_contact, create_deal, move_deal_stage, add_note, create_task,
@@ -27,6 +31,17 @@ app/copilot/finance_access.py::require_finance_access antes de ejecutar —
 mismo criterio OWNER/PLATFORM_OWNER-o-FinancePermission que ya exigían sus
 endpoints REST equivalentes (app/api/finance.py, app/api/profitability.py).
 
+Las 7 tools de lectura de la Ronda 1 de Finanzas/Gastos replican esa misma
+protección: list_expenses/list_expense_categories/list_recurring_expenses/
+list_expense_rules/list_product_categories/list_goal_assignments llaman
+require_finance_access (branch_id del filtro si aplica, None si no);
+list_finance_permissions es la excepción — usa check_permission +
+ActionDefinition.required_role=_OWNER_TIER (mismo patrón que
+get_team_performance), igual que su endpoint REST real
+(app/api/finance.py::list_finance_permissions usa _require_owner, no
+_require_finance_access — mostrar quién tiene acceso a finanzas es en sí
+una acción de owner, no de cualquiera con acceso de lectura a finanzas).
+
 Tool-use format: nativo Anthropic SDK 0.104.x
   name, description, input_schema (JSON Schema)
 """
@@ -35,6 +50,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from calendar import monthrange
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -48,8 +64,8 @@ from app.models.agent import AgentSuggestion
 from app.models.ai_memory import AIDraftEdit, AIEntityContext, AIMemoryEvent
 from app.models.deal import Deal
 from app.models.deal_stage_history import DealStageHistory
-from app.models.finance import Expense
-from app.models.goals import MonthlyGoal, MonthlyGoalHistory
+from app.models.finance import Expense, ExpenseCategory, ExpenseRule, FinancePermission, RecurringExpense
+from app.models.goals import MonthlyGoal, MonthlyGoalAssignment, MonthlyGoalHistory, ProductCategory
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.pipeline import PipelineStage
 from app.models.tenant import Tenant
@@ -192,6 +208,115 @@ COPILOT_TOOLS: list[dict[str, Any]] = [
             },
             "required": [],
         },
+    },
+    {
+        "name": "list_expenses",
+        "description": (
+            "Lists individual expense records with full detail (id, category, amount, kind, "
+            "currency, status, date, description, etc.), with optional filters by month, kind "
+            "(fijo/variable), category_id, status (draft/confirmed), and branch_id. Unlike "
+            "get_expenses_summary (which only returns totals grouped by kind), this returns "
+            "the actual list of expense rows. Use when the user wants to see, review, or "
+            "filter individual gastos, not just a total."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "month": {"type": "string", "format": "date", "description": "Any day within the target month (YYYY-MM-DD)"},
+                "kind": {"type": "string", "enum": ["fijo", "variable"]},
+                "category_id": {"type": "string", "format": "uuid"},
+                "status": {"type": "string", "enum": ["draft", "confirmed"]},
+                "branch_id": {"type": "string", "format": "uuid"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "list_expense_categories",
+        "description": (
+            "Lists expense categories (name, kind, icon, active flag) configured for the "
+            "tenant. Use when the user asks what expense categories exist, or before "
+            "creating/filtering an expense by category."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "include_inactive": {"type": "boolean", "description": "Include inactive categories (default false)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "list_recurring_expenses",
+        "description": (
+            "Lists recurring (monthly) expense definitions: category, amount, day of month, "
+            "description, active flag. Use when asked about gastos recurrentes or fixed "
+            "monthly charges configured for the tenant."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "include_inactive": {"type": "boolean", "description": "Include inactive recurring expenses (default false)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "list_expense_rules",
+        "description": (
+            "Lists automatic expense generation rules tied to deals (percent_of_deal, "
+            "fixed_per_deal, percent_of_cost), including their category, value, deal type "
+            "filter, and auto-confirm flag. Use when asked how expenses are auto-generated "
+            "from won deals, or what rules exist."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "include_inactive": {"type": "boolean", "description": "Include inactive rules (default false)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "list_product_categories",
+        "description": (
+            "Lists product categories used to segment monthly goals by product line. "
+            "Use when asked what product categories exist, or before setting a "
+            "product-category-scoped monthly goal."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "include_inactive": {"type": "boolean", "description": "Include inactive product categories (default false)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "list_goal_assignments",
+        "description": (
+            "Lists how a specific monthly goal is split across team members: each assigned "
+            "user, their share percent, and their resulting amount. Requires goal_id. Use "
+            "when asked who a monthly goal is assigned to, or how it's distributed across "
+            "the team."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goal_id": {"type": "string", "format": "uuid", "description": "UUID of the monthly goal"},
+            },
+            "required": ["goal_id"],
+        },
+    },
+    {
+        "name": "list_finance_permissions",
+        "description": (
+            "Lists which users have been granted access to financial reports, and whether "
+            "that access is tenant-wide or scoped to a specific branch. Only for OWNER and "
+            "PLATFORM_OWNER roles. Use when asked who can see finanzas, or to audit finance "
+            "access grants."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "get_monthly_goal",
@@ -711,6 +836,197 @@ async def execute_tool(
             "fijo_mxn": by_kind.get("fijo", 0.0),
             "variable_mxn": by_kind.get("variable", 0.0),
         }
+
+    if name == "list_expenses":
+        branch_id_raw = args.get("branch_id")
+        try:
+            branch_id = uuid.UUID(str(branch_id_raw)) if branch_id_raw else None
+        except (ValueError, AttributeError):
+            return {"error": "branch_id inválido"}
+
+        allowed, reason = await require_finance_access(user, branch_id, db)
+        if not allowed:
+            return {"error": reason}
+
+        category_id_raw = args.get("category_id")
+        try:
+            category_id = uuid.UUID(str(category_id_raw)) if category_id_raw else None
+        except (ValueError, AttributeError):
+            return {"error": "category_id inválido"}
+
+        month_filter_raw = args.get("month")
+        month_filter = None
+        if month_filter_raw:
+            try:
+                month_filter = date.fromisoformat(str(month_filter_raw))
+            except ValueError:
+                return {"error": "month inválido, use formato YYYY-MM-DD"}
+
+        kind_filter = args.get("kind")
+        status_filter = args.get("status")
+
+        q = select(Expense).where(Expense.tenant_id == user.tenant_id)
+        if branch_id is not None:
+            q = q.where(Expense.branch_id == branch_id)
+        if month_filter is not None:
+            first_day = month_filter.replace(day=1)
+            last_day = month_filter.replace(day=monthrange(month_filter.year, month_filter.month)[1])
+            q = q.where(Expense.incurred_at.between(first_day, last_day))
+        if kind_filter is not None:
+            q = q.where(Expense.kind == kind_filter)
+        if category_id is not None:
+            q = q.where(Expense.category_id == category_id)
+        if status_filter is not None:
+            q = q.where(Expense.status == status_filter)
+        q = q.order_by(Expense.incurred_at.desc())
+        rows = (await db.execute(q)).scalars().all()
+        return _jsonable([
+            {
+                "id": r.id, "tenant_id": r.tenant_id, "branch_id": r.branch_id,
+                "category_id": r.category_id, "owner_id": r.owner_id, "amount": r.amount,
+                "kind": r.kind, "currency": r.currency, "incurred_at": r.incurred_at,
+                "status": r.status, "source": r.source, "deal_id": r.deal_id,
+                "rule_id": r.rule_id, "recurring_id": r.recurring_id,
+                "receipt_url": r.receipt_url, "description": r.description,
+            }
+            for r in rows
+        ])
+
+    if name == "list_expense_categories":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+        include_inactive = bool(args.get("include_inactive", False))
+        q = select(ExpenseCategory).where(ExpenseCategory.tenant_id == user.tenant_id)
+        if not include_inactive:
+            q = q.where(ExpenseCategory.is_active.is_(True))
+        q = q.order_by(ExpenseCategory.kind, ExpenseCategory.name)
+        rows = (await db.execute(q)).scalars().all()
+        return _jsonable([
+            {
+                "id": r.id, "tenant_id": r.tenant_id, "name": r.name,
+                "kind": r.kind, "icon": r.icon, "is_active": r.is_active,
+            }
+            for r in rows
+        ])
+
+    if name == "list_recurring_expenses":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+        include_inactive = bool(args.get("include_inactive", False))
+        q = select(RecurringExpense).where(RecurringExpense.tenant_id == user.tenant_id)
+        if not include_inactive:
+            q = q.where(RecurringExpense.is_active.is_(True))
+        rows = (await db.execute(q)).scalars().all()
+        return _jsonable([
+            {
+                "id": r.id, "tenant_id": r.tenant_id, "category_id": r.category_id,
+                "amount": r.amount, "day_of_month": r.day_of_month,
+                "description": r.description, "is_active": r.is_active,
+            }
+            for r in rows
+        ])
+
+    if name == "list_expense_rules":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+        include_inactive = bool(args.get("include_inactive", False))
+        q = select(ExpenseRule).where(ExpenseRule.tenant_id == user.tenant_id)
+        if not include_inactive:
+            q = q.where(ExpenseRule.is_active.is_(True))
+        rows = (await db.execute(q)).scalars().all()
+        return _jsonable([
+            {
+                "id": r.id, "tenant_id": r.tenant_id, "category_id": r.category_id,
+                "name": r.name, "rule_type": r.rule_type, "value": r.value,
+                "deal_type_filter": r.deal_type_filter, "auto_confirm": r.auto_confirm,
+                "is_active": r.is_active,
+            }
+            for r in rows
+        ])
+
+    if name == "list_product_categories":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+        include_inactive = bool(args.get("include_inactive", False))
+        q = select(ProductCategory).where(ProductCategory.tenant_id == user.tenant_id)
+        if not include_inactive:
+            q = q.where(ProductCategory.is_active.is_(True))
+        q = q.order_by(ProductCategory.position, ProductCategory.name)
+        rows = (await db.execute(q)).scalars().all()
+        return _jsonable([
+            {
+                "id": r.id, "tenant_id": r.tenant_id, "name": r.name,
+                "is_active": r.is_active, "position": r.position,
+            }
+            for r in rows
+        ])
+
+    if name == "list_goal_assignments":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
+        try:
+            goal_id = uuid.UUID(str(args.get("goal_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "goal_id inválido"}
+
+        goal = (
+            await db.execute(
+                select(MonthlyGoal).where(
+                    MonthlyGoal.id == goal_id,
+                    MonthlyGoal.tenant_id == user.tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if goal is None:
+            return {"error": "Meta mensual no encontrada"}
+
+        rows = (
+            await db.execute(
+                select(MonthlyGoalAssignment, User)
+                .join(User, User.id == MonthlyGoalAssignment.user_id)
+                .where(MonthlyGoalAssignment.goal_id == goal_id)
+                .order_by(MonthlyGoalAssignment.share_percent.desc())
+            )
+        ).all()
+        return _jsonable([
+            {
+                "id": a.id, "goal_id": a.goal_id, "tenant_id": a.tenant_id,
+                "user_id": a.user_id, "share_percent": a.share_percent,
+                "amount": a.amount, "user_name": u.name, "user_email": u.email,
+            }
+            for a, u in rows
+        ])
+
+    if name == "list_finance_permissions":
+        from app.copilot.actions_catalog import ACTIONS
+        from app.copilot.permissions import check_permission
+
+        allowed, _reason = check_permission(user, ACTIONS["list_finance_permissions"])
+        if not allowed:
+            return {"error": "Solo el propietario puede ver los permisos de finanzas"}
+
+        rows = (
+            await db.execute(
+                select(FinancePermission, User)
+                .join(User, User.id == FinancePermission.user_id)
+                .where(FinancePermission.tenant_id == user.tenant_id)
+                .order_by(FinancePermission.created_at)
+            )
+        ).all()
+        return _jsonable([
+            {
+                "id": fp.id, "tenant_id": fp.tenant_id, "branch_id": fp.branch_id,
+                "user_id": fp.user_id, "granted_by": fp.granted_by,
+                "user_name": u.name, "user_email": u.email,
+            }
+            for fp, u in rows
+        ])
 
     if name == "get_monthly_goal":
         goal = await get_current_month_goal(user.tenant_id, year, month, db)
