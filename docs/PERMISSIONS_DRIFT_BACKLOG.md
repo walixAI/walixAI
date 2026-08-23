@@ -90,6 +90,15 @@ resto del código.
 `platform_owner` (tendría que asumir el rol del tenant o pedirle al owner
 real), no un problema de seguridad.
 
+**✅ RESUELTO** (2026-08-23, ver commit de este cambio): `_require_owner`
+ahora exige `user.role not in (UserRole.OWNER, UserRole.PLATFORM_OWNER)`,
+igual que el resto del código. No se creó una constante compartida en
+`app/core/roles.py` para este patrón — está duplicado en varios archivos
+más (`billing.py`, `finance.py`, `profitability.py`, `walix_builder.py`,
+`tenant.py`), consolidarlos todos es un refactor más grande que este
+hallazgo puntual, queda como decisión aparte. Tests en
+`backend/tests/regression/test_users_require_owner_platform_owner.py`.
+
 ---
 
 ## 3. `industry_onboarding.py::_OWNER_ROLES` = `(OWNER,)` sin PLATFORM_OWNER
@@ -344,7 +353,7 @@ respeta.
 | # | Hallazgo | Archivo(s) | Riesgo | Esfuerzo estimado | Estado |
 |---|---|---|---|---|---|
 | 1 | `_MULTI_BRANCH_ROLES` divergente | leads.py, pipeline.py, pipelines.py, users.py, metrics.py | Bajo-medio | Chico | **✅ Resuelto (2026-08-22)** |
-| 2 | `users.py::_require_owner` sin PLATFORM_OWNER | users.py | Bajo | Chico | Abierto |
+| 2 | `users.py::_require_owner` sin PLATFORM_OWNER | users.py | Bajo | Chico | **✅ Resuelto (2026-08-23)** |
 | 3 | `industry_onboarding.py::_OWNER_ROLES` = (OWNER,) | industry_onboarding.py | Bajo | Chico | Abierto |
 | 4 | `automations.py::_OWNER_PLUS` vs `_OWNER_TIER` | automations.py, actions_catalog.py | Bajo | Mediano (requiere decisión de producto, no solo código) | Abierto |
 | 5 | `delete_deal` sin restricción de rol | deals.py | **Alto** | Chico | **✅ Resuelto (2026-08-20)** |

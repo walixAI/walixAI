@@ -104,7 +104,7 @@ async def _get_user_for_tenant(
 
 
 def _require_owner(user: User) -> None:
-    if user.role != UserRole.OWNER:
+    if user.role not in (UserRole.OWNER, UserRole.PLATFORM_OWNER):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo el owner puede realizar esta acción",
