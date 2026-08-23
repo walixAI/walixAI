@@ -164,8 +164,25 @@ async def _get_suggestion_for_user(
     user: User,
     db: AsyncSession,
 ) -> AgentSuggestion:
-    """Load suggestion and verify it belongs to the user's tenant."""
-    suggestion = await db.get(AgentSuggestion, suggestion_id)
-    if suggestion is None or suggestion.tenant_id != user.tenant_id:
+    """Load suggestion and verify it belongs to the user's tenant AND that
+    the user actually owns it — directly addressed (target_user_id == user)
+    or broadcast to their role (target_user_id IS NULL AND target_role ==
+    user's role). Same ownership criterion as list_suggestions above
+    (hallazgo #7 de docs/PERMISSIONS_DRIFT_BACKLOG.md) — previously this
+    only checked tenant_id, so any user in the tenant could confirm/dismiss
+    a suggestion addressed to someone else."""
+    result = await db.execute(
+        select(AgentSuggestion).where(
+            AgentSuggestion.id == suggestion_id,
+            AgentSuggestion.tenant_id == user.tenant_id,
+            or_(
+                AgentSuggestion.target_user_id == user.id,
+                (AgentSuggestion.target_user_id.is_(None))
+                & (AgentSuggestion.target_role == user.role.value),
+            ),
+        )
+    )
+    suggestion = result.scalar_one_or_none()
+    if suggestion is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Suggestion not found")
     return suggestion

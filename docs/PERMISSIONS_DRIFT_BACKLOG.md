@@ -378,6 +378,33 @@ específico (no hay enumeración trivial vía la API), pero si se conoce uno,
 la consecuencia es ejecución real de una acción de negocio ajena, no solo
 lectura de datos.
 
+**✅ RESUELTO** (2026-08-23): `_get_suggestion_for_user` ahora aplica el
+mismo filtro de ownership que `list_suggestions` (`target_user_id ==
+usuario`, O `target_user_id IS NULL` y `target_role == rol del usuario`),
+centralizado en el helper — `confirm_suggestion` y `dismiss_suggestion`
+no duplican la condición, siguen llamándolo igual que antes. El chequeo
+de `tenant_id` se mantiene en la misma query. La respuesta ante fallo
+sigue siendo 404 (sin cambios de status code, solo cambió qué filtra la
+query).
+
+El mismo problema ya se había resuelto del lado del Copiloto
+(`app/ai/copilot_tools.py::execute_tool`, rama `dismiss_suggestion`, ver
+`tests/regression/test_copilot_dismiss_suggestion.py`) en un commit
+anterior de esta sesión, precisamente para no heredar este hueco al
+conectar el catálogo — ese fix construía su propia query con el mismo
+criterio en vez de reutilizar este helper, porque en ese momento el
+helper REST seguía siendo el que solo validaba `tenant_id`. Este cambio
+cierra el lado REST que había quedado pendiente entonces.
+
+Tests nuevos en `tests/regression/test_agents_suggestion_ownership.py`
+(vía los endpoints REST reales con `client`, mockeando
+`execute_suggestion_task.delay` para no encolar un job real contra el
+Redis compartido del entorno): dirigida a otro usuario específico →
+404 sin cambiar estado (confirm y dismiss), dirigida directamente al
+usuario → sigue funcionando, dirigida a su rol (broadcast) → sigue
+funcionando, dirigida a otro rol → 404, y otro tenant → 404 confirmado
+explícitamente ahora que se tocó la función.
+
 ---
 
 ## 8. Tools de finanzas del Copiloto sin validar `FinancePermission`
@@ -513,6 +540,6 @@ consistente entre la capa de RLS y la capa de aplicación.
 | 4 | `automations.py::_OWNER_PLUS` vs `_OWNER_TIER` | automations.py, actions_catalog.py | Bajo | Mediano (requiere decisión de producto, no solo código) | **✅ Resuelto (2026-08-23)** |
 | 5 | `delete_deal` sin restricción de rol | deals.py | **Alto** | Chico | **✅ Resuelto (2026-08-20)** |
 | 6 | `set_monthly_goal` duplicado (Copiloto vs REST) | copilot_tools.py, goals.py | Bajo | Mediano (requiere decisión de arquitectura) | **✅ Resuelto (2026-08-23)** |
-| 7 | `confirm_suggestion`/`dismiss_suggestion` sin ownership | agents.py | Medio | Chico | Abierto |
+| 7 | `confirm_suggestion`/`dismiss_suggestion` sin ownership | agents.py | Medio | Chico | **✅ Resuelto (2026-08-23)** |
 | 8 | Tools de finanzas del Copiloto sin `FinancePermission` | copilot_tools.py, finance_access.py | **Alto** | Chico | **✅ Resuelto (2026-08-21)** |
 | 9 | Impersonación: tenant_id del token no se usa en la app | auth.py, platform.py, tenant_context.py | **Alto** | Grande (rediseño de arquitectura, no un fix mecánico) | Abierto |
