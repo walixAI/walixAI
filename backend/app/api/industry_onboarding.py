@@ -45,7 +45,7 @@ _setup_svc = TenantSetupService()
 
 # ── Auth helpers ───────────────────────────────────────────────────────────────
 
-_OWNER_ROLES = (UserRole.OWNER,)
+_OWNER_ROLES = (UserRole.OWNER, UserRole.PLATFORM_OWNER)
 
 
 def _require_owner(user: User) -> None:
