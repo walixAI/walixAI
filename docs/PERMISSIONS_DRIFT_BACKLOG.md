@@ -285,6 +285,35 @@ depender de código de `app/api/`).
 es de mantenimiento futuro (drift silencioso), no de seguridad ni de datos
 incorrectos en el estado actual.
 
+**✅ RESUELTO** (2026-08-23): se implementó la opción (a) — se unificó la
+lógica de negocio en `backend/app/services/goals_service.py::
+upsert_monthly_goal` (validar periodo pasado, buscar meta existente,
+upsert, registrar `MonthlyGoalHistory`), y ahora tanto
+`goals.py::create_or_update_monthly_goal` como la rama `set_monthly_goal`
+de `copilot_tools.py::execute_tool` llaman a ese servicio compartido en
+vez de reimplementar la lógica cada uno por su lado. El chequeo de acceso
+(`_require_finance_access` en el REST, `require_finance_access` en el
+Copiloto) y el flujo `confirmed=bool` propio del Copiloto se quedaron
+fuera del servicio — son responsabilidad de cada caller, no lógica de
+negocio de la meta en sí.
+
+**Gap de acceso encontrado durante este fix (no es el hallazgo #6
+original, que era solo sobre duplicación):** al auditar el código para
+unificarlo se confirmó que la rama `set_monthly_goal` del Copiloto **no**
+llamaba a `require_finance_access` — a diferencia de su endpoint REST
+equivalente y del resto de tools de finanzas del Copiloto (hallazgo #8).
+Cualquier usuario autenticado podía setear la meta mensual global vía el
+Copiloto sin ningún chequeo de acceso a finanzas. Se corrigió agregando
+`require_finance_access(user, None, db)` al inicio de la rama, ANTES del
+flujo `confirmed=bool` — así un usuario sin acceso no ve ni el mensaje de
+confirmación con el monto propuesto. Tests nuevos en
+`tests/regression/test_copilot_set_monthly_goal_access.py` cubren: ASESOR
+sin `FinancePermission` denegado (y sin crear nada en BD), OWNER con
+bypass por rol, ASESOR con `FinancePermission` tenant-wide permitido, el
+orden acceso-antes-que-confirmación, y un upsert real (crear → actualizar)
+verificando que `MonthlyGoalHistory` registra `goal_created` y
+`goal_updated` igual que antes del refactor.
+
 ---
 
 ## 7. `confirm_suggestion`/`dismiss_suggestion` sin validación de ownership
@@ -483,7 +512,7 @@ consistente entre la capa de RLS y la capa de aplicación.
 | 3 | `industry_onboarding.py::_OWNER_ROLES` = (OWNER,) | industry_onboarding.py | Bajo | Chico | **✅ Resuelto (2026-08-23)** |
 | 4 | `automations.py::_OWNER_PLUS` vs `_OWNER_TIER` | automations.py, actions_catalog.py | Bajo | Mediano (requiere decisión de producto, no solo código) | **✅ Resuelto (2026-08-23)** |
 | 5 | `delete_deal` sin restricción de rol | deals.py | **Alto** | Chico | **✅ Resuelto (2026-08-20)** |
-| 6 | `set_monthly_goal` duplicado (Copiloto vs REST) | copilot_tools.py, goals.py | Bajo | Mediano (requiere decisión de arquitectura) | Abierto |
+| 6 | `set_monthly_goal` duplicado (Copiloto vs REST) | copilot_tools.py, goals.py | Bajo | Mediano (requiere decisión de arquitectura) | **✅ Resuelto (2026-08-23)** |
 | 7 | `confirm_suggestion`/`dismiss_suggestion` sin ownership | agents.py | Medio | Chico | Abierto |
 | 8 | Tools de finanzas del Copiloto sin `FinancePermission` | copilot_tools.py, finance_access.py | **Alto** | Chico | **✅ Resuelto (2026-08-21)** |
 | 9 | Impersonación: tenant_id del token no se usa en la app | auth.py, platform.py, tenant_context.py | **Alto** | Grande (rediseño de arquitectura, no un fix mecánico) | Abierto |
