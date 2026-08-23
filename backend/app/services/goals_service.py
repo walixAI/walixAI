@@ -24,6 +24,15 @@ from app.models.goals import MonthlyGoal, MonthlyGoalHistory
 
 GoalAction = Literal["created", "updated"]
 
+# Sentinel para currency/notes en upsert_monthly_goal: distingue "el caller
+# no especificó este campo, no lo toques" de "el caller sí lo especificó,
+# incluso como None" (notes=None es un valor válido: borrar las notas).
+# Necesario porque el REST (goals.py) siempre manda currency/notes explícitos
+# desde el body, pero el Copiloto (copilot_tools.py::set_monthly_goal) nunca
+# tuvo la intención de tocarlos — sin este sentinel, un default real como
+# "MXN"/None resetearía en silencio esos campos en cada update vía Copiloto.
+_UNSET = object()
+
 
 def is_past_period(year: int, month: int, today: date | None = None) -> bool:
     today = today or date.today()
@@ -81,14 +90,19 @@ async def upsert_monthly_goal(
     month: int,
     amount: Decimal,
     user_id: uuid.UUID,
-    currency: str = "MXN",
+    currency: str | object = _UNSET,
     dimension: str = "global",
     dimension_value_text: str | None = None,
     dimension_value_uuid: uuid.UUID | None = None,
-    notes: str | None = None,
+    notes: str | None | object = _UNSET,
     is_draft: bool = False,
 ) -> tuple[MonthlyGoal, GoalAction]:
     """Create or update a MonthlyGoal and record a MonthlyGoalHistory entry.
+
+    currency/notes default to _UNSET (module sentinel): on update, _UNSET
+    leaves the existing value untouched; on create, _UNSET falls back to a
+    real default ("MXN"/None) since a new goal needs an actual value, not a
+    sentinel. Pass an explicit value (including notes=None) to overwrite.
 
     Raises ValueError if year/month is a past period. Does not check access —
     callers must authorize before calling (see module docstring). Commits and
@@ -110,8 +124,10 @@ async def upsert_monthly_goal(
     if existing is not None:
         before = goal_as_dict(existing)
         existing.amount = amount
-        existing.currency = currency
-        existing.notes = notes
+        if currency is not _UNSET:
+            existing.currency = currency
+        if notes is not _UNSET:
+            existing.notes = notes
         existing.is_draft = is_draft
         await db.flush()
         after = goal_as_dict(existing)
@@ -132,11 +148,11 @@ async def upsert_monthly_goal(
         period_year=year,
         period_month=month,
         amount=amount,
-        currency=currency,
+        currency=currency if currency is not _UNSET else "MXN",
         dimension=dimension,
         dimension_value_text=dimension_value_text,
         dimension_value_uuid=dimension_value_uuid,
-        notes=notes,
+        notes=notes if notes is not _UNSET else None,
         is_draft=is_draft,
         created_by=user_id,
     )
