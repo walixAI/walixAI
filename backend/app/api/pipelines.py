@@ -16,15 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
+from app.core.roles import MULTI_BRANCH_ROLES
 from app.models.deal import Deal
 from app.models.pipeline import PipelineStage
 from app.models.pipeline_group import Pipeline, resolve_default_pipeline_id
 from app.models.tenant import Branch
-from app.models.user import User, UserRole
+from app.models.user import User
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
-
-_MULTI_BRANCH_ROLES = (UserRole.OWNER, UserRole.IT)
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -76,8 +75,8 @@ async def list_pipelines(
         if branch is None or branch.tenant_id != current_user.tenant_id:
             raise HTTPException(status_code=404, detail="Branch no encontrada")
         where = [Pipeline.branch_id == branch_id, Pipeline.tenant_id == current_user.tenant_id]
-    elif current_user.role in _MULTI_BRANCH_ROLES:
-        # Owner/IT: all pipelines across all branches of the tenant
+    elif current_user.role in MULTI_BRANCH_ROLES:
+        # MULTI_BRANCH_ROLES: all pipelines across all branches of the tenant
         where = [Pipeline.tenant_id == current_user.tenant_id]
     elif current_user.branch_id is not None:
         where = [Pipeline.branch_id == current_user.branch_id, Pipeline.tenant_id == current_user.tenant_id]
