@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
@@ -84,6 +84,7 @@ class MeResponse(BaseModel):
 
 
 async def get_current_user(
+    request: Request,
     creds: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -108,6 +109,29 @@ async def get_current_user(
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
         raise credentials_error
+
+    # Platform-owner impersonation (hallazgo #9, docs/PERMISSIONS_DRIFT_BACKLOG.md):
+    # an impersonation token (see platform.py::impersonate_tenant) carries a
+    # tenant_id claim for the TARGET tenant, distinct from this row's own
+    # tenant_id (the platform_owner's home tenant). TenantContextMiddleware
+    # already uses that claim correctly to activate RLS, but the 213+ call
+    # sites across app/api/ that filter by current_user.tenant_id at the
+    # application layer (outside RLS) were still using the platform_owner's
+    # own tenant_id. Overriding it here — in memory only, never flushed or
+    # committed from this function, never via session.merge() — makes those
+    # filters see the impersonated tenant like TenantContextMiddleware/RLS
+    # already do.
+    request.state.is_impersonating = False
+    token_tenant_id = payload.get("tenant_id")
+    if token_tenant_id:
+        try:
+            claim_tenant_id = uuid.UUID(token_tenant_id)
+        except (ValueError, TypeError):
+            claim_tenant_id = None
+        if claim_tenant_id is not None and claim_tenant_id != user.tenant_id:
+            user.tenant_id = claim_tenant_id
+            request.state.is_impersonating = True
+
     return user
 
 
