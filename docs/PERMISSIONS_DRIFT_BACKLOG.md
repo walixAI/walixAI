@@ -372,6 +372,90 @@ respeta.
 
 ---
 
+## 9. Mecanismo de impersonación de platform_owner: `tenant_id` del token no se usa en la app, y `read_only_impersonation` no se valida
+
+**Archivo(s):**
+- `backend/app/api/platform.py:508-527` — `impersonate_tenant`. Emite un
+  JWT con:
+  ```python
+  access_token = create_access_token(
+      data={
+          "sub": str(current_user.id),
+          "tenant_id": str(tenant_id),
+          "read_only_impersonation": True,
+      },
+      expires_at=expires_at,
+  )
+  ```
+- `backend/app/api/auth.py:86-111` — `get_current_user`. Solo lee `sub`
+  del token (línea 100), carga el `User` de BD (línea 108) y lo retorna.
+  El claim `tenant_id` del token **se ignora por completo** —
+  `current_user.tenant_id` siempre es el tenant propio del usuario en BD
+  (columna `users.tenant_id`), nunca el tenant impersonado.
+- `backend/app/middleware/tenant_context.py:71-74` — SÍ lee el claim
+  `tenant_id` del token:
+  ```python
+  tid = payload.get("tenant_id")
+  if tid:
+      # Preferred path: tenant_id embedded in token.
+      tenant_id = str(UUID(tid))
+  ```
+  pero únicamente para setear `request.state.tenant_id`, que alimenta
+  `app.current_tenant_id` de RLS a nivel Postgres — no toca nada de la
+  lógica de aplicación.
+- `read_only_impersonation` aparece **una sola vez en todo el backend**
+  (`platform.py:524`, donde se crea el claim) — no se valida en ningún
+  otro lugar del código.
+
+**Problema:** hay dos capas leyendo el mismo JWT de impersonación de forma
+divergente. RLS (vía el middleware) sí reposiciona el contexto de tenant a
+nivel de base de datos usando el `tenant_id` del token. Pero la capa de
+aplicación (`get_current_user`, y por extensión cualquier endpoint que
+filtre explícitamente por `current_user.tenant_id`, que es el patrón
+dominante en este código) sigue usando el tenant propio del
+`platform_owner`, no el tenant impersonado — el claim se emite pero nunca
+se consume ahí. Además, el claim `read_only_impersonation: True` es
+puramente decorativo: no existe ningún middleware o dependency que
+bloquee métodos no-GET cuando ese claim está presente, así que la promesa
+de "solo lectura" no se aplica en ningún punto del código.
+
+**Nota — esto es un problema de ARQUITECTURA del mecanismo completo, no de
+un endpoint puntual.** No es específico de billing, finance o
+industry_onboarding (los módulos auditados en hallazgos recientes) — afecta
+potencialmente cualquier endpoint que la impersonación debería alcanzar,
+porque el mismatch está en `get_current_user`, que es la dependency que
+usa prácticamente toda la API.
+
+**Nota sobre el efecto práctico probable hoy (hipótesis razonada a partir
+del código, NO confirmada con un test real — no se escribió ese test
+end-to-end en este hallazgo):** un `platform_owner` que impersona un
+tenant probablemente ve datos vacíos o `404` en los endpoints que filtran
+por `current_user.tenant_id` explícito (porque ese sigue siendo el tenant
+propio del `platform_owner`, no el impersonado) — no una fuga de datos
+hacia el tenant ajeno. Es más un problema de "la funcionalidad de
+impersonar probablemente no funciona como se espera" que de exposición de
+datos, pero queda como hipótesis a validar, no como hecho confirmado.
+
+**Fix sugerido (no implementar ahora) — preguntas de diseño abiertas, no
+una solución cerrada:**
+- ¿`get_current_user` debería resolver `current_user.tenant_id` desde el
+  claim `tenant_id` del token cuando existe, haciendo que impersonar de
+  verdad cambie el contexto de aplicación (no solo el de RLS)?
+- ¿`read_only_impersonation` debería aplicarse en un middleware/dependency
+  que bloquee métodos no-GET cuando el claim está presente, para que la
+  promesa de "solo lectura" sea real?
+- ¿Es deseable que un `platform_owner` impersonando termine operando con
+  un `User` en memoria cuyo `tenant_id` no coincide con su fila real en
+  BD? Eso tiene implicaciones en auditoría/logging (¿qué tenant_id se
+  registra en los logs de acciones?) que también habría que decidir.
+
+**Riesgo si no se corrige:** alto — no por fuga de datos (que no está
+confirmada), sino porque es la base de cualquier flujo de soporte de
+`platform_owner` sobre tenants ajenos, y hoy parece no funcionar de forma
+consistente entre la capa de RLS y la capa de aplicación.
+
+---
+
 ## Resumen para priorizar
 
 | # | Hallazgo | Archivo(s) | Riesgo | Esfuerzo estimado | Estado |
@@ -384,3 +468,4 @@ respeta.
 | 6 | `set_monthly_goal` duplicado (Copiloto vs REST) | copilot_tools.py, goals.py | Bajo | Mediano (requiere decisión de arquitectura) | Abierto |
 | 7 | `confirm_suggestion`/`dismiss_suggestion` sin ownership | agents.py | Medio | Chico | Abierto |
 | 8 | Tools de finanzas del Copiloto sin `FinancePermission` | copilot_tools.py, finance_access.py | **Alto** | Chico | **✅ Resuelto (2026-08-21)** |
+| 9 | Impersonación: tenant_id del token no se usa en la app | auth.py, platform.py, tenant_context.py | **Alto** | Grande (rediseño de arquitectura, no un fix mecánico) | Abierto |
