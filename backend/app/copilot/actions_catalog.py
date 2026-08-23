@@ -47,6 +47,17 @@ RiskTier = Literal["low", "medium", "high"]
 
 _ALL_ROLES = frozenset(UserRole)
 # Mismo set que _OWNER_ROLES en copilot_tools.py / billing.py::_require_owner.
+#
+# OJO: este set NO incluye IT a propósito — cancel_subscription,
+# get_team_performance y list_finance_permissions son intencionalmente más
+# restrictivos que otras acciones "owner-tier" del código (ver hallazgo #4
+# de docs/PERMISSIONS_DRIFT_BACKLOG.md). Si en el futuro se conecta
+# re_execute_automation o patch_automation (app/api/automations.py) al
+# catálogo, usar un set que SÍ incluya IT — como
+# app/api/automations.py::_OWNER_PLUS del REST equivalente — NO reutilizar
+# _OWNER_TIER. automations.py::_OWNER_PLUS ya es correcto tal como está;
+# no se tocó en ese hallazgo, solo se documentó esta divergencia
+# intencional para que no se junten por error.
 _OWNER_TIER = frozenset({UserRole.OWNER, UserRole.PLATFORM_OWNER})
 
 ActionHandler = Callable[..., Awaitable[dict[str, Any]]]

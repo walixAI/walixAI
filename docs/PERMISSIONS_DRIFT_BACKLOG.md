@@ -196,6 +196,24 @@ todo el código o si `automations.py` es el que está mal.
 archivos, es una inconsistencia latente que solo importa el día que se
 conecten.
 
+**✅ RESUELTO** (2026-08-23, ver commit de este cambio): decisión de
+producto tomada en el chat — `IT` SÍ debe tener el mismo nivel de acceso
+que `OWNER`/`PLATFORM_OWNER` para gestionar automatizaciones, es decir,
+`automations.py::_OWNER_PLUS` (que ya incluye `IT`) es el comportamiento
+correcto, **no** `actions_catalog.py::_OWNER_TIER`. Esto NO fue un fix de
+código — `automations.py` ya estaba correcto tal como estaba y no se
+tocó. `_OWNER_TIER` tampoco se modificó globalmente (sigue sin `IT`,
+correcto para `cancel_subscription`, `get_team_performance` y
+`list_finance_permissions`, que deben seguir siendo más restrictivos).
+Se agregó un comentario defensivo justo antes de la definición de
+`_OWNER_TIER` en `actions_catalog.py` explicando esta divergencia
+intencional, para que si algún día se conecta `re_execute_automation` o
+`patch_automation` al catálogo, quien lo haga use un set que incluya `IT`
+(como `_OWNER_PLUS`) en vez de reutilizar `_OWNER_TIER` por costumbre. No
+hizo falta ningún test nuevo — no cambia comportamiento de ningún endpoint
+ni tool; se corrió `test_copilot_actions_catalog.py` como chequeo de que
+tocar el archivo no rompió nada (sin cambios de resultado esperados).
+
 ---
 
 ## 5. `delete_deal` sin restricción de rol en el endpoint REST real
@@ -463,7 +481,7 @@ consistente entre la capa de RLS y la capa de aplicación.
 | 1 | `_MULTI_BRANCH_ROLES` divergente | leads.py, pipeline.py, pipelines.py, users.py, metrics.py | Bajo-medio | Chico | **✅ Resuelto (2026-08-22)** |
 | 2 | `users.py::_require_owner` sin PLATFORM_OWNER | users.py | Bajo | Chico | **✅ Resuelto (2026-08-23)** |
 | 3 | `industry_onboarding.py::_OWNER_ROLES` = (OWNER,) | industry_onboarding.py | Bajo | Chico | **✅ Resuelto (2026-08-23)** |
-| 4 | `automations.py::_OWNER_PLUS` vs `_OWNER_TIER` | automations.py, actions_catalog.py | Bajo | Mediano (requiere decisión de producto, no solo código) | Abierto |
+| 4 | `automations.py::_OWNER_PLUS` vs `_OWNER_TIER` | automations.py, actions_catalog.py | Bajo | Mediano (requiere decisión de producto, no solo código) | **✅ Resuelto (2026-08-23)** |
 | 5 | `delete_deal` sin restricción de rol | deals.py | **Alto** | Chico | **✅ Resuelto (2026-08-20)** |
 | 6 | `set_monthly_goal` duplicado (Copiloto vs REST) | copilot_tools.py, goals.py | Bajo | Mediano (requiere decisión de arquitectura) | Abierto |
 | 7 | `confirm_suggestion`/`dismiss_suggestion` sin ownership | agents.py | Medio | Chico | Abierto |
