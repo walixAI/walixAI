@@ -131,6 +131,30 @@ demás archivos.
 **Riesgo si no se corrige:** bajo — mismo tipo de limitación operativa que
 el hallazgo 2, no una fuga de datos.
 
+**✅ RESUELTO** (2026-08-23, ver commit de este cambio): `_OWNER_ROLES`
+pasó a `(UserRole.OWNER, UserRole.PLATFORM_OWNER)`. Decisión de producto
+explícita tomada en el chat (no asumida por el patrón de los demás
+archivos, como pedía la nota de "fix sugerido" de arriba): `PLATFORM_OWNER`
+SÍ debe poder ver **y** cambiar la industria de un tenant, incluyendo
+`change_industry` (acción destructiva que recrea el pipeline completo) —
+deliberado, no un descuido.
+
+Nota de diseño importante descubierta al implementar: ni
+`get_industry_settings` ni `change_industry` aceptan un `tenant_id`
+objetivo — ambos operan exclusivamente sobre `current_user.tenant_id`, a
+diferencia de `app/api/platform.py`, donde las operaciones cross-tenant de
+`PLATFORM_OWNER` sí reciben `tenant_id` explícito. Este fix solo permite
+que un usuario con rol `PLATFORM_OWNER` gestione la industria de **su
+propio tenant** — no la de un tenant ajeno, porque el endpoint no tiene
+ningún mecanismo para apuntar a otro tenant. Habilitar eso de verdad
+requeriría rediseñar el endpoint (agregar `tenant_id`, posiblemente mover
+a `platform.py`) — quedó fuera de alcance de este hallazgo puntual, es una
+decisión aparte si se quiere ese alcance real.
+
+Tests en `backend/tests/regression/test_industry_onboarding_owner_roles.py`
+— incluye verificación real de que `change_industry` archiva las etapas
+viejas y crea las nuevas del template (no solo status 200).
+
 ---
 
 ## 4. `automations.py::_OWNER_PLUS` incluye IT, no coincide con `app/copilot/actions_catalog.py::_OWNER_TIER`
@@ -354,7 +378,7 @@ respeta.
 |---|---|---|---|---|---|
 | 1 | `_MULTI_BRANCH_ROLES` divergente | leads.py, pipeline.py, pipelines.py, users.py, metrics.py | Bajo-medio | Chico | **✅ Resuelto (2026-08-22)** |
 | 2 | `users.py::_require_owner` sin PLATFORM_OWNER | users.py | Bajo | Chico | **✅ Resuelto (2026-08-23)** |
-| 3 | `industry_onboarding.py::_OWNER_ROLES` = (OWNER,) | industry_onboarding.py | Bajo | Chico | Abierto |
+| 3 | `industry_onboarding.py::_OWNER_ROLES` = (OWNER,) | industry_onboarding.py | Bajo | Chico | **✅ Resuelto (2026-08-23)** |
 | 4 | `automations.py::_OWNER_PLUS` vs `_OWNER_TIER` | automations.py, actions_catalog.py | Bajo | Mediano (requiere decisión de producto, no solo código) | Abierto |
 | 5 | `delete_deal` sin restricción de rol | deals.py | **Alto** | Chico | **✅ Resuelto (2026-08-20)** |
 | 6 | `set_monthly_goal` duplicado (Copiloto vs REST) | copilot_tools.py, goals.py | Bajo | Mediano (requiere decisión de arquitectura) | Abierto |
