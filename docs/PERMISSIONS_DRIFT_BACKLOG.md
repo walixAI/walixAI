@@ -45,6 +45,20 @@ cuenta como parte de este hallazgo porque `opportunities.py` no está montado
 en `app/main.py` (código deprecado, ver `docs/OPPORTUNITY_VS_DEAL_AUDIT.md`),
 pero si algún día se reactiva heredaría la misma divergencia.*
 
+**✅ RESUELTO** (2026-08-22, ver commit de este cambio): se creó
+`app/core/roles.py::MULTI_BRANCH_ROLES = frozenset({OWNER, IT,
+PLATFORM_OWNER})` como única fuente de verdad, e importada en los 5
+archivos (`leads.py`, `pipeline.py`, `pipelines.py`, `users.py`,
+`metrics.py`), eliminando cada definición local. Esto amplía el acceso
+cross-branch de `PLATFORM_OWNER` en `leads.py`/`pipeline.py`/
+`pipelines.py`/`users.py` — es el fix esperado, no un efecto secundario.
+`app/copilot/permissions.py:32` mantiene su propia copia idéntica sin
+tocar (fuera de alcance de este cambio, evaluado y descartado por ahora —
+ver mensaje del PR); `app/_deprecated/opportunities.py:38` tampoco se
+tocó (código deprecado, no montado en `app/main.py`). Tests en
+`backend/tests/regression/test_core_roles.py` y ajustes en las suites de
+los 5 módulos.
+
 ---
 
 ## 2. `users.py::_require_owner` excluye PLATFORM_OWNER
@@ -329,7 +343,7 @@ respeta.
 
 | # | Hallazgo | Archivo(s) | Riesgo | Esfuerzo estimado | Estado |
 |---|---|---|---|---|---|
-| 1 | `_MULTI_BRANCH_ROLES` divergente | leads.py, pipeline.py, pipelines.py, users.py, metrics.py | Bajo-medio | Chico | Abierto |
+| 1 | `_MULTI_BRANCH_ROLES` divergente | leads.py, pipeline.py, pipelines.py, users.py, metrics.py | Bajo-medio | Chico | **✅ Resuelto (2026-08-22)** |
 | 2 | `users.py::_require_owner` sin PLATFORM_OWNER | users.py | Bajo | Chico | Abierto |
 | 3 | `industry_onboarding.py::_OWNER_ROLES` = (OWNER,) | industry_onboarding.py | Bajo | Chico | Abierto |
 | 4 | `automations.py::_OWNER_PLUS` vs `_OWNER_TIER` | automations.py, actions_catalog.py | Bajo | Mediano (requiere decisión de producto, no solo código) | Abierto |

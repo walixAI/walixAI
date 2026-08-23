@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.core.database import get_db
 from app.core.redis import redis_client
+from app.core.roles import MULTI_BRANCH_ROLES
 from app.models.activity import ActivityType, LeadActivity
 from app.models.ai_memory import AIDraftEdit, AIMemoryEvent
 from app.models.pipeline import PipelineStage
@@ -173,8 +174,6 @@ class UserBrief(BaseModel):
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-_MULTI_BRANCH_ROLES = (UserRole.OWNER, UserRole.IT)
-
 
 def _require_branch(user: User) -> uuid.UUID:
     if user.branch_id is None:
@@ -190,13 +189,13 @@ async def _get_lead_accessible(
 ) -> Lead:
     """Fetch a lead the user is allowed to see.
 
-    Owner/IT: any lead in their tenant.
+    MULTI_BRANCH_ROLES (owner/IT/platform_owner): any lead in their tenant.
     Others: only leads in their own branch.
     """
     lead = await db.get(Lead, lead_id)
     if lead is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
-    if user.role in _MULTI_BRANCH_ROLES:
+    if user.role in MULTI_BRANCH_ROLES:
         if lead.tenant_id != user.tenant_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
     else:
@@ -250,7 +249,7 @@ async def list_leads(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LeadListResponse:
-    if current_user.role in _MULTI_BRANCH_ROLES:
+    if current_user.role in MULTI_BRANCH_ROLES:
         base = select(Lead).where(Lead.tenant_id == current_user.tenant_id)
     else:
         branch_id = _require_branch(current_user)

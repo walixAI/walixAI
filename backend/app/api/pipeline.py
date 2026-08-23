@@ -15,12 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
+from app.core.roles import MULTI_BRANCH_ROLES
 from app.models.activity import LeadActivity
 from app.models.deal import Deal
 from app.models.lead import Lead, LeadSentiment, LeadStatus
 from app.models.pipeline import PipelineStage
 from app.models.pipeline_group import Pipeline, resolve_default_pipeline_id
-from app.models.user import User, UserRole
+from app.models.user import User
 
 # ── Pydantic schema para listado de usuarios del tenant ───────────────────────
 
@@ -33,8 +34,6 @@ class TenantUserItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
-
-_MULTI_BRANCH_ROLES = (UserRole.OWNER, UserRole.IT)
 
 # ── Pydantic schemas ───────────────────────────────────────────────────────────
 
@@ -101,8 +100,8 @@ async def get_pipeline_board(
             detail="branch_id is required for users without an assigned branch",
         )
 
-    # Access control: non-owner/IT users can only see their own branch
-    if current_user.role not in _MULTI_BRANCH_ROLES:
+    # Access control: non-multi-branch-role users can only see their own branch
+    if current_user.role not in MULTI_BRANCH_ROLES:
         if current_user.branch_id != resolved_branch_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -247,7 +246,7 @@ async def get_pipeline_stages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict]:
-    is_multi_branch = current_user.role in _MULTI_BRANCH_ROLES
+    is_multi_branch = current_user.role in MULTI_BRANCH_ROLES
 
     if pipeline_id is not None:
         p = await db.get(Pipeline, pipeline_id)
@@ -304,7 +303,7 @@ async def get_pipeline_deals(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[DealKanbanItem]:
-    is_multi_branch = current_user.role in _MULTI_BRANCH_ROLES
+    is_multi_branch = current_user.role in MULTI_BRANCH_ROLES
 
     if pipeline_id is not None:
         p = await db.get(Pipeline, pipeline_id)

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.core.database import get_db
+from app.core.roles import MULTI_BRANCH_ROLES
 from app.core.security import hash_password, verify_password
 from app.models.tenant import Branch
 from app.models.user import User, UserRole
@@ -198,9 +199,6 @@ async def create_team_member(
 
 # ── GET /users — tenant directory (lightweight, all authenticated roles) ──────
 
-_MULTI_BRANCH_ROLES = (UserRole.OWNER, UserRole.IT)
-
-
 @users_router.get("", response_model=list[TenantUserOut])
 async def list_tenant_users(
     current_user: User = Depends(get_current_user),
@@ -208,7 +206,7 @@ async def list_tenant_users(
 ) -> list[TenantUserOut]:
     """Returns active users visible to the caller.
 
-    OWNER / IT → all active users of the tenant.
+    MULTI_BRANCH_ROLES (owner/IT/platform_owner) → all active users of the tenant.
     Everyone else → only active users in the same branch.
     No email or wa_phone is exposed.
     """
@@ -216,7 +214,7 @@ async def list_tenant_users(
         User.tenant_id == current_user.tenant_id,
         User.is_active.is_(True),
     )
-    if current_user.role not in _MULTI_BRANCH_ROLES:
+    if current_user.role not in MULTI_BRANCH_ROLES:
         q = q.where(User.branch_id == current_user.branch_id)
     q = q.order_by(User.name)
     rows = (await db.execute(q)).scalars().all()

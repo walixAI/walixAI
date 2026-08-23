@@ -16,6 +16,7 @@ from app.api.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis import redis_client
+from app.core.roles import MULTI_BRANCH_ROLES
 from app.models.agent import AgentSuggestion
 from app.models.conversation import Conversation, ConversationHandler, Message, MessageRole
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
@@ -28,7 +29,7 @@ from app.models.deal import Deal
 from app.models.deal_stage_history import DealStageHistory
 from app.models.scoring import LeadScore
 from app.models.tenant import Branch, Tenant
-from app.models.user import User, UserRole
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,6 @@ pipeline_router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
 _anthropic = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-_MULTI_BRANCH_ROLES = {UserRole.OWNER, UserRole.IT, UserRole.PLATFORM_OWNER}
 _TERMINAL = [LeadStatus.PERDIDO, LeadStatus.CALIFICADO]
 
 CACHE_TTL = 300  # 5 min
@@ -327,7 +327,7 @@ def _resolve_branch(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="branch_id is required for users without an assigned branch",
         )
-    if user.role not in _MULTI_BRANCH_ROLES and user.branch_id and resolved != user.branch_id:
+    if user.role not in MULTI_BRANCH_ROLES and user.branch_id and resolved != user.branch_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this branch")
     return resolved
 
@@ -1023,7 +1023,7 @@ async def get_pipeline_intelligence(
 
     # ── Branch resolution ─────────────────────────────────────────────────────
     if branch_id:
-        if current_user.role not in _MULTI_BRANCH_ROLES and current_user.branch_id != branch_id:
+        if current_user.role not in MULTI_BRANCH_ROLES and current_user.branch_id != branch_id:
             raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Sin acceso a esta sucursal")
         branch_ids = [branch_id]
     else:
