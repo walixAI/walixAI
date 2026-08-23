@@ -16,6 +16,9 @@ Política de confirmación:
   set_monthly_goal
     → requiere confirmed=True en el input; si confirmed=False devuelve
       mensaje de confirmación para que Claude lo presente al usuario.
+      El chequeo require_finance_access corre ANTES del flujo confirmed
+      (hallazgo #6 de docs/PERMISSIONS_DRIFT_BACKLOG.md) — así no se le
+      revela el monto/mensaje de confirmación a alguien sin acceso.
 
 dismiss_suggestion (Copiloto Fase 1, ronda de agents.py) valida ownership
 real (target_user_id/target_role, mismo patrón que
@@ -42,6 +45,14 @@ get_team_performance), igual que su endpoint REST real
 _require_finance_access — mostrar quién tiene acceso a finanzas es en sí
 una acción de owner, no de cualquiera con acceso de lectura a finanzas).
 
+set_monthly_goal (hallazgo #6 de docs/PERMISSIONS_DRIFT_BACKLOG.md) delega
+el upsert a app/services/goals_service.py::upsert_monthly_goal, compartido
+con app/api/goals.py::create_or_update_monthly_goal — unifica la lógica de
+negocio que antes estaba duplicada inline en ambos lados. El chequeo de
+acceso (require_finance_access aquí, _require_finance_access en el REST) y
+el flujo confirmed=bool del Copiloto quedan fuera del servicio, son
+responsabilidad de cada caller.
+
 Tool-use format: nativo Anthropic SDK 0.104.x
   name, description, input_schema (JSON Schema)
 """
@@ -65,11 +76,12 @@ from app.models.ai_memory import AIDraftEdit, AIEntityContext, AIMemoryEvent
 from app.models.deal import Deal
 from app.models.deal_stage_history import DealStageHistory
 from app.models.finance import Expense, ExpenseCategory, ExpenseRule, FinancePermission, RecurringExpense
-from app.models.goals import MonthlyGoal, MonthlyGoalAssignment, MonthlyGoalHistory, ProductCategory
+from app.models.goals import MonthlyGoal, MonthlyGoalAssignment, ProductCategory
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.pipeline import PipelineStage
 from app.models.tenant import Tenant
 from app.models.user import User, UserRole
+from app.services.goals_service import upsert_monthly_goal
 from app.services.profitability import (
     get_current_month_goal,
     get_tenant_profitability,
@@ -1423,6 +1435,10 @@ async def execute_tool(
         }
 
     if name == "set_monthly_goal":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
         confirmed = bool(args.get("confirmed", False))
         total_raw = args.get("total")
 
@@ -1450,86 +1466,25 @@ async def execute_tool(
         goal_year = year
         goal_month = month
 
-        if (goal_year, goal_month) < (today.year, today.month):
-            return {"error": f"No se puede modificar la meta de un periodo pasado ({goal_year}/{goal_month:02d})"}
-
-        # _find_existing_goal logic inline (reutiliza el mismo patrón de goals.py:47-71)
-        existing = (
-            await db.execute(
-                select(MonthlyGoal).where(
-                    MonthlyGoal.tenant_id == user.tenant_id,
-                    MonthlyGoal.period_year == goal_year,
-                    MonthlyGoal.period_month == goal_month,
-                    MonthlyGoal.dimension == "global",
-                    MonthlyGoal.dimension_value_text.is_(None),
-                    MonthlyGoal.dimension_value_uuid.is_(None),
-                )
-            )
-        ).scalar_one_or_none()
-
-        def _goal_as_dict(g: MonthlyGoal) -> dict:
-            return {
-                "id": str(g.id),
-                "period_year": g.period_year,
-                "period_month": g.period_month,
-                "amount": str(g.amount),
-                "dimension": g.dimension,
-                "is_draft": g.is_draft,
-            }
-
-        if existing:
-            before = _goal_as_dict(existing)
-            existing.amount = amount
-            existing.is_draft = False
-            await db.flush()
-            after = _goal_as_dict(existing)
-            db.add(MonthlyGoalHistory(
+        try:
+            goal, action = await upsert_monthly_goal(
+                db,
                 tenant_id=user.tenant_id,
-                goal_id=existing.id,
-                action="goal_updated",
-                before_data=before,
-                after_data=after,
-                changed_by=user.id,
-            ))
-            await db.commit()
-            return {
-                "set": True,
-                "goal_id": str(existing.id),
-                "amount_mxn": float(amount),
-                "year": goal_year,
-                "month": goal_month,
-                "action": "updated",
-            }
+                year=goal_year,
+                month=goal_month,
+                amount=amount,
+                user_id=user.id,
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}
 
-        goal = MonthlyGoal(
-            tenant_id=user.tenant_id,
-            period_year=goal_year,
-            period_month=goal_month,
-            amount=amount,
-            currency="MXN",
-            dimension="global",
-            is_draft=False,
-            created_by=user.id,
-        )
-        db.add(goal)
-        await db.flush()
-        after = _goal_as_dict(goal)
-        db.add(MonthlyGoalHistory(
-            tenant_id=user.tenant_id,
-            goal_id=goal.id,
-            action="goal_created",
-            before_data=None,
-            after_data=after,
-            changed_by=user.id,
-        ))
-        await db.commit()
         return {
             "set": True,
             "goal_id": str(goal.id),
             "amount_mxn": float(amount),
             "year": goal_year,
             "month": goal_month,
-            "action": "created",
+            "action": action,
         }
 
     if name == "dismiss_suggestion":

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
 from decimal import Decimal
 from typing import Literal
 
@@ -17,58 +16,11 @@ from app.api.finance import _require_finance_access, _require_owner
 from app.core.database import get_db
 from app.models.goals import MonthlyGoal, MonthlyGoalAssignment, MonthlyGoalHistory, ProductCategory
 from app.models.user import User
+from app.services.goals_service import goal_as_dict as _goal_as_dict
+from app.services.goals_service import is_past_period as _is_past_period
+from app.services.goals_service import upsert_monthly_goal
 
 router = APIRouter(prefix="/goals", tags=["goals"])
-
-
-# ── Business-rule helpers ─────────────────────────────────────────────────────
-
-def _is_past_period(year: int, month: int) -> bool:
-    today = date.today()
-    return (year, month) < (today.year, today.month)
-
-
-def _goal_as_dict(goal: MonthlyGoal) -> dict:
-    """Serialize a MonthlyGoal to a JSON-safe dict for history before/after data."""
-    return jsonable_encoder({
-        "id": goal.id,
-        "period_year": goal.period_year,
-        "period_month": goal.period_month,
-        "amount": goal.amount,
-        "currency": goal.currency,
-        "dimension": goal.dimension,
-        "dimension_value_text": goal.dimension_value_text,
-        "dimension_value_uuid": goal.dimension_value_uuid,
-        "notes": goal.notes,
-        "is_draft": goal.is_draft,
-    })
-
-
-async def _find_existing_goal(
-    db: AsyncSession,
-    tenant_id: uuid.UUID,
-    year: int,
-    month: int,
-    dimension: str,
-    value_text: str | None,
-    value_uuid: uuid.UUID | None,
-) -> MonthlyGoal | None:
-    """Look up an existing goal matching all dimension keys, treating NULL == NULL."""
-    q = select(MonthlyGoal).where(
-        MonthlyGoal.tenant_id == tenant_id,
-        MonthlyGoal.period_year == year,
-        MonthlyGoal.period_month == month,
-        MonthlyGoal.dimension == dimension,
-    )
-    if value_text is None:
-        q = q.where(MonthlyGoal.dimension_value_text.is_(None))
-    else:
-        q = q.where(MonthlyGoal.dimension_value_text == value_text)
-    if value_uuid is None:
-        q = q.where(MonthlyGoal.dimension_value_uuid.is_(None))
-    else:
-        q = q.where(MonthlyGoal.dimension_value_uuid == value_uuid)
-    return (await db.execute(q)).scalar_one_or_none()
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -258,69 +210,24 @@ async def create_or_update_monthly_goal(
 ) -> MonthlyGoalOut:
     await _require_finance_access(current_user, branch_id=None, db=db)
 
-    if _is_past_period(body.period_year, body.period_month):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"No se puede crear una meta para un periodo pasado ({body.period_year}/{body.period_month:02d})",
-        )
-
-    existing = await _find_existing_goal(
-        db,
-        tenant_id=current_user.tenant_id,
-        year=body.period_year,
-        month=body.period_month,
-        dimension=body.dimension,
-        value_text=body.dimension_value_text,
-        value_uuid=body.dimension_value_uuid,
-    )
-
-    if existing is not None:
-        # Upsert: update the existing goal instead of creating a duplicate
-        before = _goal_as_dict(existing)
-        existing.amount = body.amount
-        existing.currency = body.currency
-        existing.notes = body.notes
-        existing.is_draft = body.is_draft
-        await db.flush()
-        after = _goal_as_dict(existing)
-        db.add(MonthlyGoalHistory(
+    try:
+        goal, _action = await upsert_monthly_goal(
+            db,
             tenant_id=current_user.tenant_id,
-            goal_id=existing.id,
-            action="goal_updated",
-            before_data=before,
-            after_data=after,
-            changed_by=current_user.id,
-        ))
-        await db.commit()
-        await db.refresh(existing)
-        return MonthlyGoalOut.model_validate(existing)
+            year=body.period_year,
+            month=body.period_month,
+            amount=body.amount,
+            user_id=current_user.id,
+            currency=body.currency,
+            dimension=body.dimension,
+            dimension_value_text=body.dimension_value_text,
+            dimension_value_uuid=body.dimension_value_uuid,
+            notes=body.notes,
+            is_draft=body.is_draft,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
 
-    goal = MonthlyGoal(
-        tenant_id=current_user.tenant_id,
-        period_year=body.period_year,
-        period_month=body.period_month,
-        amount=body.amount,
-        currency=body.currency,
-        dimension=body.dimension,
-        dimension_value_text=body.dimension_value_text,
-        dimension_value_uuid=body.dimension_value_uuid,
-        notes=body.notes,
-        is_draft=body.is_draft,
-        created_by=current_user.id,
-    )
-    db.add(goal)
-    await db.flush()  # populate goal.id before building history
-    after = _goal_as_dict(goal)
-    db.add(MonthlyGoalHistory(
-        tenant_id=current_user.tenant_id,
-        goal_id=goal.id,
-        action="goal_created",
-        before_data=None,
-        after_data=after,
-        changed_by=current_user.id,
-    ))
-    await db.commit()
-    await db.refresh(goal)
     return MonthlyGoalOut.model_validate(goal)
 
 
