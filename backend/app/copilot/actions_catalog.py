@@ -3,8 +3,8 @@
 Este módulo NO reimplementa ejecución — el Copiloto conversacional
 (app/ai/copilot_engine.py + app/ai/copilot_tools.py, ya en producción desde
 C2/C3/C4) tiene sus tools nativas de Claude con su propio dispatcher
-(copilot_tools.execute_tool). Este catálogo formaliza esas tools (31
-wireadas al día de la Ronda 2a-i de Finanzas/Gastos) con la metadata
+(copilot_tools.execute_tool). Este catálogo formaliza esas tools (39
+wireadas al día de la Ronda 2a-ii de Finanzas/Gastos) con la metadata
 declarativa que hoy vive dispersa o no existe en absoluto: risk_tier,
 requires_confirmation y required_role centralizados, en vez de checks de
 rol sueltos dentro de execute_tool (ver el que reemplaza en
@@ -375,6 +375,79 @@ _MEDIUM_RISK: list[ActionDefinition] = [
         "waiting for the scheduled job.",
         "medium",
         required_role=_OWNER_TIER,
+    ),
+    # Expansión Finanzas/Gastos, Ronda 2a-ii — catálogos de finanzas (4
+    # pares create/update). Todas validan acceso real vía
+    # require_finance_access dentro del dispatcher (branch_id=None,
+    # tenant-wide), no vía required_role acá — mismo patrón que sus 4
+    # hermanas de lectura de la Ronda 1.
+    _wired(
+        "create_expense_category",
+        "Creates a new expense category for the tenant. Requires name and "
+        "kind ('fijo' or 'variable'). Optional: icon. Use when the user "
+        "wants to add a new category to classify expenses.",
+        "medium",
+    ),
+    _wired(
+        "update_expense_category",
+        "Updates an existing expense category — partial update, only the "
+        "fields provided are changed. Requires category_id. Editable "
+        "fields: name, kind, icon, is_active. Use when the user wants to "
+        "edit, rename, or activate/deactivate an expense category.",
+        "medium",
+    ),
+    _wired(
+        "create_recurring_expense",
+        "Creates a new recurring (monthly) expense template. Requires "
+        "amount (>0). Optional: category_id, day_of_month (1-28, default "
+        "1), description. Use when the user wants to set up a fixed "
+        "monthly charge, like rent or a subscription.",
+        "medium",
+    ),
+    _wired(
+        "update_recurring_expense",
+        "Updates an existing recurring expense template — partial update, "
+        "only the fields provided are changed. Requires recurring_id. "
+        "Editable fields: category_id, amount, day_of_month (1-28), "
+        "description, is_active. Use when the user wants to edit or "
+        "deactivate a recurring/fixed monthly expense.",
+        "medium",
+    ),
+    _wired(
+        "create_expense_rule",
+        "Creates a new automatic expense generation rule tied to deals. "
+        "Requires name, rule_type ('percent_of_deal', 'fixed_per_deal', or "
+        "'percent_of_cost'), and value (>0). Optional: category_id, "
+        "deal_type_filter, auto_confirm (default false). Use when the user "
+        "wants to set up automatic expense generation from won deals.",
+        "medium",
+    ),
+    _wired(
+        "update_expense_rule",
+        "Updates an existing expense generation rule — partial update, only "
+        "the fields provided are changed. Requires rule_id. Editable "
+        "fields: category_id, name, rule_type, value, deal_type_filter, "
+        "auto_confirm, is_active. Note: deal_type_filter can only be set, "
+        "never cleared back to none, through this action. Use when the "
+        "user wants to edit an existing expense rule.",
+        "medium",
+    ),
+    _wired(
+        "create_product_category",
+        "Creates a new product category used to segment monthly goals by "
+        "product line. Requires name (must be unique within the tenant). "
+        "Optional: position (default 0). Use when the user wants to add a "
+        "new product category.",
+        "medium",
+    ),
+    _wired(
+        "update_product_category",
+        "Updates an existing product category — partial update, only the "
+        "fields provided are changed. Requires category_id. Editable "
+        "fields: name (must stay unique within the tenant), is_active, "
+        "position. Use when the user wants to rename, reorder, or "
+        "activate/deactivate a product category.",
+        "medium",
     ),
 ]
 
