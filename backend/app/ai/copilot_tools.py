@@ -13,6 +13,9 @@ Expansión Finanzas/Gastos, Ronda 2a-i: 5 tools de escritura — núcleo de
 Expansión Finanzas/Gastos, Ronda 2a-ii: 8 tools de escritura — catálogos
   de finanzas, 4 pares create/update (expense_category, recurring_expense,
   expense_rule, product_category) — ver más abajo.
+Expansión Finanzas/Gastos, Ronda 2a-iii: 2 tools de escritura — metas
+  (update_monthly_goal por id, set_goal_assignments) — cierra la Ronda 2a
+  completa. Ver más abajo.
 
 Política de confirmación:
   create_contact, create_deal, move_deal_stage, add_note, create_task,
@@ -87,6 +90,29 @@ resto del request. update_expense_rule replica una limitación existente
 del REST: deal_type_filter nunca se puede limpiar a None una vez seteado
 (mismo patrón `if body.deal_type_filter is not None` del endpoint real).
 
+Las 2 tools de escritura de la Ronda 2a-iii (metas) cierran la Ronda 2a
+completa. Son DISTINTAS de set_monthly_goal (arriba) y NO reusan
+upsert_monthly_goal — solo importan las funciones puras is_past_period y
+goal_as_dict de goals_service.py.
+  - update_monthly_goal (por id) replica app/api/goals.py::update_monthly_goal
+    (PATCH /goals/monthly-goals/{goal_id}): lógica inline propia del
+    endpoint, actualiza una meta YA EXISTENTE por id (no por dimensión),
+    con partial update `if "campo" in args and args["campo"] is not None:`
+    SIN el sentinel _UNSET de upsert_monthly_goal — mismo estilo que
+    update_expense_rule: notes nunca se puede limpiar a None una vez
+    seteado, es una limitación existente del REST, no un bug.
+  - set_goal_assignments replica app/api/goals.py::set_goal_assignments
+    (PUT /goals/monthly-goals/{goal_id}/assignments): reemplaza TODAS las
+    asignaciones de una meta de golpe (bulk set, no incremental), patrón
+    delete-then-insert con amount auto-calculado
+    (goal.amount * share_percent / 100), validación de tenant sobre los
+    user_id, regla de suma=100% (tolerancia 0.01) solo para metas
+    no-borrador con lista no vacía, y una sola entrada de
+    MonthlyGoalHistory (action="assignment_changed") para todo el cambio en
+    bloque. A propósito NO valida periodo pasado — el REST real tampoco lo
+    hace para esta acción (a diferencia de update_monthly_goal, que sí),
+    así que no se agrega esa restricción acá.
+
 Tool-use format: nativo Anthropic SDK 0.104.x
   name, description, input_schema (JSON Schema)
 """
@@ -100,7 +126,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -111,12 +137,14 @@ from app.models.ai_memory import AIDraftEdit, AIEntityContext, AIMemoryEvent
 from app.models.deal import Deal
 from app.models.deal_stage_history import DealStageHistory
 from app.models.finance import Expense, ExpenseCategory, ExpenseRule, FinancePermission, RecurringExpense
-from app.models.goals import MonthlyGoal, MonthlyGoalAssignment, ProductCategory
+from app.models.goals import MonthlyGoal, MonthlyGoalAssignment, MonthlyGoalHistory, ProductCategory
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.pipeline import PipelineStage
 from app.models.tenant import Tenant
 from app.models.user import User, UserRole
 from app.services.expense_generation import generate_recurring_expenses
+from app.services.goals_service import goal_as_dict as _goal_as_dict
+from app.services.goals_service import is_past_period as _is_past_period
 from app.services.goals_service import upsert_monthly_goal
 from app.services.profitability import (
     get_current_month_goal,
@@ -558,6 +586,60 @@ COPILOT_TOOLS: list[dict[str, Any]] = [
                 },
             },
             "required": ["total", "confirmed"],
+        },
+    },
+    {
+        "name": "update_monthly_goal",
+        "description": (
+            "Updates an existing monthly goal identified by its id — partial update, only "
+            "the fields provided are changed. Requires goal_id. Editable fields: amount, "
+            "currency, notes, is_draft. Note: notes can only be set, never cleared back to "
+            "none, through this action. Fails if the goal belongs to a past period. Use "
+            "when the user wants to edit a specific monthly goal (found via get_monthly_goal "
+            "or list operations), as opposed to set_monthly_goal which upserts by period/dimension."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goal_id": {"type": "string", "format": "uuid", "description": "UUID of the monthly goal to update"},
+                "amount": {"type": "number", "description": "New goal amount (optional)"},
+                "currency": {"type": "string", "description": "New currency code (optional)"},
+                "notes": {"type": "string", "description": "New notes (optional; cannot be cleared once set)"},
+                "is_draft": {"type": "boolean", "description": "New draft flag (optional)"},
+            },
+            "required": ["goal_id"],
+        },
+    },
+    {
+        "name": "set_goal_assignments",
+        "description": (
+            "Replaces the ENTIRE set of user assignments for a monthly goal in one shot — "
+            "this is a full replacement, not an incremental add. Each assignment has a "
+            "user_id and a share_percent (0-100); each user's resulting amount is "
+            "auto-calculated as goal.amount * share_percent / 100. For a non-draft goal "
+            "with a non-empty assignment list, the share percentages must sum to exactly "
+            "100% (tolerance 0.01) — mark the goal as draft to save a partial split. Use "
+            "when the user wants to define or change how a monthly goal is split across "
+            "team members."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goal_id": {"type": "string", "format": "uuid", "description": "UUID of the monthly goal"},
+                "assignments": {
+                    "type": "array",
+                    "description": "Full list of assignments to set (replaces any existing ones)",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "user_id": {"type": "string", "format": "uuid", "description": "UUID of the user"},
+                            "share_percent": {"type": "number", "description": "Share percent, 0-100"},
+                        },
+                        "required": ["user_id", "share_percent"],
+                    },
+                },
+            },
+            "required": ["goal_id", "assignments"],
         },
     },
     {
@@ -2106,6 +2188,205 @@ async def execute_tool(
             "month": goal_month,
             "action": action,
         }
+
+    if name == "update_monthly_goal":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
+        try:
+            goal_id = uuid.UUID(str(args.get("goal_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "goal_id inválido"}
+
+        goal = (
+            await db.execute(
+                select(MonthlyGoal).where(
+                    MonthlyGoal.id == goal_id,
+                    MonthlyGoal.tenant_id == user.tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if goal is None:
+            return {"error": "Meta mensual no encontrada"}
+
+        if _is_past_period(goal.period_year, goal.period_month):
+            return {
+                "error": (
+                    f"No se puede editar una meta de un periodo pasado "
+                    f"({goal.period_year}/{goal.period_month:02d})"
+                )
+            }
+
+        before = _goal_as_dict(goal)
+        if "amount" in args and args["amount"] is not None:
+            try:
+                new_amount = Decimal(str(args["amount"]))
+                if new_amount < 0:
+                    raise ValueError
+            except (ValueError, Exception):
+                return {"error": f"Monto inválido: {args['amount']}"}
+            goal.amount = new_amount
+        if "currency" in args and args["currency"] is not None:
+            goal.currency = str(args["currency"])
+        # notes: mismo comportamiento que el REST (update_monthly_goal,
+        # app/api/goals.py) — nunca se puede limpiar a None una vez seteado
+        # vía este endpoint, es una limitación existente del REST, no un bug
+        # a corregir acá (mismo patrón que deal_type_filter en
+        # update_expense_rule).
+        if "notes" in args and args["notes"] is not None:
+            goal.notes = str(args["notes"])
+        if "is_draft" in args and args["is_draft"] is not None:
+            goal.is_draft = bool(args["is_draft"])
+
+        await db.flush()
+        after = _goal_as_dict(goal)
+        db.add(MonthlyGoalHistory(
+            tenant_id=user.tenant_id,
+            goal_id=goal.id,
+            action="goal_updated",
+            before_data=before,
+            after_data=after,
+            changed_by=user.id,
+        ))
+        await db.commit()
+        await db.refresh(goal)
+        return _jsonable({
+            "id": goal.id, "tenant_id": goal.tenant_id, "period_year": goal.period_year,
+            "period_month": goal.period_month, "amount": goal.amount, "currency": goal.currency,
+            "dimension": goal.dimension, "dimension_value_text": goal.dimension_value_text,
+            "dimension_value_uuid": goal.dimension_value_uuid, "notes": goal.notes,
+            "is_draft": goal.is_draft,
+        })
+
+    if name == "set_goal_assignments":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
+        try:
+            goal_id = uuid.UUID(str(args.get("goal_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "goal_id inválido"}
+
+        goal = (
+            await db.execute(
+                select(MonthlyGoal).where(
+                    MonthlyGoal.id == goal_id,
+                    MonthlyGoal.tenant_id == user.tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if goal is None:
+            return {"error": "Meta mensual no encontrada"}
+
+        assignments_raw = args.get("assignments")
+        if not isinstance(assignments_raw, list):
+            return {"error": "El campo assignments es requerido y debe ser una lista"}
+
+        parsed: list[tuple[uuid.UUID, Decimal]] = []
+        for item in assignments_raw:
+            if not isinstance(item, dict):
+                return {"error": f"Elemento de assignments inválido: {item}"}
+            try:
+                item_user_id = uuid.UUID(str(item.get("user_id", "")))
+            except (ValueError, AttributeError):
+                return {"error": f"user_id inválido: {item.get('user_id')}"}
+            try:
+                share_percent = Decimal(str(item.get("share_percent")))
+                if share_percent < 0 or share_percent > 100:
+                    raise ValueError
+            except (ValueError, Exception):
+                return {"error": f"share_percent inválido: {item.get('share_percent')}"}
+            parsed.append((item_user_id, share_percent))
+
+        # (1) validar que todos los user_id pertenezcan al tenant actual
+        user_ids = [uid for uid, _ in parsed]
+        users_map: dict[uuid.UUID, User] = {}
+        if user_ids:
+            user_rows = (
+                await db.execute(
+                    select(User).where(
+                        User.id.in_(user_ids),
+                        User.tenant_id == user.tenant_id,
+                    )
+                )
+            ).scalars().all()
+            users_map = {u.id: u for u in user_rows}
+            missing = [str(uid) for uid in user_ids if uid not in users_map]
+            if missing:
+                return {"error": f"Usuario(s) no encontrado(s) en este tenant: {missing}"}
+
+        # (2) suma == 100 requerida para metas no-borrador con lista no vacía
+        if parsed and not goal.is_draft:
+            total = sum(share for _, share in parsed)
+            if abs(total - Decimal("100")) >= Decimal("0.01"):
+                return {
+                    "error": (
+                        f"La suma de porcentajes debe ser 100% (actual: {total:.2f}%). "
+                        "Marca la meta como borrador para guardar parcialmente."
+                    )
+                }
+
+        # (3) patrón delete-then-insert, capturando estado before/after
+        before_rows = (
+            await db.execute(
+                select(MonthlyGoalAssignment).where(MonthlyGoalAssignment.goal_id == goal_id)
+            )
+        ).scalars().all()
+        before_data = _jsonable([
+            {"user_id": r.user_id, "share_percent": r.share_percent, "amount": r.amount}
+            for r in before_rows
+        ])
+
+        await db.execute(delete(MonthlyGoalAssignment).where(MonthlyGoalAssignment.goal_id == goal_id))
+
+        new_assignments: list[MonthlyGoalAssignment] = []
+        for item_user_id, share_percent in parsed:
+            calc_amount = (goal.amount * share_percent / Decimal("100")).quantize(Decimal("0.01"))
+            a = MonthlyGoalAssignment(
+                goal_id=goal_id,
+                tenant_id=user.tenant_id,
+                user_id=item_user_id,
+                share_percent=share_percent,
+                amount=calc_amount,
+            )
+            db.add(a)
+            new_assignments.append(a)
+
+        await db.flush()
+        after_data = _jsonable([
+            {"user_id": a.user_id, "share_percent": a.share_percent, "amount": a.amount}
+            for a in new_assignments
+        ])
+
+        # (4) una sola entrada de historial para todo el cambio en bloque
+        db.add(MonthlyGoalHistory(
+            tenant_id=user.tenant_id,
+            goal_id=goal_id,
+            action="assignment_changed",
+            before_data=before_data,
+            after_data=after_data,
+            changed_by=user.id,
+        ))
+        await db.commit()
+
+        result_rows = (
+            await db.execute(
+                select(MonthlyGoalAssignment, User)
+                .join(User, User.id == MonthlyGoalAssignment.user_id)
+                .where(MonthlyGoalAssignment.goal_id == goal_id)
+                .order_by(MonthlyGoalAssignment.share_percent.desc())
+            )
+        ).all()
+        return _jsonable([
+            {
+                "id": a.id, "goal_id": a.goal_id, "tenant_id": a.tenant_id,
+                "user_id": a.user_id, "share_percent": a.share_percent,
+                "amount": a.amount, "user_name": u.name, "user_email": u.email,
+            }
+            for a, u in result_rows
+        ])
 
     if name == "dismiss_suggestion":
         try:

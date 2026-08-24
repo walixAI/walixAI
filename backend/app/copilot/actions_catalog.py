@@ -3,8 +3,8 @@
 Este módulo NO reimplementa ejecución — el Copiloto conversacional
 (app/ai/copilot_engine.py + app/ai/copilot_tools.py, ya en producción desde
 C2/C3/C4) tiene sus tools nativas de Claude con su propio dispatcher
-(copilot_tools.execute_tool). Este catálogo formaliza esas tools (39
-wireadas al día de la Ronda 2a-ii de Finanzas/Gastos) con la metadata
+(copilot_tools.execute_tool). Este catálogo formaliza esas tools (41
+wireadas al día de la Ronda 2a-iii de Finanzas/Gastos) con la metadata
 declarativa que hoy vive dispersa o no existe en absoluto: risk_tier,
 requires_confirmation y required_role centralizados, en vez de checks de
 rol sueltos dentro de execute_tool (ver el que reemplaza en
@@ -306,6 +306,44 @@ _MEDIUM_RISK: list[ActionDefinition] = [
         "REQUIRES confirmed=true — only call this after the user has explicitly confirmed "
         "the new goal amount. If confirmed=false, the tool returns a confirmation request "
         "that you must present to the user before proceeding.",
+        "medium",
+    ),
+    # Expansión Finanzas/Gastos, Ronda 2a-iii — metas (cierra la Ronda 2a
+    # completa). Ambas validan acceso real vía require_finance_access
+    # dentro del dispatcher (branch_id=None, tenant-wide), mismo patrón que
+    # sus hermanas de las Rondas 2a-i/2a-ii. Son DISTINTAS de
+    # set_monthly_goal (arriba): actualizan/reemplazan por goal_id, no
+    # hacen upsert por dimensión.
+    _wired(
+        "update_monthly_goal",
+        "Updates an existing monthly goal identified by its id — partial update, only "
+        "the fields provided are changed. Requires goal_id. Editable fields: amount, "
+        "currency, notes, is_draft. Note: notes can only be set, never cleared back to "
+        "none, through this action. Fails if the goal belongs to a past period. Use "
+        "when the user wants to edit a specific monthly goal (found via get_monthly_goal "
+        "or list operations), as opposed to set_monthly_goal which upserts by period/dimension.",
+        "medium",
+    ),
+    # set_goal_assignments reemplaza TODAS las asignaciones de una meta de
+    # golpe (bulk set, no incremental) — destructivo para las asignaciones
+    # existentes de esa meta, aunque reversible (queda antes/después en
+    # MonthlyGoalHistory y se puede volver a llamar con el set anterior).
+    # Tier medium por analogía con confirm_all_draft_expenses/
+    # trigger_recurring_expense_generation (arriba): escritura masiva sobre
+    # datos propios del tenant, no sobre terceros, y sin borrado permanente
+    # de datos fuera de esa meta. Decisión reportada en el chat, no
+    # asumida — mismo criterio que trigger_recurring_expense_generation en
+    # la Ronda 2a-i.
+    _wired(
+        "set_goal_assignments",
+        "Replaces the ENTIRE set of user assignments for a monthly goal in one shot — "
+        "this is a full replacement, not an incremental add. Each assignment has a "
+        "user_id and a share_percent (0-100); each user's resulting amount is "
+        "auto-calculated as goal.amount * share_percent / 100. For a non-draft goal "
+        "with a non-empty assignment list, the share percentages must sum to exactly "
+        "100% (tolerance 0.01) — mark the goal as draft to save a partial split. Use "
+        "when the user wants to define or change how a monthly goal is split across "
+        "team members.",
         "medium",
     ),
     # Representativa, NO conectada al Copiloto — mapea a POST /leads/{id}/assign
