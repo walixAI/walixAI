@@ -131,6 +131,17 @@ async def get_current_user(
         if claim_tenant_id is not None and claim_tenant_id != user.tenant_id:
             user.tenant_id = claim_tenant_id
             request.state.is_impersonating = True
+            # hallazgo #10 (docs/PERMISSIONS_DRIFT_BACKLOG.md, encontrado al
+            # implementar el #9): la asignación de arriba marca `user` dirty
+            # en la sesión de SQLAlchemy automáticamente, sin necesidad de
+            # session.merge() ni db.add(). Si un db.commit() posterior en
+            # esta misma request (aunque no tenga nada que ver con
+            # current_user — ej. agents.py::list_suggestions, un GET que
+            # comitea al marcar sugerencias vencidas) hiciera flush de la
+            # sesión, persistiría el tenant_id impersonado sobre la fila
+            # REAL del platform_owner. expunge() lo desprende de la sesión
+            # para que ningún commit posterior pueda arrastrar el cambio.
+            db.expunge(user)
 
     return user
 

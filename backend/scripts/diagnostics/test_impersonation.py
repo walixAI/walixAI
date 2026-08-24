@@ -20,6 +20,16 @@ Verificaciones:
   e) Con un token normal (sin read_only_impersonation), el mismo POST
      sigue funcionando (200, meta creada) — prueba de que el middleware
      no rompe el flujo normal.
+  f) Hallazgo #10 (encontrado al implementar el #9, resuelto con
+     db.expunge(user) en get_current_user): con el token de impersonación,
+     GET /api/agents/suggestions (que internamente hace db.commit() al
+     marcar sugerencias vencidas como "expired" — un GET con commit
+     incidental, no bloqueado por el guardrail de solo-lectura del #9)
+     debe: (1) responder 200 y efectivamente expirar la sugerencia vencida
+     de prueba (prueba de que el commit interno SÍ corrió, no solo un 200
+     vacío), y (2) NO persistir el tenant_id impersonado sobre la fila
+     REAL del platform_owner en la tabla users — verificado con una
+     consulta directa a BD, fuera del cliente HTTP.
 
 Uso:
     .venv/Scripts/python.exe scripts/diagnostics/test_impersonation.py
@@ -29,7 +39,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -44,6 +54,7 @@ from sqlalchemy import delete, select
 from app.core.database import AsyncSessionLocal
 from app.core.security import create_access_token
 from app.main import app
+from app.models.agent import AgentSuggestion
 from app.models.goals import MonthlyGoal
 from app.models.lead import Lead
 from app.models.tenant import Branch, Company, Tenant, TenantPlan
@@ -112,10 +123,27 @@ async def _setup() -> dict:
         )
         db.add(target_lead)
 
+        # hallazgo #10: sugerencia YA vencida en el tenant objetivo, para que
+        # GET /api/agents/suggestions (list_suggestions) la encuentre en su
+        # bulk-expire y efectivamente llame a db.commit() — no alcanza con
+        # pegarle al endpoint, tiene que ejercitar ese commit interno de verdad.
+        expired_suggestion = AgentSuggestion(
+            tenant_id=target_tenant.id,
+            agent_type="follow_up",
+            trigger_description="[test_impersonation] vencida a propósito",
+            suggestion_text="No debería sobrevivir al GET de impersonación",
+            target_role="platform_owner",
+            target_user_id=None,
+            status="suggested",
+            expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+        db.add(expired_suggestion)
+
         await db.commit()
         await db.refresh(platform_owner)
         await db.refresh(home_lead)
         await db.refresh(target_lead)
+        await db.refresh(expired_suggestion)
 
         return {
             "platform_owner_id": platform_owner.id,
@@ -123,6 +151,7 @@ async def _setup() -> dict:
             "target_tenant_id": target_tenant.id,
             "home_lead_id": home_lead.id,
             "target_lead_id": target_lead.id,
+            "expired_suggestion_id": expired_suggestion.id,
         }
 
 
@@ -140,6 +169,20 @@ async def _count_monthly_goals(tenant_id: uuid.UUID) -> int:
     async with AsyncSessionLocal() as db:
         rows = (await db.execute(select(MonthlyGoal).where(MonthlyGoal.tenant_id == tenant_id))).scalars().all()
         return len(rows)
+
+
+async def _get_user_tenant_id(user_id: uuid.UUID) -> uuid.UUID | None:
+    """Consulta directa a BD, sesión propia — para el hallazgo #10 esto tiene
+    que ser independiente de la sesión que usó el cliente HTTP."""
+    async with AsyncSessionLocal() as db:
+        row = await db.get(User, user_id)
+        return row.tenant_id if row else None
+
+
+async def _get_suggestion_status(suggestion_id: uuid.UUID) -> str | None:
+    async with AsyncSessionLocal() as db:
+        row = await db.get(AgentSuggestion, suggestion_id)
+        return row.status if row else None
 
 
 def _goal_body() -> dict:
@@ -230,6 +273,26 @@ async def main() -> int:
                 "e. POST /api/goals/monthly-goals (token NORMAL, sin impersonación) sigue funcionando (200, crea la meta)",
                 ok_e,
                 f"status={r.status_code} goals_before={goals_before_home} goals_after={goals_after_home}",
+            ))
+
+            # ── f) hallazgo #10 — GET con commit incidental no debe persistir
+            #      el tenant_id impersonado sobre la fila real del platform_owner ──
+            tenant_id_before = await _get_user_tenant_id(ctx["platform_owner_id"])
+            r = await client.get("/api/agents/suggestions", headers=auth_imp)
+            suggestion_status_after = await _get_suggestion_status(ctx["expired_suggestion_id"])
+            tenant_id_after = await _get_user_tenant_id(ctx["platform_owner_id"])
+
+            commit_ran = suggestion_status_after == "expired"
+            tenant_id_intact = tenant_id_after == ctx["home_tenant_id"]
+            ok_f = r.status_code == 200 and commit_ran and tenant_id_intact
+            results.append((
+                "f. GET /api/agents/suggestions (token impersonación, con commit interno) NO persiste el tenant_id impersonado sobre la fila real del platform_owner",
+                ok_f,
+                (
+                    f"status={r.status_code} suggestion_expired={commit_ran} "
+                    f"tenant_id_before={tenant_id_before} tenant_id_after_commit={tenant_id_after} "
+                    f"home_tenant_id={ctx['home_tenant_id']} (esperado: tenant_id_after == home_tenant_id)"
+                ),
             ))
 
         return _report(results)

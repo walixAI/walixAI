@@ -564,6 +564,21 @@ del `platform_owner` quedaría persistido por error. No se corrigió acá
 — queda para evaluar en el chat (opciones: `db.expunge(user)` después del
 override, o revisar cada GET que haga commit incidental).
 
+**✅ RESUELTO** (2026-08-23): se implementó `db.expunge(user)` en
+`get_current_user` inmediatamente después de sobreescribir
+`user.tenant_id`, dentro de la misma rama condicional (solo cuando hay
+impersonación activa) — desprende el objeto de la sesión para que ningún
+`db.commit()` posterior en la misma request, sin importar dónde ocurra,
+pueda arrastrar el `tenant_id` sobreescrito a BD. Cubierto por el punto
+f) nuevo de `scripts/diagnostics/test_impersonation.py`, que reproduce
+exactamente el escenario descrito arriba contra la BD real: crea una
+sugerencia ya vencida en el tenant objetivo, llama
+`GET /api/agents/suggestions` con el token de impersonación (confirmando
+que el commit interno de `list_suggestions` sí corrió — la sugerencia
+queda `"expired"`), y verifica con una consulta directa a BD, en una
+sesión aparte, que la fila real del `platform_owner` en `users` conserva
+su `tenant_id` original — PASS.
+
 ---
 
 ## Resumen para priorizar
