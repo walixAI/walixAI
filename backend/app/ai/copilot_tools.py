@@ -17,6 +17,18 @@ Expansión Finanzas/Gastos, Ronda 2a-iii: 2 tools de escritura — metas
   (update_monthly_goal por id, set_goal_assignments) — cierra la Ronda 2a
   completa. Ver más abajo.
 
+Knowledge Base (app/api/kb.py): 9 tools (1 de escritura fire-and-forget,
+  3 de lectura, 4 de escritura, 1 de escritura con confirmación en dos
+  pasos) — reindex_kb, kb_status, list_kb_documents, get_kb_document,
+  create_kb_document, update_kb_document, delete_kb_document,
+  add_kb_fragment, delete_kb_fragment. Primer módulo huérfano fuera de
+  Finanzas/Gastos — NO usa require_finance_access, usa control de acceso
+  por rol vía check_permission + ActionDefinition.required_role, mismo
+  patrón que list_finance_permissions/get_team_performance/
+  trigger_recurring_expense_generation (required_role del catálogo es
+  metadata declarativa, no se aplica sola — el chequeo real es la llamada
+  a check_permission dentro de cada bloque). Ver más abajo.
+
 Política de confirmación:
   create_contact, create_deal, move_deal_stage, add_note, create_task,
   dismiss_suggestion
@@ -113,11 +125,37 @@ goal_as_dict de goals_service.py.
     hace para esta acción (a diferencia de update_monthly_goal, que sí),
     así que no se agrega esa restricción acá.
 
+Las 9 tools de Knowledge Base replican sus endpoints REST equivalentes en
+app/api/kb.py línea por línea — reindex_kb dispara ingest_all_documents vía
+asyncio.create_task (fire-and-forget dentro del mismo proceso, NO Celery,
+tal como el REST real). create_kb_document/update_kb_document/
+add_kb_fragment llaman a app/api/kb.py::_embed_and_store (importada directo
+de kb.py, no duplicada — no hay import circular: kb.py no importa
+copilot_tools.py ni actions_catalog.py), que a su vez llama a la API de
+OpenAI de forma SÍNCRONA dentro del dispatcher — puede tardar varios
+segundos, es esperado, no se le agrega timeout ni mecanismo async
+adicional. _embed_and_store lanza HTTPException(503) si OPENAI_API_KEY no
+está configurado — el dispatcher atrapa esa excepción puntual y la
+convierte en {"error": ...}, nunca deja que se propague cruda. Ambas
+create_kb_document y add_kb_fragment son idempotentes por content_hash
+(mismo contenido = mismo documento, sin regenerar embeddings) — replicado
+tal cual del REST. delete_kb_document tiene flujo de confirmación en dos
+pasos para documentos is_auto_generated=True (retorna
+requires_confirmation=True sin borrar hasta que el caller reintente con
+confirm=True); delete_kb_fragment es el alias legacy y a propósito NO
+tiene ese guardrail — borra directo incluso si is_auto_generated=True,
+mismo comportamiento asimétrico que su endpoint REST real (documentado ahí
+como "sin warning de auto-generated", no es un bug de este wireo).
+get_kb_document reconstruye el content desde KnowledgeChunk ordenados por
+chunk_index cuando doc.content es None (documento file-based) — mismo
+fallback exacto que el REST.
+
 Tool-use format: nativo Anthropic SDK 0.104.x
   name, description, input_schema (JSON Schema)
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -126,10 +164,13 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.ingestion import _sha256, ingest_all_documents
+from app.api.kb import _embed_and_store
 from app.copilot.finance_access import require_finance_access
 from app.models.activity import Activity
 from app.models.agent import AgentSuggestion
@@ -138,6 +179,7 @@ from app.models.deal import Deal
 from app.models.deal_stage_history import DealStageHistory
 from app.models.finance import Expense, ExpenseCategory, ExpenseRule, FinancePermission, RecurringExpense
 from app.models.goals import MonthlyGoal, MonthlyGoalAssignment, MonthlyGoalHistory, ProductCategory
+from app.models.knowledge import KnowledgeChunk, KnowledgeDocument
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.pipeline import PipelineStage
 from app.models.tenant import Tenant
@@ -160,6 +202,12 @@ _VALID_TASK_KINDS = (
     "cobro", "cotizacion", "servicio", "seguimiento",
     "queja", "refaccion", "facturacion", "devolucion", "otro",
 )
+
+# reindex_kb dispara ingest_all_documents fire-and-forget (asyncio.create_task,
+# no Celery) — mismo patrón que app/api/kb.py::_background_tasks. Set propio
+# acá (no se reutiliza el de kb.py) porque cada proceso/dispatcher gestiona su
+# propio ciclo de vida de tasks en background.
+_kb_background_tasks: set[asyncio.Task] = set()
 
 # ── Tool catalog (Anthropic native format) ────────────────────────────────────
 
@@ -656,6 +704,156 @@ COPILOT_TOOLS: list[dict[str, Any]] = [
                 "reason": {"type": "string", "description": "Optional reason for dismissing (optional)"},
             },
             "required": ["suggestion_id"],
+        },
+    },
+    {
+        "name": "reindex_kb",
+        "description": (
+            "Triggers a background re-index of all Knowledge Base .md files on disk for the "
+            "tenant. Runs asynchronously — returns immediately with status='processing', the "
+            "actual indexing happens in the background. Only for OWNER and IT roles. Use when "
+            "the user wants to refresh or rebuild the bot's knowledge base from source files."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "kb_status",
+        "description": (
+            "Returns a summary of the Knowledge Base: each indexed document (filename, title, "
+            "chunk count, indexed_at), plus totals (total_documents, total_chunks, "
+            "last_indexed). Only for OWNER, GERENTE, and IT roles. Use when asked about the "
+            "state or freshness of the knowledge base."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "list_kb_documents",
+        "description": (
+            "Lists Knowledge Base documents, paginated, without embeddings — id, title, a "
+            "content preview (truncated to 200 chars), chunk_count, is_auto_generated, and "
+            "created_at. Only for OWNER, GERENTE, and IT roles. Use when the user wants to "
+            "browse or review the documents that feed the bot's answers."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer", "description": "Page number, 1-based (default 1)"},
+                "limit": {"type": "integer", "description": "Results per page, 1-100 (default 20)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_kb_document",
+        "description": (
+            "Returns a single Knowledge Base document in full, without embeddings — id, title, "
+            "content, chunk_count, is_auto_generated, created_at, updated_at. If the document "
+            "is file-based (no content stored directly), the content is reconstructed by "
+            "concatenating its chunks in order. Only for OWNER, GERENTE, and IT roles. Requires "
+            "doc_id."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "format": "uuid", "description": "UUID of the KB document"},
+            },
+            "required": ["doc_id"],
+        },
+    },
+    {
+        "name": "create_kb_document",
+        "description": (
+            "Creates a new Knowledge Base document and generates its embeddings — this can "
+            "take several seconds for long content. Requires title (1-255 chars) and content "
+            "(10-20,000 chars). Idempotent by content hash: if a document with the exact same "
+            "content already exists for the tenant, returns that existing document instead of "
+            "creating a duplicate. Only for OWNER and IT roles. Use when the user wants to add "
+            "new information for the bot to use in its answers."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Document title, 1-255 chars"},
+                "content": {"type": "string", "description": "Document content, 10-20,000 chars"},
+            },
+            "required": ["title", "content"],
+        },
+    },
+    {
+        "name": "update_kb_document",
+        "description": (
+            "Updates an existing Knowledge Base document — partial update, only the fields "
+            "provided are changed. Requires doc_id. If content changes (different hash from "
+            "what's stored), the old embeddings are deleted and regenerated — can take several "
+            "seconds. Only for OWNER and IT roles."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "format": "uuid", "description": "UUID of the KB document to update"},
+                "title": {"type": "string", "description": "New title, 1-255 chars (optional)"},
+                "content": {"type": "string", "description": "New content, 10-20,000 chars (optional)"},
+            },
+            "required": ["doc_id"],
+        },
+    },
+    {
+        "name": "delete_kb_document",
+        "description": (
+            "Deletes a Knowledge Base document and its chunks. If the document was "
+            "auto-generated from the tenant's onboarding (is_auto_generated=true) and "
+            "confirm is not true, this does NOT delete anything — it returns a warning and "
+            "requires_confirmation=true instead. In that case, present the warning to the "
+            "user and, if they confirm, call this tool again with confirm=true to actually "
+            "delete. Only for OWNER and IT roles."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string", "format": "uuid", "description": "UUID of the KB document to delete"},
+                "confirm": {
+                    "type": "boolean",
+                    "description": (
+                        "Set to true to proceed with deleting an auto-generated document after "
+                        "the user has explicitly confirmed. Default false."
+                    ),
+                },
+            },
+            "required": ["doc_id"],
+        },
+    },
+    {
+        "name": "add_kb_fragment",
+        "description": (
+            "Legacy alias of create_kb_document with tighter length limits — title (1-200 "
+            "chars) and content (10-10,000 chars). Same content-hash idempotency and embedding "
+            "generation as create_kb_document. Only for OWNER and IT roles. Prefer "
+            "create_kb_document for new integrations; this exists for backward compatibility."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Fragment title, 1-200 chars"},
+                "content": {"type": "string", "description": "Fragment content, 10-10,000 chars"},
+            },
+            "required": ["title", "content"],
+        },
+    },
+    {
+        "name": "delete_kb_fragment",
+        "description": (
+            "Legacy alias of delete_kb_document — deletes a Knowledge Base document (fragment) "
+            "and its chunks immediately, with NO confirmation step, even if the document is "
+            "auto-generated from onboarding. Unlike delete_kb_document, this always deletes "
+            "right away. Only for OWNER and IT roles. Prefer delete_kb_document for new "
+            "integrations, since it protects auto-generated documents."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "document_id": {"type": "string", "format": "uuid", "description": "UUID of the KB document/fragment to delete"},
+            },
+            "required": ["document_id"],
         },
     },
 ]
@@ -2432,5 +2630,420 @@ async def execute_tool(
             "suggestion_id": str(suggestion_id),
             "reason": str(reason) if reason else None,
         }
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # KNOWLEDGE BASE (app/api/kb.py) — primer módulo huérfano fuera de
+    # Finanzas/Gastos. NO usa require_finance_access — control de acceso por
+    # rol vía check_permission + ActionDefinition.required_role, mismo patrón
+    # que list_finance_permissions/get_team_performance/
+    # trigger_recurring_expense_generation (required_role del catálogo es
+    # metadata declarativa, el enforcement real es esta llamada explícita).
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if name == "reindex_kb":
+        from app.copilot.actions_catalog import ACTIONS
+        from app.copilot.permissions import check_permission
+
+        allowed, _reason = check_permission(user, ACTIONS["reindex_kb"])
+        if not allowed:
+            return {"error": "No tienes permisos para esta acción"}
+
+        task = asyncio.create_task(
+            ingest_all_documents(tenant_id=user.tenant_id, branch_id=user.branch_id)
+        )
+        _kb_background_tasks.add(task)
+        task.add_done_callback(_kb_background_tasks.discard)
+        return {"message": "Re-indexación iniciada en background", "status": "processing"}
+
+    if name == "kb_status":
+        from app.copilot.actions_catalog import ACTIONS
+        from app.copilot.permissions import check_permission
+
+        allowed, _reason = check_permission(user, ACTIONS["kb_status"])
+        if not allowed:
+            return {"error": "No tienes permisos para esta acción"}
+
+        rows = (
+            await db.execute(
+                select(KnowledgeDocument)
+                .where(KnowledgeDocument.tenant_id == user.tenant_id)
+                .order_by(KnowledgeDocument.filename)
+            )
+        ).scalars().all()
+        documents = [
+            {
+                "id": d.id, "filename": d.filename, "title": d.title,
+                "chunk_count": d.chunk_count, "indexed_at": d.indexed_at,
+            }
+            for d in rows
+        ]
+        total_chunks = sum(d["chunk_count"] for d in documents)
+        last_indexed = max((d["indexed_at"] for d in documents if d["indexed_at"]), default=None)
+        return _jsonable({
+            "documents": documents,
+            "total_documents": len(documents),
+            "total_chunks": total_chunks,
+            "last_indexed": last_indexed,
+        })
+
+    if name == "list_kb_documents":
+        from app.copilot.actions_catalog import ACTIONS
+        from app.copilot.permissions import check_permission
+
+        allowed, _reason = check_permission(user, ACTIONS["list_kb_documents"])
+        if not allowed:
+            return {"error": "No tienes permisos para esta acción"}
+
+        try:
+            page = int(args.get("page") or 1)
+        except (ValueError, TypeError):
+            page = 1
+        try:
+            limit = int(args.get("limit") or 20)
+        except (ValueError, TypeError):
+            limit = 20
+        page = max(page, 1)
+        limit = min(max(limit, 1), 100)
+        offset = (page - 1) * limit
+
+        rows = (
+            await db.execute(
+                select(KnowledgeDocument)
+                .where(KnowledgeDocument.tenant_id == user.tenant_id)
+                .order_by(KnowledgeDocument.created_at.desc())
+                .offset(offset).limit(limit)
+            )
+        ).scalars().all()
+        return _jsonable([
+            {
+                "id": d.id, "title": d.title,
+                "content_preview": d.content[:200] if d.content else None,
+                "chunk_count": d.chunk_count, "is_auto_generated": d.is_auto_generated,
+                "created_at": d.created_at,
+            }
+            for d in rows
+        ])
+
+    if name == "get_kb_document":
+        from app.copilot.actions_catalog import ACTIONS
+        from app.copilot.permissions import check_permission
+
+        allowed, _reason = check_permission(user, ACTIONS["get_kb_document"])
+        if not allowed:
+            return {"error": "No tienes permisos para esta acción"}
+
+        try:
+            doc_id = uuid.UUID(str(args.get("doc_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "doc_id inválido"}
+
+        doc = (
+            await db.execute(
+                select(KnowledgeDocument).where(
+                    KnowledgeDocument.id == doc_id,
+                    KnowledgeDocument.tenant_id == user.tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if doc is None:
+            return {"error": "Documento no encontrado"}
+
+        # Si content no está guardado (doc file-based), reconstruir desde
+        # KnowledgeChunk ordenados por chunk_index — mismo fallback exacto
+        # que app/api/kb.py::get_document.
+        content = doc.content
+        if content is None:
+            chunk_rows = (
+                await db.execute(
+                    select(KnowledgeChunk.content, KnowledgeChunk.chunk_index)
+                    .where(KnowledgeChunk.document_id == doc_id)
+                    .order_by(KnowledgeChunk.chunk_index)
+                )
+            ).all()
+            if chunk_rows:
+                content = "\n\n".join(r[0] for r in chunk_rows)
+
+        return _jsonable({
+            "id": doc.id, "title": doc.title, "content": content,
+            "chunk_count": doc.chunk_count, "is_auto_generated": doc.is_auto_generated,
+            "created_at": doc.created_at, "updated_at": doc.updated_at,
+        })
+
+    if name == "create_kb_document":
+        from app.copilot.actions_catalog import ACTIONS
+        from app.copilot.permissions import check_permission
+
+        allowed, _reason = check_permission(user, ACTIONS["create_kb_document"])
+        if not allowed:
+            return {"error": "No tienes permisos para esta acción"}
+
+        title_raw = args.get("title")
+        content_raw = args.get("content")
+        if not title_raw or not str(title_raw).strip():
+            return {"error": "El título (title) es requerido"}
+        title = str(title_raw)
+        if len(title) > 255:
+            return {"error": "El título (title) no puede exceder 255 caracteres"}
+        if not content_raw or len(str(content_raw)) < 10:
+            return {"error": "El contenido (content) debe tener al menos 10 caracteres"}
+        content = str(content_raw)
+        if len(content) > 20_000:
+            return {"error": "El contenido (content) no puede exceder 20,000 caracteres"}
+
+        content_hash = _sha256(content)
+        # Idempotente por content_hash — mismo contenido ya indexado en el
+        # tenant retorna el documento existente, no regenera embeddings.
+        existing = (
+            await db.execute(
+                select(KnowledgeDocument).where(
+                    KnowledgeDocument.tenant_id == user.tenant_id,
+                    KnowledgeDocument.content_hash == content_hash,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            return _jsonable({
+                "id": existing.id, "title": existing.title, "chunk_count": existing.chunk_count,
+                "is_auto_generated": existing.is_auto_generated, "created_at": existing.created_at,
+            })
+
+        now = datetime.now(timezone.utc)
+        doc_id = uuid.uuid4()
+        doc = KnowledgeDocument(
+            id=doc_id,
+            branch_id=user.branch_id,
+            tenant_id=user.tenant_id,
+            filename=f"doc_{doc_id.hex[:8]}.txt",
+            title=title,
+            content=content,
+            content_hash=content_hash,
+            chunk_count=0,
+            indexed_at=now,
+            is_auto_generated=False,
+        )
+        db.add(doc)
+        await db.flush()
+
+        # _embed_and_store llama a OpenAI de forma SÍNCRONA acá dentro —
+        # puede tardar varios segundos, es esperado (ya decidido, mismo
+        # comportamiento que el REST real). Si OPENAI_API_KEY no está
+        # configurado, o falla la generación, lanza HTTPException — se
+        # atrapa acá para no dejar propagar la excepción cruda, con
+        # rollback explícito del doc ya flusheado (mismo motivo que el
+        # rollback tras IntegrityError en create_product_category: sin él
+        # la sesión queda con un insert pendiente para el resto del request).
+        try:
+            chunk_count = await _embed_and_store(content, doc_id, user.tenant_id, title, db)
+        except HTTPException as exc:
+            await db.rollback()
+            return {"error": str(exc.detail)}
+        doc.chunk_count = chunk_count
+        await db.commit()
+
+        return _jsonable({
+            "id": doc_id, "title": title, "chunk_count": chunk_count,
+            "is_auto_generated": False, "created_at": now,
+        })
+
+    if name == "update_kb_document":
+        from app.copilot.actions_catalog import ACTIONS
+        from app.copilot.permissions import check_permission
+
+        allowed, _reason = check_permission(user, ACTIONS["update_kb_document"])
+        if not allowed:
+            return {"error": "No tienes permisos para esta acción"}
+
+        try:
+            doc_id = uuid.UUID(str(args.get("doc_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "doc_id inválido"}
+
+        doc = (
+            await db.execute(
+                select(KnowledgeDocument).where(
+                    KnowledgeDocument.id == doc_id,
+                    KnowledgeDocument.tenant_id == user.tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if doc is None:
+            return {"error": "Documento no encontrado"}
+
+        if "title" in args and args["title"] is not None:
+            new_title = str(args["title"])
+            if not new_title.strip():
+                return {"error": "El título (title) no puede estar vacío"}
+            if len(new_title) > 255:
+                return {"error": "El título (title) no puede exceder 255 caracteres"}
+            doc.title = new_title
+
+        if "content" in args and args["content"] is not None:
+            new_content = str(args["content"])
+            if len(new_content) < 10:
+                return {"error": "El contenido (content) debe tener al menos 10 caracteres"}
+            if len(new_content) > 20_000:
+                return {"error": "El contenido (content) no puede exceder 20,000 caracteres"}
+            new_hash = _sha256(new_content)
+            if new_hash != doc.content_hash:
+                # Contenido cambió de verdad (hash distinto) — borra los
+                # KnowledgeChunk viejos y regenera embeddings. Mismo manejo
+                # de OPENAI_API_KEY faltante que en create_kb_document.
+                await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.document_id == doc_id))
+                await db.flush()
+                try:
+                    chunk_count = await _embed_and_store(new_content, doc_id, user.tenant_id, doc.title, db)
+                except HTTPException as exc:
+                    await db.rollback()
+                    return {"error": str(exc.detail)}
+                doc.content = new_content
+                doc.content_hash = new_hash
+                doc.chunk_count = chunk_count
+                doc.indexed_at = datetime.now(timezone.utc)
+
+        await db.commit()
+        await db.refresh(doc)
+        return _jsonable({
+            "id": doc.id, "title": doc.title, "chunk_count": doc.chunk_count,
+            "is_auto_generated": doc.is_auto_generated, "created_at": doc.created_at,
+        })
+
+    if name == "delete_kb_document":
+        from app.copilot.actions_catalog import ACTIONS
+        from app.copilot.permissions import check_permission
+
+        allowed, _reason = check_permission(user, ACTIONS["delete_kb_document"])
+        if not allowed:
+            return {"error": "No tienes permisos para esta acción"}
+
+        try:
+            doc_id = uuid.UUID(str(args.get("doc_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "doc_id inválido"}
+        confirm = bool(args.get("confirm", False))
+
+        doc = (
+            await db.execute(
+                select(KnowledgeDocument).where(
+                    KnowledgeDocument.id == doc_id,
+                    KnowledgeDocument.tenant_id == user.tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if doc is None:
+            return {"error": "Documento no encontrado"}
+
+        # Flujo de confirmación en dos pasos para documentos auto-generados
+        # (from onboarding) — mismo criterio que app/api/kb.py::delete_document,
+        # pero con requires_confirmation en vez de confirm_url (no hay URL en
+        # el contexto del Copiloto): el modelo debe volver a preguntar al
+        # usuario y reintentar con confirm=True si acepta.
+        if doc.is_auto_generated and not confirm:
+            return {
+                "warning": (
+                    "Este documento fue generado automáticamente desde tu onboarding. "
+                    "Eliminarlo puede afectar la calidad de las respuestas del bot."
+                ),
+                "requires_confirmation": True,
+                "doc_id": str(doc_id),
+            }
+
+        await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.document_id == doc_id))
+        await db.delete(doc)
+        await db.commit()
+        return {"deleted": True, "id": str(doc_id)}
+
+    if name == "add_kb_fragment":
+        from app.copilot.actions_catalog import ACTIONS
+        from app.copilot.permissions import check_permission
+
+        allowed, _reason = check_permission(user, ACTIONS["add_kb_fragment"])
+        if not allowed:
+            return {"error": "No tienes permisos para esta acción"}
+
+        # Alias legacy de create_kb_document — límites de longitud DISTINTOS
+        # (title max 200 vs 255, content max 10_000 vs 20_000), propios de
+        # FragmentIn en el REST real.
+        title_raw = args.get("title")
+        content_raw = args.get("content")
+        if not title_raw or not str(title_raw).strip():
+            return {"error": "El título (title) es requerido"}
+        title = str(title_raw)
+        if len(title) > 200:
+            return {"error": "El título (title) no puede exceder 200 caracteres"}
+        if not content_raw or len(str(content_raw)) < 10:
+            return {"error": "El contenido (content) debe tener al menos 10 caracteres"}
+        content = str(content_raw)
+        if len(content) > 10_000:
+            return {"error": "El contenido (content) no puede exceder 10,000 caracteres"}
+
+        content_hash = _sha256(content)
+        existing = (
+            await db.execute(
+                select(KnowledgeDocument).where(
+                    KnowledgeDocument.tenant_id == user.tenant_id,
+                    KnowledgeDocument.content_hash == content_hash,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            return _jsonable({
+                "id": existing.id, "title": existing.title, "chunk_count": existing.chunk_count,
+                "indexed_at": existing.indexed_at,
+            })
+
+        now = datetime.now(timezone.utc)
+        doc_id = uuid.uuid4()
+        doc = KnowledgeDocument(
+            id=doc_id, branch_id=user.branch_id, tenant_id=user.tenant_id,
+            filename=f"fragment_{doc_id.hex[:8]}.txt", title=title, content=content,
+            content_hash=content_hash, chunk_count=0, indexed_at=now, is_auto_generated=False,
+        )
+        db.add(doc)
+        await db.flush()
+
+        try:
+            chunk_count = await _embed_and_store(content, doc_id, user.tenant_id, title, db)
+        except HTTPException as exc:
+            await db.rollback()
+            return {"error": str(exc.detail)}
+        doc.chunk_count = chunk_count
+        await db.commit()
+
+        return _jsonable({
+            "id": doc_id, "title": title, "chunk_count": chunk_count, "indexed_at": now,
+        })
+
+    if name == "delete_kb_fragment":
+        from app.copilot.actions_catalog import ACTIONS
+        from app.copilot.permissions import check_permission
+
+        allowed, _reason = check_permission(user, ACTIONS["delete_kb_fragment"])
+        if not allowed:
+            return {"error": "No tienes permisos para esta acción"}
+
+        try:
+            document_id = uuid.UUID(str(args.get("document_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "document_id inválido"}
+
+        doc = (
+            await db.execute(
+                select(KnowledgeDocument).where(
+                    KnowledgeDocument.id == document_id,
+                    KnowledgeDocument.tenant_id == user.tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if doc is None:
+            return {"error": "Fragmento no encontrado"}
+
+        # Alias legacy — a propósito SIN el flujo de confirmación de
+        # auto_generated (borra directo), mismo comportamiento asimétrico
+        # que app/api/kb.py::delete_kb_fragment real. No es un bug de este
+        # wireo, es el comportamiento legacy documentado en el REST.
+        await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.document_id == document_id))
+        await db.delete(doc)
+        await db.commit()
+        return {"deleted": True, "id": str(document_id)}
 
     return {"error": f"Tool '{name}' no reconocida"}
