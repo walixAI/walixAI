@@ -528,6 +528,42 @@ confirmada), sino porque es la base de cualquier flujo de soporte de
 `platform_owner` sobre tenants ajenos, y hoy parece no funcionar de forma
 consistente entre la capa de RLS y la capa de aplicación.
 
+**✅ RESUELTO** (2026-08-23): decisión de diseño tomada — override en
+memoria de `tenant_id` sobre el `User` que devuelve `get_current_user`
+(nunca persistido: sin `flush`/`commit` en esa función, sin
+`session.merge()`) cuando el claim `tenant_id` del token difiere del de
+la fila en BD, más un middleware nuevo (`ImpersonationReadOnlyMiddleware`,
+`app/middleware/impersonation_guard.py`) que bloquea con 403 cualquier
+método no-GET/HEAD/OPTIONS cuando el token trae
+`read_only_impersonation: True`, registrado junto a
+`TenantContextMiddleware`/`TrialGuardMiddleware` en `app/main.py`.
+`tenant_context.py` no se tocó (ya funcionaba correctamente). Verificado
+end-to-end con `scripts/diagnostics/test_impersonation.py` contra la BD
+real: token de impersonación ve los datos del tenant objetivo (no los del
+`platform_owner`), un POST con ese token devuelve 403 sin crear nada, y
+un POST con token normal (sin impersonación) sigue funcionando igual que
+antes — 4/4 PASS.
+
+**Hallazgo nuevo encontrado durante la implementación (no confirmado como
+explotado, candidato a hallazgo #10, evaluar antes de tocar):** el
+override en memoria de `user.tenant_id` marca ese objeto ORM como "dirty"
+en SQLAlchemy — asignar un atributo sobre un objeto ya persistente en la
+sesión lo marca dirty automáticamente, sin necesidad de `session.merge()`
+ni `db.add()` explícito. Si en la MISMA request ocurre un `db.commit()`
+más adelante (aunque sea un commit incidental, no relacionado con
+`current_user`), ese commit haría flush de TODO el unit-of-work de la
+sesión, incluyendo el `tenant_id` sobreescrito — lo que persistiría en
+BD el tenant_id impersonado sobre la fila real del `platform_owner`. El
+guardrail de solo-lectura (bloquear métodos no-GET) reduce mucho la
+superficie pero no la cierra del todo: ya existe un caso real de un GET
+que hace commit incidental — `agents.py::list_suggestions` marca
+sugerencias vencidas como `"expired"` y llama `db.commit()` dentro de un
+handler GET. Si ese endpoint (u otro GET con un patrón similar) se
+alcanza durante una sesión de impersonación, el `tenant_id` en memoria
+del `platform_owner` quedaría persistido por error. No se corrigió acá
+— queda para evaluar en el chat (opciones: `db.expunge(user)` después del
+override, o revisar cada GET que haga commit incidental).
+
 ---
 
 ## Resumen para priorizar
@@ -542,4 +578,4 @@ consistente entre la capa de RLS y la capa de aplicación.
 | 6 | `set_monthly_goal` duplicado (Copiloto vs REST) | copilot_tools.py, goals.py | Bajo | Mediano (requiere decisión de arquitectura) | **✅ Resuelto (2026-08-23)** |
 | 7 | `confirm_suggestion`/`dismiss_suggestion` sin ownership | agents.py | Medio | Chico | **✅ Resuelto (2026-08-23)** |
 | 8 | Tools de finanzas del Copiloto sin `FinancePermission` | copilot_tools.py, finance_access.py | **Alto** | Chico | **✅ Resuelto (2026-08-21)** |
-| 9 | Impersonación: tenant_id del token no se usa en la app | auth.py, platform.py, tenant_context.py | **Alto** | Grande (rediseño de arquitectura, no un fix mecánico) | Abierto |
+| 9 | Impersonación: tenant_id del token no se usa en la app | auth.py, platform.py, tenant_context.py | **Alto** | Grande (rediseño de arquitectura, no un fix mecánico) | **✅ Resuelto (2026-08-23)** |

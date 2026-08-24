@@ -7,6 +7,7 @@ from app.api import activities, agents, ai, ai_copilot, auth, automations, billi
 from app.api.industry_onboarding import onboarding_router as industry_onboarding_router
 from app.api.industry_onboarding import settings_router as industry_settings_router
 from app.api.users import team_router, users_router
+from app.middleware.impersonation_guard import ImpersonationReadOnlyMiddleware
 from app.middleware.tenant_context import TenantContextMiddleware
 from app.middleware.trial_guard import TrialGuardMiddleware
 from app.services.scheduler import lifespan_scheduler
@@ -56,11 +57,18 @@ app.add_middleware(
 # run). It sets request.state.tenant_id from the JWT so that get_db can call
 # set_config before any query. Requests without a JWT get NULL_UUID (safe).
 # Middleware execution order (LIFO: last added = outermost = runs first):
-#   1. TenantContextMiddleware  → decodes JWT, sets request.state.tenant_id
-#   2. TrialGuardMiddleware     → reads tenant_id set by step 1, checks trial expiry
-# Adding TrialGuard first makes it inner (runs after TenantContext).
+#   1. ImpersonationReadOnlyMiddleware → decodes the JWT itself, blocks any
+#      non-GET/HEAD/OPTIONS request on a read-only impersonation token (403)
+#      before anything else runs (hallazgo #9, docs/PERMISSIONS_DRIFT_BACKLOG.md)
+#   2. TenantContextMiddleware  → decodes JWT, sets request.state.tenant_id
+#   3. TrialGuardMiddleware     → reads tenant_id set by step 2, checks trial expiry
+# Adding TrialGuard first makes it innermost (runs last, right before routing).
+# ImpersonationReadOnlyMiddleware and TenantContextMiddleware each decode the
+# token independently — their relative order doesn't matter, only that both
+# run before routing.
 app.add_middleware(TrialGuardMiddleware)
 app.add_middleware(TenantContextMiddleware)
+app.add_middleware(ImpersonationReadOnlyMiddleware)
 
 
 app.include_router(agents.router, prefix="/api")
