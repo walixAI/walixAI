@@ -6,6 +6,10 @@ Expansión Finanzas/Gastos, Ronda 1: 7 tools de lectura adicionales
   (list_expenses, list_expense_categories, list_recurring_expenses,
   list_expense_rules, list_product_categories, list_goal_assignments,
   list_finance_permissions) — ver más abajo.
+Expansión Finanzas/Gastos, Ronda 2a-i: 5 tools de escritura — núcleo de
+  gastos (create_expense, update_expense, confirm_expense,
+  confirm_all_draft_expenses, trigger_recurring_expense_generation) — ver
+  más abajo.
 
 Política de confirmación:
   create_contact, create_deal, move_deal_stage, add_note, create_task,
@@ -53,6 +57,20 @@ acceso (require_finance_access aquí, _require_finance_access en el REST) y
 el flujo confirmed=bool del Copiloto quedan fuera del servicio, son
 responsabilidad de cada caller.
 
+Las 5 tools de escritura de la Ronda 2a-i (núcleo de gastos) replican la
+lógica de sus endpoints REST equivalentes en app/api/finance.py
+(create_expense, update_expense, confirm_expense,
+confirm_all_draft_expenses, trigger_recurring_expense_generation).
+create_expense/update_expense/confirm_expense/confirm_all_draft_expenses
+llaman require_finance_access dentro del dispatcher — update_expense y
+confirm_expense usan el branch_id DEL GASTO YA EXISTENTE (no el que venga
+en args), igual que el REST. trigger_recurring_expense_generation es la
+única excepción: su endpoint REST real usa _require_owner, no
+_require_finance_access, así que acá usa check_permission +
+ActionDefinition.required_role=_OWNER_TIER (mismo patrón que
+list_finance_permissions/get_team_performance) en vez de
+require_finance_access.
+
 Tool-use format: nativo Anthropic SDK 0.104.x
   name, description, input_schema (JSON Schema)
 """
@@ -66,7 +84,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.copilot.finance_access import require_finance_access
@@ -81,6 +99,7 @@ from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.pipeline import PipelineStage
 from app.models.tenant import Tenant
 from app.models.user import User, UserRole
+from app.services.expense_generation import generate_recurring_expenses
 from app.services.goals_service import upsert_monthly_goal
 from app.services.profitability import (
     get_current_month_goal,
@@ -1039,6 +1058,230 @@ async def execute_tool(
             }
             for fp, u in rows
         ])
+
+    # Expansión Finanzas/Gastos, Ronda 2a-i — núcleo de gastos (escritura).
+    # create_expense/update_expense/confirm_expense/confirm_all_draft_expenses
+    # replican exactamente la lógica de sus endpoints REST equivalentes en
+    # app/api/finance.py (create_expense, update_expense, confirm_expense,
+    # confirm_all_draft_expenses) y validan acceso vía require_finance_access
+    # dentro del dispatcher — mismo patrón que list_expenses/etc (Ronda 1).
+    # update_expense/confirm_expense usan el branch_id DEL GASTO YA EXISTENTE
+    # para el chequeo de acceso, no el que venga en args — así lo hace el REST.
+    if name == "create_expense":
+        branch_id_raw = args.get("branch_id")
+        try:
+            branch_id = uuid.UUID(str(branch_id_raw)) if branch_id_raw else None
+        except (ValueError, AttributeError):
+            return {"error": "branch_id inválido"}
+
+        category_id_raw = args.get("category_id")
+        try:
+            category_id = uuid.UUID(str(category_id_raw)) if category_id_raw else None
+        except (ValueError, AttributeError):
+            return {"error": "category_id inválido"}
+
+        deal_id_raw = args.get("deal_id")
+        try:
+            deal_id = uuid.UUID(str(deal_id_raw)) if deal_id_raw else None
+        except (ValueError, AttributeError):
+            return {"error": "deal_id inválido"}
+
+        allowed, reason = await require_finance_access(user, branch_id, db)
+        if not allowed:
+            return {"error": reason}
+
+        amount_raw = args.get("amount")
+        if amount_raw is None:
+            return {"error": "El monto (amount) es requerido"}
+        try:
+            amount = Decimal(str(amount_raw))
+            if amount <= 0:
+                raise ValueError
+        except (ValueError, Exception):
+            return {"error": f"Monto inválido: {amount_raw}"}
+
+        kind = args.get("kind")
+        if kind not in ("fijo", "variable"):
+            return {"error": "kind debe ser 'fijo' o 'variable'"}
+
+        incurred_at_raw = args.get("incurred_at")
+        if incurred_at_raw:
+            try:
+                incurred_at = date.fromisoformat(str(incurred_at_raw))
+            except ValueError:
+                return {"error": "incurred_at inválido, use formato YYYY-MM-DD"}
+        else:
+            incurred_at = date.today()
+
+        exp = Expense(
+            tenant_id=user.tenant_id,
+            branch_id=branch_id,
+            category_id=category_id,
+            owner_id=user.id,
+            amount=amount,
+            kind=kind,
+            currency=str(args.get("currency") or "MXN"),
+            incurred_at=incurred_at,
+            status="confirmed",
+            source="manual",
+            deal_id=deal_id,
+            receipt_url=args.get("receipt_url"),
+            description=args.get("description"),
+        )
+        db.add(exp)
+        await db.commit()
+        await db.refresh(exp)
+        return _jsonable({
+            "id": exp.id, "tenant_id": exp.tenant_id, "branch_id": exp.branch_id,
+            "category_id": exp.category_id, "owner_id": exp.owner_id, "amount": exp.amount,
+            "kind": exp.kind, "currency": exp.currency, "incurred_at": exp.incurred_at,
+            "status": exp.status, "source": exp.source, "deal_id": exp.deal_id,
+            "rule_id": exp.rule_id, "recurring_id": exp.recurring_id,
+            "receipt_url": exp.receipt_url, "description": exp.description,
+        })
+
+    if name == "update_expense":
+        try:
+            expense_id = uuid.UUID(str(args.get("expense_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "expense_id inválido"}
+
+        exp = (
+            await db.execute(
+                select(Expense).where(Expense.id == expense_id, Expense.tenant_id == user.tenant_id)
+            )
+        ).scalar_one_or_none()
+        if exp is None:
+            return {"error": "Gasto no encontrado"}
+
+        allowed, reason = await require_finance_access(user, exp.branch_id, db)
+        if not allowed:
+            return {"error": reason}
+
+        if "branch_id" in args and args["branch_id"] is not None:
+            try:
+                exp.branch_id = uuid.UUID(str(args["branch_id"]))
+            except (ValueError, AttributeError):
+                return {"error": "branch_id inválido"}
+        if "category_id" in args and args["category_id"] is not None:
+            try:
+                exp.category_id = uuid.UUID(str(args["category_id"]))
+            except (ValueError, AttributeError):
+                return {"error": "category_id inválido"}
+        if "amount" in args and args["amount"] is not None:
+            try:
+                new_amount = Decimal(str(args["amount"]))
+                if new_amount <= 0:
+                    raise ValueError
+            except (ValueError, Exception):
+                return {"error": f"Monto inválido: {args['amount']}"}
+            exp.amount = new_amount
+        if "kind" in args and args["kind"] is not None:
+            if args["kind"] not in ("fijo", "variable"):
+                return {"error": "kind debe ser 'fijo' o 'variable'"}
+            exp.kind = args["kind"]
+        if "currency" in args and args["currency"] is not None:
+            exp.currency = str(args["currency"])
+        if "incurred_at" in args and args["incurred_at"] is not None:
+            try:
+                exp.incurred_at = date.fromisoformat(str(args["incurred_at"]))
+            except ValueError:
+                return {"error": "incurred_at inválido, use formato YYYY-MM-DD"}
+        if "status" in args and args["status"] is not None:
+            if args["status"] not in ("draft", "confirmed"):
+                return {"error": "status debe ser 'draft' o 'confirmed'"}
+            exp.status = args["status"]
+        if "deal_id" in args and args["deal_id"] is not None:
+            try:
+                exp.deal_id = uuid.UUID(str(args["deal_id"]))
+            except (ValueError, AttributeError):
+                return {"error": "deal_id inválido"}
+        if "receipt_url" in args and args["receipt_url"] is not None:
+            exp.receipt_url = args["receipt_url"]
+        if "description" in args and args["description"] is not None:
+            exp.description = args["description"]
+
+        await db.commit()
+        await db.refresh(exp)
+        return _jsonable({
+            "id": exp.id, "tenant_id": exp.tenant_id, "branch_id": exp.branch_id,
+            "category_id": exp.category_id, "owner_id": exp.owner_id, "amount": exp.amount,
+            "kind": exp.kind, "currency": exp.currency, "incurred_at": exp.incurred_at,
+            "status": exp.status, "source": exp.source, "deal_id": exp.deal_id,
+            "rule_id": exp.rule_id, "recurring_id": exp.recurring_id,
+            "receipt_url": exp.receipt_url, "description": exp.description,
+        })
+
+    if name == "confirm_expense":
+        try:
+            expense_id = uuid.UUID(str(args.get("expense_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "expense_id inválido"}
+
+        exp = (
+            await db.execute(
+                select(Expense).where(Expense.id == expense_id, Expense.tenant_id == user.tenant_id)
+            )
+        ).scalar_one_or_none()
+        if exp is None:
+            return {"error": "Gasto no encontrado"}
+
+        allowed, reason = await require_finance_access(user, exp.branch_id, db)
+        if not allowed:
+            return {"error": reason}
+
+        exp.status = "confirmed"
+        if args.get("amount") is not None:
+            try:
+                new_amount = Decimal(str(args["amount"]))
+                if new_amount <= 0:
+                    raise ValueError
+            except (ValueError, Exception):
+                return {"error": f"Monto inválido: {args['amount']}"}
+            exp.amount = new_amount
+
+        await db.commit()
+        await db.refresh(exp)
+        return _jsonable({
+            "id": exp.id, "tenant_id": exp.tenant_id, "branch_id": exp.branch_id,
+            "category_id": exp.category_id, "owner_id": exp.owner_id, "amount": exp.amount,
+            "kind": exp.kind, "currency": exp.currency, "incurred_at": exp.incurred_at,
+            "status": exp.status, "source": exp.source, "deal_id": exp.deal_id,
+            "rule_id": exp.rule_id, "recurring_id": exp.recurring_id,
+            "receipt_url": exp.receipt_url, "description": exp.description,
+        })
+
+    if name == "confirm_all_draft_expenses":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
+        result = await db.execute(
+            update(Expense)
+            .where(Expense.tenant_id == user.tenant_id, Expense.status == "draft")
+            .values(status="confirmed")
+        )
+        await db.commit()
+        return {"updated": result.rowcount}
+
+    if name == "trigger_recurring_expense_generation":
+        # required_role=_OWNER_TIER en el catálogo (app/copilot/actions_catalog.py)
+        # es solo metadata declarativa — execute_tool no la aplica automáticamente
+        # (ningún caller de execute_tool en copilot_engine.py/capability_runner.py
+        # chequea required_role antes de despachar). El chequeo real vive acá,
+        # mismo patrón que list_finance_permissions/get_team_performance arriba.
+        # NO se llama require_finance_access — el endpoint REST real
+        # (app/api/finance.py::trigger_recurring_expense_generation) usa
+        # _require_owner, no _require_finance_access, y esto lo replica tal cual.
+        from app.copilot.actions_catalog import ACTIONS
+        from app.copilot.permissions import check_permission
+
+        allowed, _reason = check_permission(user, ACTIONS["trigger_recurring_expense_generation"])
+        if not allowed:
+            return {"error": "Solo el propietario puede generar los gastos recurrentes"}
+
+        generated = await generate_recurring_expenses(user.tenant_id, db)
+        return {"generated": generated}
 
     if name == "get_monthly_goal":
         goal = await get_current_month_goal(user.tenant_id, year, month, db)
