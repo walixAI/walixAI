@@ -3,8 +3,8 @@
 Este módulo NO reimplementa ejecución — el Copiloto conversacional
 (app/ai/copilot_engine.py + app/ai/copilot_tools.py, ya en producción desde
 C2/C3/C4) tiene sus tools nativas de Claude con su propio dispatcher
-(copilot_tools.execute_tool). Este catálogo formaliza esas tools (41
-wireadas al día de la Ronda 2a-iii de Finanzas/Gastos) con la metadata
+(copilot_tools.execute_tool). Este catálogo formaliza esas tools (50
+wireadas al día del wireo de Knowledge Base, app/api/kb.py) con la metadata
 declarativa que hoy vive dispersa o no existe en absoluto: risk_tier,
 requires_confirmation y required_role centralizados, en vez de checks de
 rol sueltos dentro de execute_tool (ver el que reemplaza en
@@ -59,6 +59,16 @@ _ALL_ROLES = frozenset(UserRole)
 # no se tocó en ese hallazgo, solo se documentó esta divergencia
 # intencional para que no se junten por error.
 _OWNER_TIER = frozenset({UserRole.OWNER, UserRole.PLATFORM_OWNER})
+
+# Knowledge Base (app/api/kb.py) — primer módulo huérfano fuera de
+# Finanzas/Gastos, con su propio esquema de roles (_require_roles), distinto
+# de _OWNER_TIER: OJO, ninguno de los dos sets de abajo incluye
+# PLATFORM_OWNER — replican exacto _REINDEX_ROLES / _STATUS_ROLES /
+# _DOC_ROLES de kb.py, no _OWNER_TIER, para no ampliar el acceso real que
+# tiene el REST. _STATUS_ROLES y _DOC_ROLES son el mismo set en kb.py
+# (OWNER/GERENTE/IT), así que acá comparten una sola constante de lectura.
+_KB_WRITE_ROLES = frozenset({UserRole.OWNER, UserRole.IT})
+_KB_READ_ROLES = frozenset({UserRole.OWNER, UserRole.GERENTE, UserRole.IT})
 
 ActionHandler = Callable[..., Awaitable[dict[str, Any]]]
 
@@ -267,6 +277,40 @@ _LOW_RISK: list[ActionDefinition] = [
         "access grants.",
         "low",
         required_role=_OWNER_TIER,
+    ),
+    # Knowledge Base (app/api/kb.py) — lectura. Las 3 de abajo usan
+    # required_role=_KB_READ_ROLES (OWNER/GERENTE/IT, sin PLATFORM_OWNER) —
+    # el dispatcher valida esto vía check_permission + ACTIONS[name], mismo
+    # patrón que list_finance_permissions/get_team_performance (el
+    # required_role del catálogo es metadata; el enforcement real es la
+    # llamada a check_permission dentro de execute_tool).
+    _wired(
+        "kb_status",
+        "Returns a summary of the Knowledge Base: each indexed document (filename, title, "
+        "chunk count, indexed_at), plus totals (total_documents, total_chunks, "
+        "last_indexed). Only for OWNER, GERENTE, and IT roles. Use when asked about the "
+        "state or freshness of the knowledge base.",
+        "low",
+        required_role=_KB_READ_ROLES,
+    ),
+    _wired(
+        "list_kb_documents",
+        "Lists Knowledge Base documents, paginated, without embeddings — id, title, a "
+        "content preview (truncated to 200 chars), chunk_count, is_auto_generated, and "
+        "created_at. Only for OWNER, GERENTE, and IT roles. Use when the user wants to "
+        "browse or review the documents that feed the bot's answers.",
+        "low",
+        required_role=_KB_READ_ROLES,
+    ),
+    _wired(
+        "get_kb_document",
+        "Returns a single Knowledge Base document in full, without embeddings — id, title, "
+        "content, chunk_count, is_auto_generated, created_at, updated_at. If the document "
+        "is file-based (no content stored directly), the content is reconstructed by "
+        "concatenating its chunks in order. Only for OWNER, GERENTE, and IT roles. Requires "
+        "doc_id.",
+        "low",
+        required_role=_KB_READ_ROLES,
     ),
 ]
 
@@ -487,6 +531,51 @@ _MEDIUM_RISK: list[ActionDefinition] = [
         "activate/deactivate a product category.",
         "medium",
     ),
+    # Knowledge Base (app/api/kb.py) — escritura no destructiva. Las 4 de
+    # abajo usan required_role=_KB_WRITE_ROLES (OWNER/IT, sin
+    # PLATFORM_OWNER, sin GERENTE) — mismo _REINDEX_ROLES que su endpoint
+    # REST real. reindex_kb/create_kb_document/update_kb_document/
+    # add_kb_fragment son reversibles o idempotentes (crear/actualizar no
+    # borra nada permanentemente; reindex solo reprocesa archivos ya en
+    # disco), a diferencia de las 2 delete de abajo en _HIGH_RISK.
+    _wired(
+        "reindex_kb",
+        "Triggers a background re-index of all Knowledge Base .md files on disk for the "
+        "tenant. Runs asynchronously — returns immediately with status='processing', the "
+        "actual indexing happens in the background. Only for OWNER and IT roles. Use when "
+        "the user wants to refresh or rebuild the bot's knowledge base from source files.",
+        "medium",
+        required_role=_KB_WRITE_ROLES,
+    ),
+    _wired(
+        "create_kb_document",
+        "Creates a new Knowledge Base document and generates its embeddings — this can "
+        "take several seconds for long content. Requires title (1-255 chars) and content "
+        "(10-20,000 chars). Idempotent by content hash: if a document with the exact same "
+        "content already exists for the tenant, returns that existing document instead of "
+        "creating a duplicate. Only for OWNER and IT roles. Use when the user wants to add "
+        "new information for the bot to use in its answers.",
+        "medium",
+        required_role=_KB_WRITE_ROLES,
+    ),
+    _wired(
+        "update_kb_document",
+        "Updates an existing Knowledge Base document — partial update, only the fields "
+        "provided are changed. Requires doc_id. If content changes (different hash from "
+        "what's stored), the old embeddings are deleted and regenerated — can take several "
+        "seconds. Only for OWNER and IT roles.",
+        "medium",
+        required_role=_KB_WRITE_ROLES,
+    ),
+    _wired(
+        "add_kb_fragment",
+        "Legacy alias of create_kb_document with tighter length limits — title (1-200 "
+        "chars) and content (10-10,000 chars). Same content-hash idempotency and embedding "
+        "generation as create_kb_document. Only for OWNER and IT roles. Prefer "
+        "create_kb_document for new integrations; this exists for backward compatibility.",
+        "medium",
+        required_role=_KB_WRITE_ROLES,
+    ),
 ]
 
 # ── Acciones de alto riesgo (impacto en terceros, destructivas, o config) ─────
@@ -536,6 +625,35 @@ _HIGH_RISK: list[ActionDefinition] = [
         "actions depending on the suggestion's agent_type). Use only after explicit "
         "user confirmation.",
         "high",
+    ),
+    # Knowledge Base (app/api/kb.py) — escritura destructiva e irreversible.
+    # required_role=_KB_WRITE_ROLES, mismo set que sus 4 hermanas de
+    # escritura no destructiva en _MEDIUM_RISK arriba.
+    _wired(
+        "delete_kb_document",
+        "Deletes a Knowledge Base document and its chunks. If the document was "
+        "auto-generated from the tenant's onboarding (is_auto_generated=true) and "
+        "confirm is not true, this does NOT delete anything — it returns a warning and "
+        "requires_confirmation=true instead. In that case, present the warning to the "
+        "user and, if they confirm, call this tool again with confirm=true to actually "
+        "delete. Only for OWNER and IT roles.",
+        "high",
+        required_role=_KB_WRITE_ROLES,
+    ),
+    # delete_kb_fragment es el alias legacy de delete_kb_document, PERO a
+    # propósito SIN el guardrail de confirmación para documentos
+    # auto_generated — borra directo, mismo comportamiento asimétrico que
+    # su endpoint REST real (documentado ahí como "sin warning de
+    # auto-generated", no es un bug de este wireo).
+    _wired(
+        "delete_kb_fragment",
+        "Legacy alias of delete_kb_document — deletes a Knowledge Base document (fragment) "
+        "and its chunks immediately, with NO confirmation step, even if the document is "
+        "auto-generated from onboarding. Unlike delete_kb_document, this always deletes "
+        "right away. Only for OWNER and IT roles. Prefer delete_kb_document for new "
+        "integrations, since it protects auto-generated documents.",
+        "high",
+        required_role=_KB_WRITE_ROLES,
     ),
 ]
 
