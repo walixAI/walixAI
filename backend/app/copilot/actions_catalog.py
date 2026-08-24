@@ -3,8 +3,8 @@
 Este módulo NO reimplementa ejecución — el Copiloto conversacional
 (app/ai/copilot_engine.py + app/ai/copilot_tools.py, ya en producción desde
 C2/C3/C4) tiene sus tools nativas de Claude con su propio dispatcher
-(copilot_tools.execute_tool). Este catálogo formaliza esas tools (26
-wireadas al día de la Ronda 1 de Finanzas/Gastos) con la metadata
+(copilot_tools.execute_tool). Este catálogo formaliza esas tools (31
+wireadas al día de la Ronda 2a-i de Finanzas/Gastos) con la metadata
 declarativa que hoy vive dispersa o no existe en absoluto: risk_tier,
 requires_confirmation y required_role centralizados, en vez de checks de
 rol sueltos dentro de execute_tool (ver el que reemplaza en
@@ -315,6 +315,66 @@ _MEDIUM_RISK: list[ActionDefinition] = [
         "Reassigns a contact (lead) to a different user on the team. "
         "Use when the user asks to hand off or reassign a contact to a colleague.",
         "medium",
+    ),
+    # Expansión Finanzas/Gastos, Ronda 2a-i — núcleo de gastos (escritura).
+    # Las 4 de abajo validan acceso real vía require_finance_access dentro
+    # del dispatcher, no vía required_role acá — mismo patrón que las 6
+    # tools de lectura de Finanzas/Gastos de la Ronda 1 (hallazgo #8).
+    _wired(
+        "create_expense",
+        "Creates a new expense record for the tenant, immediately confirmed "
+        "(status='confirmed'). Requires category_id, amount (>0), and kind "
+        "('fijo' or 'variable'). Optional: branch_id, currency (defaults to MXN), "
+        "incurred_at (defaults to today), deal_id, receipt_url, description. "
+        "Use when the user wants to log, register, or add a new gasto/expense.",
+        "medium",
+    ),
+    _wired(
+        "update_expense",
+        "Updates an existing expense record — partial update, only the fields "
+        "provided are changed. Requires expense_id. Editable fields: branch_id, "
+        "category_id, amount, kind, currency, incurred_at, receipt_url, "
+        "description. Use when the user wants to edit, correct, or change "
+        "details of an existing gasto/expense.",
+        "medium",
+    ),
+    _wired(
+        "confirm_expense",
+        "Confirms a draft expense, setting its status to 'confirmed'. Optionally "
+        "updates its amount at the same time. Requires expense_id. Use when the "
+        "user wants to approve or confirm a pending (draft) gasto/expense.",
+        "medium",
+    ),
+    _wired(
+        "confirm_all_draft_expenses",
+        "Confirms ALL draft expenses for the tenant at once, setting their "
+        "status to 'confirmed'. Returns the number of expenses updated. Use "
+        "when the user wants to bulk-confirm or approve all pending draft "
+        "gastos/expenses in one go.",
+        "medium",
+    ),
+    # trigger_recurring_expense_generation SÍ usa required_role acá
+    # (_OWNER_TIER) — su endpoint REST real
+    # (app/api/finance.py::trigger_recurring_expense_generation) usa
+    # _require_owner, no _require_finance_access: generar los gastos
+    # recurrentes del mes es una acción de owner, no de cualquiera con
+    # acceso de lectura/escritura a finanzas. El dispatcher (execute_tool)
+    # valida esto vía check_permission + ACTIONS[name], mismo patrón que
+    # list_finance_permissions/get_team_performance. Tier medium por
+    # analogía con confirm_all_draft_expenses: es una escritura masiva
+    # sobre el tenant pero no destructiva (crea Expense rows, no borra
+    # nada) y además es idempotente — generate_recurring_expenses salta
+    # las plantillas que ya generaron su gasto del mes actual.
+    _wired(
+        "trigger_recurring_expense_generation",
+        "Generates this month's expense records from all active recurring "
+        "expense templates. Idempotent — skips templates that already "
+        "generated an expense for the current month. Only for OWNER and "
+        "PLATFORM_OWNER roles. Use when the user (owner) wants to manually "
+        "trigger generation of recurring/fixed monthly expenses instead of "
+        "waiting for the scheduled job.",
+        "medium",
+        required_role=_OWNER_TIER,
     ),
 ]
 
