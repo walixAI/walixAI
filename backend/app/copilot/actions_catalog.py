@@ -333,9 +333,9 @@ _MEDIUM_RISK: list[ActionDefinition] = [
         "update_expense",
         "Updates an existing expense record — partial update, only the fields "
         "provided are changed. Requires expense_id. Editable fields: branch_id, "
-        "category_id, amount, kind, currency, incurred_at, receipt_url, "
-        "description. Use when the user wants to edit, correct, or change "
-        "details of an existing gasto/expense.",
+        "category_id, amount, kind, currency, incurred_at, status, deal_id, "
+        "receipt_url, description. Use when the user wants to edit, correct, or "
+        "change details of an existing gasto/expense.",
         "medium",
     ),
     _wired(

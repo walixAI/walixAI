@@ -1187,6 +1187,15 @@ async def execute_tool(
                 exp.incurred_at = date.fromisoformat(str(args["incurred_at"]))
             except ValueError:
                 return {"error": "incurred_at inválido, use formato YYYY-MM-DD"}
+        if "status" in args and args["status"] is not None:
+            if args["status"] not in ("draft", "confirmed"):
+                return {"error": "status debe ser 'draft' o 'confirmed'"}
+            exp.status = args["status"]
+        if "deal_id" in args and args["deal_id"] is not None:
+            try:
+                exp.deal_id = uuid.UUID(str(args["deal_id"]))
+            except (ValueError, AttributeError):
+                return {"error": "deal_id inválido"}
         if "receipt_url" in args and args["receipt_url"] is not None:
             exp.receipt_url = args["receipt_url"]
         if "description" in args and args["description"] is not None:

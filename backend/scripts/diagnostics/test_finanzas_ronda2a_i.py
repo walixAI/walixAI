@@ -25,6 +25,10 @@ Verificaciones:
      require_finance_access (esta acción no la llama).
   g) OWNER llama trigger_recurring_expense_generation — responde
      {"generated": ...} sin error.
+  h) OWNER actualiza el gasto de (a)/(b) vía update_expense con
+     status="draft" y deal_id — confirma que ambos campos (los que faltaban
+     en el bloque wireado original) se aplican de verdad, y que el resto
+     (amount/description/kind) sigue intacto.
 
 Uso:
     .venv/Scripts/python.exe scripts/diagnostics/test_finanzas_ronda2a_i.py
@@ -48,7 +52,11 @@ from sqlalchemy import delete, select
 
 from app.ai.copilot_tools import execute_tool
 from app.core.database import AsyncSessionLocal
+from app.models.deal import Deal
 from app.models.finance import Expense, ExpenseCategory, FinancePermission
+from app.models.lead import Lead
+from app.models.pipeline import PipelineStage
+from app.models.pipeline_group import Pipeline
 from app.models.tenant import Branch, Company, Tenant, TenantPlan
 from app.models.user import User, UserRole
 
@@ -105,6 +113,32 @@ async def _setup() -> dict:
         db.add(asesor_no_permission)
         await db.flush()
 
+        # expenses.deal_id SÍ tiene FK real hacia deals.id (a diferencia de
+        # category_id, que ninguna capa valida) — hace falta un Deal real
+        # para probar update_expense con deal_id, un UUID inventado viola
+        # el constraint a nivel de BD.
+        lead = Lead(branch_id=branch_a.id, tenant_id=tenant.id, wa_phone="+520000000099", name="Lead para Deal de prueba")
+        db.add(lead)
+        await db.flush()
+
+        pipeline = Pipeline(tenant_id=tenant.id, branch_id=branch_a.id, name="Pipeline Test", is_default=True, position=0)
+        db.add(pipeline)
+        await db.flush()
+
+        stage = PipelineStage(
+            tenant_id=tenant.id, branch_id=branch_a.id, pipeline_id=pipeline.id,
+            name="Nuevo", slug="nuevo", order_index=0, is_won=False, is_lost=False,
+        )
+        db.add(stage)
+        await db.flush()
+
+        deal = Deal(
+            tenant_id=tenant.id, lead_id=lead.id, pipeline_stage_id=stage.id,
+            title="Deal de prueba", amount=Decimal("0"), probability=0, owner_id=owner_user.id,
+        )
+        db.add(deal)
+        await db.flush()
+
         await db.commit()
 
         return {
@@ -112,6 +146,7 @@ async def _setup() -> dict:
             "branch_a_id": branch_a.id,
             "branch_b_id": branch_b.id,
             "category_id": category.id,
+            "deal_id": deal.id,
             "owner_user": owner_user,
             "asesor_wrong_branch": asesor_wrong_branch,
             "asesor_no_permission": asesor_no_permission,
@@ -283,6 +318,26 @@ async def main() -> int:
             results.append((
                 "g. trigger_recurring_expense_generation funciona para OWNER (sin error, devuelve 'generated')",
                 ok_g, f"result={allowed_trigger}",
+            ))
+
+            # ── h) update_expense — status y deal_id (campos que faltaban) ──────
+            deal_id_str = str(ctx["deal_id"])
+            updated_h = await execute_tool(
+                "update_expense",
+                {"expense_id": expense_id, "status": "draft", "deal_id": deal_id_str},
+                owner, tenant, db,
+            )
+            ok_h = (
+                "error" not in updated_h
+                and updated_h.get("status") == "draft"
+                and updated_h.get("deal_id") == deal_id_str
+                and float(updated_h.get("amount", 0)) == 750.0  # de (b), no tocado acá
+                and updated_h.get("description") == "Renta de agosto"  # no tocado
+                and updated_h.get("kind") == "fijo"  # no tocado
+            )
+            results.append((
+                "h. update_expense aplica status='draft' y deal_id de verdad, sin pisar amount/description/kind",
+                ok_h, f"updated={updated_h}",
             ))
 
         return _report(results)
