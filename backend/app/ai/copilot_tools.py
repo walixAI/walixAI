@@ -10,6 +10,9 @@ Expansión Finanzas/Gastos, Ronda 2a-i: 5 tools de escritura — núcleo de
   gastos (create_expense, update_expense, confirm_expense,
   confirm_all_draft_expenses, trigger_recurring_expense_generation) — ver
   más abajo.
+Expansión Finanzas/Gastos, Ronda 2a-ii: 8 tools de escritura — catálogos
+  de finanzas, 4 pares create/update (expense_category, recurring_expense,
+  expense_rule, product_category) — ver más abajo.
 
 Política de confirmación:
   create_contact, create_deal, move_deal_stage, add_note, create_task,
@@ -71,6 +74,19 @@ ActionDefinition.required_role=_OWNER_TIER (mismo patrón que
 list_finance_permissions/get_team_performance) en vez de
 require_finance_access.
 
+Las 8 tools de escritura de la Ronda 2a-ii (catálogos de finanzas, 4 pares
+create/update) replican sus endpoints REST equivalentes en
+app/api/finance.py (expense-categories, recurring-expenses, expense-rules)
+y app/api/goals.py (product-categories) — todas llaman
+require_finance_access(user, None, db), tenant-wide igual que sus 4
+hermanas de lectura de la Ronda 1. create_product_category/
+update_product_category atrapan IntegrityError (ProductCategory tiene un
+unique constraint (tenant_id, name)) con rollback explícito antes de
+retornar el error — sin ese rollback la sesión queda inutilizable para el
+resto del request. update_expense_rule replica una limitación existente
+del REST: deal_type_filter nunca se puede limpiar a None una vez seteado
+(mismo patrón `if body.deal_type_filter is not None` del endpoint real).
+
 Tool-use format: nativo Anthropic SDK 0.104.x
   name, description, input_schema (JSON Schema)
 """
@@ -85,6 +101,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.copilot.finance_access import require_finance_access
@@ -1282,6 +1299,366 @@ async def execute_tool(
 
         generated = await generate_recurring_expenses(user.tenant_id, db)
         return {"generated": generated}
+
+    # Expansión Finanzas/Gastos, Ronda 2a-ii — catálogos de finanzas
+    # (escritura). Las 8 acciones de abajo replican sus endpoints REST
+    # equivalentes en app/api/finance.py (expense-categories,
+    # recurring-expenses, expense-rules) y app/api/goals.py
+    # (product-categories) — todas tenant-wide (branch_id=None en
+    # require_finance_access), igual que sus 4 hermanas de lectura de la
+    # Ronda 1 (list_expense_categories/list_recurring_expenses/
+    # list_expense_rules/list_product_categories).
+    if name == "create_expense_category":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
+        cat_name = args.get("name")
+        if not cat_name or not str(cat_name).strip():
+            return {"error": "El nombre (name) es requerido"}
+
+        kind = args.get("kind")
+        if kind not in ("fijo", "variable"):
+            return {"error": "kind debe ser 'fijo' o 'variable'"}
+
+        cat = ExpenseCategory(
+            tenant_id=user.tenant_id,
+            name=str(cat_name).strip(),
+            kind=kind,
+            icon=args.get("icon"),
+        )
+        db.add(cat)
+        await db.commit()
+        await db.refresh(cat)
+        return _jsonable({
+            "id": cat.id, "tenant_id": cat.tenant_id, "name": cat.name,
+            "kind": cat.kind, "icon": cat.icon, "is_active": cat.is_active,
+        })
+
+    if name == "update_expense_category":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
+        try:
+            category_id = uuid.UUID(str(args.get("category_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "category_id inválido"}
+
+        cat = (
+            await db.execute(
+                select(ExpenseCategory).where(
+                    ExpenseCategory.id == category_id, ExpenseCategory.tenant_id == user.tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if cat is None:
+            return {"error": "Categoría no encontrada"}
+
+        if "name" in args and args["name"] is not None:
+            if not str(args["name"]).strip():
+                return {"error": "El nombre (name) no puede estar vacío"}
+            cat.name = str(args["name"]).strip()
+        if "kind" in args and args["kind"] is not None:
+            if args["kind"] not in ("fijo", "variable"):
+                return {"error": "kind debe ser 'fijo' o 'variable'"}
+            cat.kind = args["kind"]
+        if "icon" in args and args["icon"] is not None:
+            cat.icon = args["icon"]
+        if "is_active" in args and args["is_active"] is not None:
+            cat.is_active = bool(args["is_active"])
+
+        await db.commit()
+        await db.refresh(cat)
+        return _jsonable({
+            "id": cat.id, "tenant_id": cat.tenant_id, "name": cat.name,
+            "kind": cat.kind, "icon": cat.icon, "is_active": cat.is_active,
+        })
+
+    if name == "create_recurring_expense":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
+        category_id_raw = args.get("category_id")
+        try:
+            category_id = uuid.UUID(str(category_id_raw)) if category_id_raw else None
+        except (ValueError, AttributeError):
+            return {"error": "category_id inválido"}
+
+        amount_raw = args.get("amount")
+        if amount_raw is None:
+            return {"error": "El monto (amount) es requerido"}
+        try:
+            amount = Decimal(str(amount_raw))
+            if amount <= 0:
+                raise ValueError
+        except (ValueError, Exception):
+            return {"error": f"Monto inválido: {amount_raw}"}
+
+        day_of_month_raw = args.get("day_of_month", 1)
+        try:
+            day_of_month = int(day_of_month_raw)
+        except (ValueError, TypeError):
+            return {"error": f"day_of_month inválido: {day_of_month_raw}"}
+        if not (1 <= day_of_month <= 28):
+            return {"error": "day_of_month debe estar entre 1 y 28"}
+
+        rec = RecurringExpense(
+            tenant_id=user.tenant_id,
+            category_id=category_id,
+            amount=amount,
+            day_of_month=day_of_month,
+            description=args.get("description"),
+        )
+        db.add(rec)
+        await db.commit()
+        await db.refresh(rec)
+        return _jsonable({
+            "id": rec.id, "tenant_id": rec.tenant_id, "category_id": rec.category_id,
+            "amount": rec.amount, "day_of_month": rec.day_of_month,
+            "description": rec.description, "is_active": rec.is_active,
+        })
+
+    if name == "update_recurring_expense":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
+        try:
+            recurring_id = uuid.UUID(str(args.get("recurring_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "recurring_id inválido"}
+
+        rec = (
+            await db.execute(
+                select(RecurringExpense).where(
+                    RecurringExpense.id == recurring_id, RecurringExpense.tenant_id == user.tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if rec is None:
+            return {"error": "Gasto recurrente no encontrado"}
+
+        if "category_id" in args and args["category_id"] is not None:
+            try:
+                rec.category_id = uuid.UUID(str(args["category_id"]))
+            except (ValueError, AttributeError):
+                return {"error": "category_id inválido"}
+        if "amount" in args and args["amount"] is not None:
+            try:
+                new_amount = Decimal(str(args["amount"]))
+                if new_amount <= 0:
+                    raise ValueError
+            except (ValueError, Exception):
+                return {"error": f"Monto inválido: {args['amount']}"}
+            rec.amount = new_amount
+        if "day_of_month" in args and args["day_of_month"] is not None:
+            try:
+                new_day = int(args["day_of_month"])
+            except (ValueError, TypeError):
+                return {"error": f"day_of_month inválido: {args['day_of_month']}"}
+            if not (1 <= new_day <= 28):
+                return {"error": "day_of_month debe estar entre 1 y 28"}
+            rec.day_of_month = new_day
+        if "description" in args and args["description"] is not None:
+            rec.description = args["description"]
+        if "is_active" in args and args["is_active"] is not None:
+            rec.is_active = bool(args["is_active"])
+
+        await db.commit()
+        await db.refresh(rec)
+        return _jsonable({
+            "id": rec.id, "tenant_id": rec.tenant_id, "category_id": rec.category_id,
+            "amount": rec.amount, "day_of_month": rec.day_of_month,
+            "description": rec.description, "is_active": rec.is_active,
+        })
+
+    if name == "create_expense_rule":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
+        category_id_raw = args.get("category_id")
+        try:
+            category_id = uuid.UUID(str(category_id_raw)) if category_id_raw else None
+        except (ValueError, AttributeError):
+            return {"error": "category_id inválido"}
+
+        rule_name = args.get("name")
+        if not rule_name or not str(rule_name).strip():
+            return {"error": "El nombre (name) es requerido"}
+
+        rule_type = args.get("rule_type")
+        if rule_type not in ("percent_of_deal", "fixed_per_deal", "percent_of_cost"):
+            return {"error": "rule_type debe ser 'percent_of_deal', 'fixed_per_deal' o 'percent_of_cost'"}
+
+        value_raw = args.get("value")
+        if value_raw is None:
+            return {"error": "El valor (value) es requerido"}
+        try:
+            value = Decimal(str(value_raw))
+            if value <= 0:
+                raise ValueError
+        except (ValueError, Exception):
+            return {"error": f"Valor inválido: {value_raw}"}
+
+        rule = ExpenseRule(
+            tenant_id=user.tenant_id,
+            category_id=category_id,
+            name=str(rule_name).strip(),
+            rule_type=rule_type,
+            value=value,
+            deal_type_filter=args.get("deal_type_filter"),
+            auto_confirm=bool(args.get("auto_confirm", False)),
+        )
+        db.add(rule)
+        await db.commit()
+        await db.refresh(rule)
+        return _jsonable({
+            "id": rule.id, "tenant_id": rule.tenant_id, "category_id": rule.category_id,
+            "name": rule.name, "rule_type": rule.rule_type, "value": rule.value,
+            "deal_type_filter": rule.deal_type_filter, "auto_confirm": rule.auto_confirm,
+            "is_active": rule.is_active,
+        })
+
+    if name == "update_expense_rule":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
+        try:
+            rule_id = uuid.UUID(str(args.get("rule_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "rule_id inválido"}
+
+        rule = (
+            await db.execute(
+                select(ExpenseRule).where(ExpenseRule.id == rule_id, ExpenseRule.tenant_id == user.tenant_id)
+            )
+        ).scalar_one_or_none()
+        if rule is None:
+            return {"error": "Regla de gasto no encontrada"}
+
+        if "category_id" in args and args["category_id"] is not None:
+            try:
+                rule.category_id = uuid.UUID(str(args["category_id"]))
+            except (ValueError, AttributeError):
+                return {"error": "category_id inválido"}
+        if "name" in args and args["name"] is not None:
+            if not str(args["name"]).strip():
+                return {"error": "El nombre (name) no puede estar vacío"}
+            rule.name = str(args["name"]).strip()
+        if "rule_type" in args and args["rule_type"] is not None:
+            if args["rule_type"] not in ("percent_of_deal", "fixed_per_deal", "percent_of_cost"):
+                return {"error": "rule_type debe ser 'percent_of_deal', 'fixed_per_deal' o 'percent_of_cost'"}
+            rule.rule_type = args["rule_type"]
+        if "value" in args and args["value"] is not None:
+            try:
+                new_value = Decimal(str(args["value"]))
+                if new_value <= 0:
+                    raise ValueError
+            except (ValueError, Exception):
+                return {"error": f"Valor inválido: {args['value']}"}
+            rule.value = new_value
+        # deal_type_filter: mismo comportamiento que el REST
+        # (update_expense_rule, app/api/finance.py) — nunca se puede limpiar
+        # a None una vez seteado vía este endpoint, es una limitación
+        # existente del REST, no un bug a corregir acá.
+        if "deal_type_filter" in args and args["deal_type_filter"] is not None:
+            rule.deal_type_filter = args["deal_type_filter"]
+        if "auto_confirm" in args and args["auto_confirm"] is not None:
+            rule.auto_confirm = bool(args["auto_confirm"])
+        if "is_active" in args and args["is_active"] is not None:
+            rule.is_active = bool(args["is_active"])
+
+        await db.commit()
+        await db.refresh(rule)
+        return _jsonable({
+            "id": rule.id, "tenant_id": rule.tenant_id, "category_id": rule.category_id,
+            "name": rule.name, "rule_type": rule.rule_type, "value": rule.value,
+            "deal_type_filter": rule.deal_type_filter, "auto_confirm": rule.auto_confirm,
+            "is_active": rule.is_active,
+        })
+
+    if name == "create_product_category":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
+        cat_name = args.get("name")
+        if not cat_name or not str(cat_name).strip():
+            return {"error": "El nombre (name) es requerido"}
+
+        position_raw = args.get("position", 0)
+        try:
+            position = int(position_raw)
+        except (ValueError, TypeError):
+            return {"error": f"position inválido: {position_raw}"}
+
+        cat = ProductCategory(
+            tenant_id=user.tenant_id,
+            name=str(cat_name).strip(),
+            position=position,
+        )
+        db.add(cat)
+        # ProductCategory tiene un unique constraint (tenant_id, name) —
+        # mismo manejo que goals.py::create_product_category: rollback
+        # explícito tras el IntegrityError, si no la sesión queda inutilizable
+        # para el resto del request.
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            return {"error": f"Ya existe una categoría de producto con el nombre '{cat_name}' en tu cuenta"}
+        await db.refresh(cat)
+        return _jsonable({
+            "id": cat.id, "tenant_id": cat.tenant_id, "name": cat.name,
+            "is_active": cat.is_active, "position": cat.position,
+        })
+
+    if name == "update_product_category":
+        allowed, reason = await require_finance_access(user, None, db)
+        if not allowed:
+            return {"error": reason}
+
+        try:
+            category_id = uuid.UUID(str(args.get("category_id", "")))
+        except (ValueError, AttributeError):
+            return {"error": "category_id inválido"}
+
+        cat = (
+            await db.execute(
+                select(ProductCategory).where(
+                    ProductCategory.id == category_id, ProductCategory.tenant_id == user.tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if cat is None:
+            return {"error": "Categoría de producto no encontrada"}
+
+        if "name" in args and args["name"] is not None:
+            if not str(args["name"]).strip():
+                return {"error": "El nombre (name) no puede estar vacío"}
+            cat.name = str(args["name"]).strip()
+        if "is_active" in args and args["is_active"] is not None:
+            cat.is_active = bool(args["is_active"])
+        if "position" in args and args["position"] is not None:
+            try:
+                cat.position = int(args["position"])
+            except (ValueError, TypeError):
+                return {"error": f"position inválido: {args['position']}"}
+
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            return {"error": f"Ya existe una categoría de producto con el nombre '{args.get('name')}' en tu cuenta"}
+        await db.refresh(cat)
+        return _jsonable({
+            "id": cat.id, "tenant_id": cat.tenant_id, "name": cat.name,
+            "is_active": cat.is_active, "position": cat.position,
+        })
 
     if name == "get_monthly_goal":
         goal = await get_current_month_goal(user.tenant_id, year, month, db)

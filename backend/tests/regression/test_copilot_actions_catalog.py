@@ -55,7 +55,7 @@ def test_catalog_wired_actions_have_execute_tool_handler() -> None:
     from app.ai.copilot_tools import execute_tool
 
     wired = [a for a in ACTIONS_LIST if a.handler is not None]
-    assert len(wired) == 31  # 26 previas + 5 de la Ronda 2a-i de Finanzas/Gastos (núcleo de gastos)
+    assert len(wired) == 39  # 31 previas + 8 de la Ronda 2a-ii de Finanzas/Gastos (catálogos de finanzas)
     assert all(a.handler is execute_tool for a in wired)
 
 
