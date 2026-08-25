@@ -75,4 +75,9 @@ logs/
 # Local databases / dumps
 *.sqlite3
 *.db
+
+# Admin scripts: local state manifests from one-off data seeding runs
+# (IDs of what was created, used by the matching purge script — not secrets,
+# but not versioned state either).
+scripts/admin/.*manifest*.json
 *.dump
