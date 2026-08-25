@@ -10,18 +10,17 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
 from sqlalchemy import select, text
 
-from app.ai.bot_engine import process_message
+from app.ai.bot_engine import _get_or_create_active_conversation, find_lead_by_phone, process_message
 from app.api.internal_wa import handle_internal_command
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, set_tenant_context
 from app.core.redis import redis_client
 from app.models.agent import AgentSuggestion
-from app.models.conversation import Conversation, ConversationHandler, ConversationStatus
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.user import User
 from app.models.meta_ads import MetaLeadConfig
 from app.models.tenant import Branch
-from app.services.whatsapp import WhatsAppService, _normalize_mx_phone
+from app.services.whatsapp import WhatsAppService, normalize_mx_phone
 
 _CODE_RE = re.compile(r"^\d{6}$")
 _CONFIRM_WORDS = frozenset({"sí", "si", "confirmar"})
@@ -80,7 +79,7 @@ async def _try_confirm_suggestion(
         return False
 
     # Normalize phone: Meta sends 521XXXXXXXXXX, users may store 52XXXXXXXXXX
-    normalized = _normalize_mx_phone(wa_phone)
+    normalized = normalize_mx_phone(wa_phone)
 
     async with AsyncSessionLocal() as db:
         # Sesión nueva — users/agent_suggestions tienen RLS. branch.tenant_id
@@ -437,8 +436,14 @@ async def receive_meta_leads_webhook(
             wa_phone_raw = raw_fields.get(mapping.get("wa_phone", "phone_number"), "")
             name = raw_fields.get(mapping.get("name", "full_name")) or None
 
-            # Normalize phone: strip leading + and non-digit chars
-            wa_phone = "".join(c for c in wa_phone_raw if c.isdigit())
+            # Normalize phone — mismo normalizador que el resto del app
+            # (bot_engine.py, contact_executor.py, etc.): antes esto solo
+            # sacaba los caracteres no-numéricos sin sacar el "1" que Meta
+            # agrega después del 52, lo que producía un wa_phone en un
+            # formato distinto al que WhatsApp inbound guarda para el mismo
+            # número real — una de las causas confirmadas de leads
+            # duplicados (hallazgo 2026-08-25).
+            wa_phone = normalize_mx_phone(wa_phone_raw)
             if not wa_phone:
                 logger.warning(
                     "meta_leads: no phone extracted for leadgen_id=%s fields=%s",
@@ -447,32 +452,38 @@ async def receive_meta_leads_webhook(
                 )
                 continue
 
-            # Create Lead + Conversation in a single transaction. config.tenant_id
-            # ya lo resolvió fn_lookup_meta_lead_configs_by_page_id arriba.
+            # Reusar el Lead existente si ya escribió antes por WhatsApp
+            # inbound (o por cualquier otro canal) con el mismo teléfono
+            # normalizado, en vez de crear un duplicado — misma búsqueda
+            # compartida que usa bot_engine.py::_get_or_create_lead.
             async with AsyncSessionLocal() as db:
                 await set_tenant_context(db, config.tenant_id)
-                lead = Lead(
-                    branch_id=config.branch_id,
-                    tenant_id=config.tenant_id,
-                    wa_phone=wa_phone,
-                    name=name,
-                    source=LeadSource.META_ADS,
-                    status=LeadStatus.NUEVO,
-                    meta_lead_id=leadgen_id,
-                    meta_form_id=form_id,
-                    meta_ad_id=ad_id,
-                    qualification_data={},
-                )
-                db.add(lead)
+                existing_lead = await find_lead_by_phone(db, wa_phone, config.branch_id, config.tenant_id)
+
+                if existing_lead is not None:
+                    existing_lead.meta_lead_id = leadgen_id
+                    existing_lead.meta_form_id = form_id
+                    existing_lead.meta_ad_id = ad_id
+                    if name and not existing_lead.name:
+                        existing_lead.name = name
+                    lead = existing_lead
+                else:
+                    lead = Lead(
+                        branch_id=config.branch_id,
+                        tenant_id=config.tenant_id,
+                        wa_phone=wa_phone,
+                        name=name,
+                        source=LeadSource.META_ADS,
+                        status=LeadStatus.NUEVO,
+                        meta_lead_id=leadgen_id,
+                        meta_form_id=form_id,
+                        meta_ad_id=ad_id,
+                        qualification_data={},
+                    )
+                    db.add(lead)
                 await db.flush()  # get lead.id
 
-                conversation = Conversation(
-                    lead_id=lead.id,
-                    branch_id=config.branch_id,
-                    status=ConversationStatus.ACTIVE,
-                    current_handler=ConversationHandler.BOT,
-                )
-                db.add(conversation)
+                conversation = await _get_or_create_active_conversation(db, lead, config.branch_id)
                 await db.commit()
                 lead_id_captured = lead.id
                 branch_id_captured = config.branch_id

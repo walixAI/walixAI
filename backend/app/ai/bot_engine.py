@@ -28,7 +28,7 @@ from app.models.agent import AgentSuggestion
 from app.models.ai_memory import AIMemoryEvent, AIOutcomeFeedback
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.tenant import Branch
-from app.services.whatsapp import WhatsAppService, _normalize_mx_phone
+from app.services.whatsapp import WhatsAppService, normalize_mx_phone
 
 logger = logging.getLogger(__name__)
 
@@ -49,19 +49,33 @@ langfuse_client = Langfuse(
 )
 
 
-async def _get_or_create_lead(
+async def find_lead_by_phone(
     db: AsyncSession,
-    wa_phone: str,
+    wa_phone: str | None,
     branch_id: uuid.UUID,
     tenant_id: uuid.UUID,
-) -> Lead:
-    # Always work with the canonical format (52XXXXXXXXXX for MX mobiles).
-    # Meta delivers 521XXXXXXXXXX; searching both variants covers existing rows
-    # that were saved before this normalization was enforced.
-    canonical = _normalize_mx_phone(wa_phone)
+) -> Lead | None:
+    """Busca un Lead existente por teléfono, sin crear nada.
+
+    ÚNICA fuente de verdad para esta búsqueda — reusada por todos los
+    call-sites que crean Leads (WhatsApp inbound acá abajo, Meta Lead Ads
+    en app/api/webhooks.py, contact_executor.py, copilot_tools.py::
+    create_contact, app/api/contacts.py) para no duplicar el mismo contacto
+    real solo porque cada uno guardaba el teléfono en un formato distinto
+    (521XXXXXXXXXX / 52XXXXXXXXXX / +52XXXXXXXXXX / crudo) — hallazgo real
+    de leads duplicados, 2026-08-25. Antes de esta unificación cada
+    call-site tenía su propia normalización (o ninguna) y solo esta función
+    buscaba por ambas variantes antes de crear.
+
+    Busca primero en la misma branch (gana el más reciente si hay
+    duplicados), después en cualquier branch del mismo tenant (para
+    reconocer contactos que ya escribieron desde otra sucursal).
+    """
+    canonical = normalize_mx_phone(wa_phone)
+    if canonical is None:
+        return None
     phones = list({wa_phone, canonical})
 
-    # 1. Same branch — most recent lead wins when duplicates exist.
     result = await db.execute(
         select(Lead).where(
             Lead.wa_phone.in_(phones),
@@ -73,7 +87,6 @@ async def _get_or_create_lead(
     if lead is not None:
         return lead
 
-    # 2. Any other branch of the same tenant — recognize returning contacts.
     result = await db.execute(
         select(Lead).where(
             Lead.wa_phone.in_(phones),
@@ -81,13 +94,22 @@ async def _get_or_create_lead(
             Lead.deleted_at.is_(None),
         ).order_by(Lead.created_at.desc()).limit(1)
     )
-    lead = result.scalar_one_or_none()
+    return result.scalar_one_or_none()
+
+
+async def _get_or_create_lead(
+    db: AsyncSession,
+    wa_phone: str,
+    branch_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> Lead:
+    lead = await find_lead_by_phone(db, wa_phone, branch_id, tenant_id)
     if lead is not None:
         return lead
 
-    # 3. New contact — always store the canonical phone format.
+    # New contact — always store the canonical phone format.
     lead = Lead(
-        wa_phone=canonical,
+        wa_phone=normalize_mx_phone(wa_phone) or wa_phone,
         branch_id=branch_id,
         tenant_id=tenant_id,
         source=LeadSource.WHATSAPP_INBOUND,

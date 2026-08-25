@@ -19,10 +19,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.ai.bot_engine import find_lead_by_phone
 from app.api.auth import get_current_user
 from app.core.database import AsyncSessionLocal, get_db, set_tenant_context
 from app.core.redis import redis_client
 from app.services.activity_service import create_field_change_activity, create_system_activity
+from app.services.whatsapp import normalize_mx_phone
 from app.models.activity import Activity
 from app.models.agent import AgentSuggestion
 from app.models.ai_memory import AIEntityContext
@@ -338,10 +340,19 @@ async def _process_csv_import(
             phone_raw = row.get("telefono", "").strip()
             phone = ""
             if phone_raw:
-                phone = _normalize_phone(phone_raw)
-                if not _is_valid_e164(phone):
+                e164_candidate = _normalize_phone(phone_raw)
+                if not _is_valid_e164(e164_candidate):
                     errors.append({"row": row_num, "reason": "invalid_phone", **row})
                     continue
+                # Se guarda en el formato canónico SIN + (mismo que usa
+                # bot_engine.py para WhatsApp inbound) — antes se guardaba
+                # en E.164 con + acá, un formato distinto para el mismo
+                # número real que WhatsApp inbound, así que nunca hacían
+                # match entre sí. Hallazgo de leads duplicados, 2026-08-25
+                # — ver app.services.whatsapp.normalize_mx_phone. Esto
+                # asume números mexicanos (igual que normalize_mx_phone);
+                # _is_valid_e164 arriba sigue validando cualquier país.
+                phone = normalize_mx_phone(e164_candidate) or e164_candidate
 
             email = row.get("email", "").strip()
             if email and not _EMAIL_RE.match(email):
@@ -562,16 +573,30 @@ async def create_contact(
             detail="No tienes una sucursal asignada",
         )
 
-    if not body.name and not body.wa_phone:
+    # Normalizado — antes se guardaba tal cual lo haya tipeado el usuario en
+    # el form, sin match posible contra un lead que ya escribió por
+    # WhatsApp con el mismo número real en formato canónico. Hallazgo de
+    # leads duplicados, 2026-08-25 — ver app.services.whatsapp.normalize_mx_phone.
+    wa_phone = normalize_mx_phone(body.wa_phone) if body.wa_phone else None
+
+    if not body.name and not wa_phone:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Se requiere al menos el nombre o el teléfono del contacto",
         )
 
+    if wa_phone:
+        existing = await find_lead_by_phone(db, wa_phone, current_user.branch_id, current_user.tenant_id)
+        if existing is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Ya existe un contacto con este teléfono: {existing.name or existing.wa_phone} (id={existing.id})",
+            )
+
     lead = Lead(
         branch_id=current_user.branch_id,
         tenant_id=current_user.tenant_id,
-        wa_phone=body.wa_phone or None,
+        wa_phone=wa_phone,
         name=body.name,
         last_name=body.last_name,
         company=body.company,
