@@ -116,6 +116,13 @@ class WhatsAppService:
                 async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS) as client:
                     response = await client.post(url, headers=headers, json=payload)
                 if response.status_code == 200:
+                    body = response.json()
+                    wamid = (body.get("messages") or [{}])[0].get("id")
+                    logger.info(
+                        "WhatsApp API 200 OK: to=%s wamid=%s",
+                        payload.get("to"),
+                        wamid,
+                    )
                     return True
                 logger.error(
                     "WhatsApp API non-200 (attempt %d): status=%d body=%s",
