@@ -9,9 +9,11 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.bot_engine import find_lead_by_phone
 from app.models.activity import Activity
 from app.models.lead import Lead, LeadSentiment, LeadSource, LeadStatus
 from app.models.user import User
+from app.services.whatsapp import normalize_mx_phone
 
 logger = logging.getLogger(__name__)
 
@@ -22,21 +24,12 @@ _ACTIVITY_EMOJIS: dict[str, str] = {
     "task": "✅", "email": "📧",
 }
 
-
-def _normalize_phone(raw: str | None) -> str | None:
-    if not raw:
-        return None
-    p = raw.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
-    if not p:
-        return None
-    if not p.startswith("+"):
-        if len(p) == 10:
-            p = "+52" + p
-        elif len(p) == 12 and p.startswith("52"):
-            p = "+" + p
-        else:
-            p = "+52" + p
-    return p
+# Este módulo tenía su propia normalización de teléfono (formato +52XXXXXXXXXX,
+# CON +), distinta de la que usa bot_engine.py para WhatsApp inbound
+# (52XXXXXXXXXX, SIN +) — dos formatos distintos para el mismo número real
+# nunca podían hacer match entre sí. Unificado a
+# app.services.whatsapp.normalize_mx_phone (hallazgo de leads duplicados,
+# 2026-08-25) — ver el docstring de esa función para el detalle completo.
 
 
 def _lead_dict(lead: Lead) -> dict[str, Any]:
@@ -80,7 +73,17 @@ async def execute_contact_create(
     if not name:
         return {"action": "error", "message": "Se requiere el nombre del contacto"}
 
-    phone = _normalize_phone(params.get("phone"))
+    phone = normalize_mx_phone(params.get("phone"))
+
+    if phone and user.branch_id:
+        existing = await find_lead_by_phone(db, phone, user.branch_id, user.tenant_id)
+        if existing is not None:
+            return {
+                "action": "contact_exists",
+                "contact": _lead_dict(existing),
+                "message": f"Ya existe un contacto con este teléfono: {existing.name or existing.wa_phone}",
+            }
+
     wa_phone = phone or f"{_NOPHONE}{uuid.uuid4().hex[:16].upper()}"
 
     lead = Lead(

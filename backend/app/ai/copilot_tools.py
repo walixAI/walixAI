@@ -169,6 +169,7 @@ from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.bot_engine import find_lead_by_phone
 from app.ai.ingestion import _sha256, ingest_all_documents
 from app.api.kb import _embed_and_store
 from app.copilot.finance_access import require_finance_access
@@ -195,6 +196,7 @@ from app.services.profitability import (
     get_user_profitability,
     get_user_run_rate,
 )
+from app.services.whatsapp import normalize_mx_phone
 
 logger = logging.getLogger(__name__)
 
@@ -1982,11 +1984,26 @@ async def execute_tool(
 
     if name == "create_contact":
         contact_name = str(args.get("name", "")).strip() or None
-        wa_phone = str(args.get("wa_phone", "")).strip() or None
+        # Sin normalizar antes, esto guardaba el teléfono tal cual lo haya
+        # pasado el modelo/usuario (cualquier formato) — no hacía match
+        # contra leads ya creados vía WhatsApp inbound con el mismo número
+        # real en formato canónico. Hallazgo de leads duplicados, 2026-08-25
+        # — ver app.services.whatsapp.normalize_mx_phone.
+        wa_phone = normalize_mx_phone(str(args.get("wa_phone", "")).strip() or None)
         if not contact_name and not wa_phone:
             return {"error": "Se requiere al menos el nombre o el teléfono del contacto"}
         if not user.branch_id:
             return {"error": "El usuario no tiene sucursal asignada — no se puede crear el contacto"}
+
+        if wa_phone:
+            existing = await find_lead_by_phone(db, wa_phone, user.branch_id, user.tenant_id)
+            if existing is not None:
+                return {
+                    "error": (
+                        f"Ya existe un contacto con este teléfono: "
+                        f"{existing.name or existing.wa_phone} (id={existing.id})"
+                    ),
+                }
 
         lead = Lead(
             branch_id=user.branch_id,

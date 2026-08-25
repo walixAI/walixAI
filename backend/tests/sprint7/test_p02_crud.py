@@ -82,7 +82,12 @@ async def test_create_contact_phone_only(client: AsyncClient, user_asesor: dict)
     )
     assert r.status_code == 201
     data = r.json()
-    assert data["wa_phone"] == "+5215512345678"
+    # Normalizado al formato canónico (52XXXXXXXXXX, sin +, sin el "1" que
+    # Meta agrega) — mismo formato que usa bot_engine.py para WhatsApp
+    # inbound, así ambos hacen match como el mismo contacto real. Antes de
+    # este fix (hallazgo de leads duplicados, 2026-08-25) este endpoint
+    # guardaba el teléfono tal cual venía en el body, sin normalizar.
+    assert data["wa_phone"] == "525512345678"
     assert data["prospection_source"] == "manual"
     assert data["assigned_user"]["id"] == user_asesor["id"]
 
