@@ -292,6 +292,14 @@ async def _process_message_inner(
             await db.flush()  # assign memory_event.id
             event_id = str(memory_event.id)
             await db.commit()
+            # MITIGACIÓN 2026-08-25 (no el fix definitivo — ver hallazgo de
+            # fuga de contexto de tenant entre sesiones concurrentes del pool
+            # de conexiones): commit() puede devolver la conexión física al
+            # pool; la siguiente query de esta MISMA sesión puede recibir una
+            # conexión distinta sin este contexto (o con el de otro tenant).
+            # Reafirmar inmediatamente después de cada commit — barato,
+            # no soluciona la causa raíz (ver PASO 2 pendiente).
+            await set_tenant_context(db, tenant_id)
 
             from app.tasks.ai_memory_tasks import update_entity_context_task
             update_entity_context_task.delay(event_id)
@@ -343,6 +351,8 @@ async def _process_message_inner(
                         context_at_action={"conversation_id": str(conversation.id)},
                     ))
                     await db.commit()
+                    # MITIGACIÓN 2026-08-25 — ver comentario en el commit de 4a.
+                    await set_tenant_context(db, tenant_id)
         except Exception:
             logger.exception(
                 "[ai_outcome] failed to create outcome feedback for contact response from lead %s", lead.id
@@ -435,6 +445,14 @@ async def _process_message_inner(
         #     Phrase-based detection removed — it was too eager and escalated on
         #     informational responses that happened to mention connecting to an advisor.
         await db.commit()
+        # MITIGACIÓN 2026-08-25 — ver comentario en el commit de 4a. Este
+        # commit en sí es donde ocurrió la falla real confirmada en
+        # producción (Erick 01:57 UTC, Antonio 17:08 UTC — el INSERT del
+        # mensaje del bot se flushea como parte de este commit()). La
+        # reafirmación de abajo protege lo que sigue (pasos 11b-14); lo que
+        # protege a ESTE commit específico es la reafirmación ya aplicada
+        # después del commit de 4b, justo antes de este bloque.
+        await set_tenant_context(db, tenant_id)
 
         # 11b. Trigger prediction scoring as a non-blocking background task.
         # Uses its own DB session; never delays the WhatsApp reply.

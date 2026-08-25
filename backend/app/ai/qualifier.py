@@ -175,6 +175,14 @@ async def qualify_lead(
             lead.sentiment = new_sentiment
 
         await db.commit()
+        # MITIGACIÓN 2026-08-25 (no el fix definitivo — ver hallazgo de fuga
+        # de contexto de tenant entre sesiones concurrentes del pool de
+        # conexiones): commit() puede devolver la conexión física al pool;
+        # db.refresh() de acá abajo puede recibir una conexión distinta sin
+        # este contexto (o con el de otro tenant). Confirmado en producción
+        # 2026-08-25 17:31:56 UTC — invalid input syntax for type uuid: ""
+        # justo en este db.refresh(lead).
+        await set_tenant_context(db, tenant_id)
         await db.refresh(lead)
 
         await advance_lead_stage(lead, q_status_str, db)
