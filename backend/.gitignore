@@ -81,3 +81,8 @@ logs/
 # but not versioned state either).
 scripts/admin/.*manifest*.json
 *.dump
+
+# Utel KB: PDFs de origen de las fichas de licenciatura — pesados, sin valor
+# versionado más allá de la extracción (los .md normalizados en
+# 03_licenciaturas/ SÍ se commitean, son la fuente de verdad legible).
+scripts/admin/utel_kb_source/licenciaturas_pdfs/
