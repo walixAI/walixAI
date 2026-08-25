@@ -29,6 +29,13 @@ from app.models.scoring import LeadScore
 
 logger = logging.getLogger(__name__)
 
+# See app/ai/bot_engine.py's _background_tasks for why this is needed: an
+# asyncio.create_task() result with no strong reference can be cancelled by
+# the GC before it completes, silently (CancelledError bypasses `except
+# Exception`). _maybe_trigger_closing_agent had the same unreferenced-task
+# bug as the scoring trigger it's called from.
+_background_tasks: set[asyncio.Task] = set()
+
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 SCORE_HIGH_THRESHOLD = 70  # triggers closing agent
 
@@ -63,7 +70,12 @@ async def calculate_lead_score(
     callers never need to handle exceptions from this background task.
     """
     try:
-        return await _score_inner(lead_id, tenant_id)
+        result = await _score_inner(lead_id, tenant_id)
+        logger.info(
+            "calculate_lead_score: done for lead=%s score=%s trend=%s",
+            lead_id, result.get("score"), result.get("current_score_trend"),
+        )
+        return result
     except Exception:
         logger.exception("calculate_lead_score: failed for lead=%s", lead_id)
         return {}
@@ -243,7 +255,11 @@ async def _score_inner(
 def _maybe_trigger_closing_agent(lead_id: uuid.UUID, tenant_id: uuid.UUID) -> None:
     try:
         from app.agents.closing_agent import run_closing_agent
-        asyncio.create_task(run_closing_agent(lead_id, tenant_id))
+        task = asyncio.create_task(
+            run_closing_agent(lead_id, tenant_id), name=f"closing_agent:{lead_id}"
+        )
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
         logger.info("prediction_service: closing agent queued for lead=%s score>=70", lead_id)
     except ImportError:
         logger.debug("prediction_service: closing agent not available — skipped")
