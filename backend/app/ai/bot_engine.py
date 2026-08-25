@@ -32,6 +32,23 @@ from app.services.whatsapp import WhatsAppService, normalize_mx_phone
 
 logger = logging.getLogger(__name__)
 
+# Strong references for fire-and-forget tasks — without this, asyncio only
+# holds a weak reference to a task created via asyncio.create_task(), and the
+# GC can cancel it (raises asyncio.CancelledError, which is a BaseException,
+# not an Exception — silently bypasses any `except Exception` inside the
+# task) before it completes. Confirmed live 2026-08-25: lead 66e166b5 had 20
+# bot replies but only 18 LeadScore rows, zero log trace for the 2 missing —
+# consistent with GC cancellation, not an exception. See
+# https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _fire_and_forget(coro: Any, *, name: str) -> None:
+    task = asyncio.create_task(coro, name=name)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 CLAUDE_MAX_TOKENS = 300
 
@@ -421,7 +438,7 @@ async def _process_message_inner(
         # 11b. Trigger prediction scoring as a non-blocking background task.
         # Uses its own DB session; never delays the WhatsApp reply.
         from app.services.prediction_service import calculate_lead_score
-        asyncio.create_task(
+        _fire_and_forget(
             calculate_lead_score(lead.id, lead.tenant_id),
             name=f"score:{lead.id}",
         )
