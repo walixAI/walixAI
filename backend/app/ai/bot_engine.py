@@ -28,6 +28,7 @@ from app.models.agent import AgentSuggestion
 from app.models.ai_memory import AIMemoryEvent, AIOutcomeFeedback
 from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.tenant import Branch
+from app.services.activity_service import create_system_activity
 from app.services.whatsapp import WhatsAppService, normalize_mx_phone
 
 logger = logging.getLogger(__name__)
@@ -466,12 +467,27 @@ async def _process_message_inner(
                 "Branch %s missing wa credentials — cannot send reply", branch_id
             )
         else:
-            await whatsapp_service.send_text_message(
+            sent = await whatsapp_service.send_text_message(
                 to_phone=wa_phone,
                 message=assistant_text,
                 phone_number_id=branch.wa_phone_number_id,
                 token=branch.wa_token,
             )
+            if not sent:
+                # Hallazgo 2026-08-25: send_text_message()._post() ya
+                # reintenta una vez y loguea el error en Railway, pero un
+                # fallo final aquí no dejaba NINGÚN rastro visible dentro de
+                # Walix — el bot mostraba la respuesta como enviada en el
+                # dashboard aunque Meta la hubiera rechazado. Ver también
+                # webhooks.py::_handle_wa_statuses para el caso en que Meta
+                # acepta el POST (200) pero la entrega falla después.
+                await create_system_activity(
+                    lead_id=lead.id,
+                    tenant_id=tenant_id,
+                    description="Envío de WhatsApp falló (ver logs de Railway para el detalle de Meta)",
+                    db=db,
+                )
+                await db.commit()
 
     # 15. Run qualifier after the session is closed and the WA reply is sent.
     #     process_message is already a background task, so awaiting here is safe.
