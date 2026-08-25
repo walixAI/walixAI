@@ -297,6 +297,21 @@ async def _fetch_lead_fields(leadgen_id: str, access_token: str) -> dict[str, st
     }
 
 
+def _build_ad_lead_welcome_message(name: str | None, template: str | None) -> str:
+    """Construye el mensaje de bienvenida para un lead de ads.
+
+    Si template es None, usa un fallback genérico (sin nombre de negocio
+    específico) — nunca un texto hardcodeado propio de un tenant particular.
+    """
+    display_name = name or "amigo/a"
+    if template:
+        return template.format(name=display_name)
+    return (
+        f"¡Hola {display_name}! 👋 Gracias por tu interés. "
+        f"Soy tu asistente virtual, ¿en qué puedo ayudarte?"
+    )
+
+
 async def _send_meta_lead_welcome(
     lead_id: uuid.UUID, branch_id: uuid.UUID, tenant_id: uuid.UUID
 ) -> None:
@@ -311,12 +326,7 @@ async def _send_meta_lead_welcome(
             )
             return
 
-        name = lead.name or "amigo/a"
-        message = (
-            f"¡Hola {name}! 👋 Gracias por tu interés en la Clínica de Endocrinología Pediátrica.\n\n"
-            f"Soy Wali, tu asistente virtual. Vi que nos dejaste tus datos en nuestro anuncio.\n"
-            f"¿Me podrías decir cuántos años tiene tu hijo o hija?"
-        )
+        message = _build_ad_lead_welcome_message(lead.name, branch.ad_lead_welcome_template)
         try:
             await _whatsapp.send_text_message(
                 to_phone=lead.wa_phone,

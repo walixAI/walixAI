@@ -215,6 +215,11 @@ class Branch(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Prompt Utel #2 — mensaje de bienvenida por branch para leads de Meta/Google
+    # Ads (placeholder {name}). None -> fallback genérico, ver
+    # app/api/webhooks.py::_build_ad_lead_welcome_message.
+    ad_lead_welcome_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # ── Metas / Finanzas ──────────────────────────────────────────────────────
     monthly_goal_total: Mapped[Decimal] = mapped_column(
         Numeric(14, 2), nullable=False, default=0, server_default="0"
