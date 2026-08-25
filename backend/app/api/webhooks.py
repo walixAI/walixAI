@@ -20,6 +20,7 @@ from app.models.lead import Lead, LeadSource, LeadStatus
 from app.models.user import User
 from app.models.meta_ads import MetaLeadConfig
 from app.models.tenant import Branch
+from app.services.activity_service import create_system_activity
 from app.services.whatsapp import WhatsAppService, normalize_mx_phone
 
 _CODE_RE = re.compile(r"^\d{6}$")
@@ -29,6 +30,67 @@ logger = logging.getLogger(__name__)
 _whatsapp = WhatsAppService()
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+
+
+async def _handle_wa_statuses(wa_phone_number_id: str, statuses: list[dict]) -> None:
+    """Background task: log delivery failures Meta reports async via `value.statuses`.
+
+    Hallazgo 2026-08-25 (diagnóstico "el bot no envía la respuesta de
+    WhatsApp"): el POST a /messages puede devolver 200 + wamid (aceptado)
+    y el mensaje fallar igual río abajo — Meta lo reporta después, vía este
+    mismo webhook, con status="failed" y un array "errors" con el motivo
+    real (ventana de 24h, número no alcanzable, etc.). Antes de este fix,
+    `value.statuses` caía en el `continue` de arriba sin loguear nada — el
+    caso más común de "el bot generó la respuesta pero nunca llegó" no
+    dejaba NINGÚN rastro, ni siquiera en logs de Railway.
+    """
+    for entry in statuses:
+        if entry.get("status") != "failed":
+            continue
+        wa_id = entry.get("recipient_id")
+        errors = entry.get("errors", [])
+        message_id = entry.get("id")
+        logger.error(
+            "WhatsApp delivery failed: wa_phone_number_id=%s recipient=%s message_id=%s errors=%s",
+            wa_phone_number_id, wa_id, message_id, errors,
+        )
+        if not wa_id:
+            continue
+
+        async with AsyncSessionLocal() as db:
+            tenant_id = (
+                await db.execute(
+                    text("SELECT fn_lookup_tenant_by_wa_phone_id(:pid)"),
+                    {"pid": wa_phone_number_id},
+                )
+            ).scalar_one_or_none()
+            if tenant_id is None:
+                continue
+            await set_tenant_context(db, tenant_id)
+
+            branch = (
+                await db.execute(
+                    select(Branch).where(Branch.wa_phone_number_id == wa_phone_number_id)
+                )
+            ).scalar_one_or_none()
+            if branch is None:
+                continue
+
+            lead = await find_lead_by_phone(db, wa_id, branch.id, tenant_id)
+            if lead is None:
+                continue
+
+            error_summary = "; ".join(
+                f"{e.get('code')}: {e.get('title') or e.get('message')}" for e in errors
+            ) or "sin detalle de Meta"
+            await create_system_activity(
+                lead_id=lead.id,
+                tenant_id=tenant_id,
+                description=f"Envío de WhatsApp no entregado: {error_summary}",
+                db=db,
+                metadata={"message_id": message_id, "errors": errors},
+            )
+            await db.commit()
 
 
 async def _try_support_code(wa_phone: str, code: str) -> bool:
@@ -153,9 +215,16 @@ async def receive_whatsapp_webhook(
             value = change.get("value", {})
             wa_phone_number_id = value.get("metadata", {}).get("phone_number_id")
             messages = value.get("messages", [])
+            statuses = value.get("statuses", [])
+            if statuses and wa_phone_number_id:
+                background_tasks.add_task(
+                    _handle_wa_statuses,
+                    wa_phone_number_id=wa_phone_number_id,
+                    statuses=statuses,
+                )
             if not messages or not wa_phone_number_id:
-                # Delivery/read receipts (value.statuses) and other event types
-                # land here. Nothing to process — ack and move on.
+                # Delivery/read receipts (value.statuses, handled above) and
+                # other event types land here. Nothing more to process.
                 continue
 
             # ── Internal Walix WA number ──────────────────────────────────────
