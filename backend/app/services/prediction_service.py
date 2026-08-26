@@ -220,6 +220,14 @@ async def _score_inner(
         lead.current_score_trend = trend
 
         await db.commit()
+        # MITIGACIÓN 2026-08-25 (no el fix definitivo — ver
+        # docs/TENANT_CONTEXT_POOL_LEAK_BACKLOG.md): commit() puede devolver
+        # la conexión física al pool; refresh() de abajo puede recibir una
+        # conexión distinta sin este contexto (o con el de otro tenant).
+        # Confirmado en producción 2026-08-25 17:31:59 UTC — invalid input
+        # syntax for type uuid: "" justo en este db.refresh(new_score_rec),
+        # mismo patrón que qualifier.py::qualify_lead.
+        await set_tenant_context(db, tenant_id)
         await db.refresh(new_score_rec)
         score_record_id = new_score_rec.id
 

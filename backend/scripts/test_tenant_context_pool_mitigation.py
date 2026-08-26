@@ -10,13 +10,16 @@ commit(); la siguiente query de la MISMA AsyncSession puede recibir una
 conexión física distinta, sin el app.current_tenant_id correcto (o con el
 de otro tenant que dejó su contexto en esa conexión).
 
-Mitigación aplicada (NO es el fix definitivo — ver nota en los 3
-call-sites): reafirmar set_tenant_context(db, tenant_id) inmediatamente
-después de cada commit(), antes de la siguiente query, en los 3 puntos
-confirmados:
+Mitigación aplicada (NO es el fix definitivo — ver
+docs/TENANT_CONTEXT_POOL_LEAK_BACKLOG.md): reafirmar
+set_tenant_context(db, tenant_id) inmediatamente después de cada commit(),
+antes de la siguiente query, en los 6 puntos confirmados:
   - app/ai/bot_engine.py: después de los commits de los pasos 4a, 4b, 11.
   - app/ai/qualifier.py::qualify_lead: después del commit que precede a
     db.refresh(lead).
+  - app/services/prediction_service.py::_score_inner: después del commit
+    que precede a db.refresh(new_score_rec) — confirmado en producción
+    2026-08-25 17:31:59 UTC, mismo traceback exacto que qualifier.py.
 
 Verificaciones:
   a) Experimento abstracto: 40 sesiones concurrentes, cada una aplicando
@@ -26,13 +29,16 @@ Verificaciones:
   b) Regresión end-to-end real: 15 invocaciones concurrentes de
      _process_message_inner() contra un lead de prueba aislado — ninguna
      debe fallar con "invalid input syntax for type uuid".
+  c) Regresión end-to-end real: 15 invocaciones concurrentes de
+     calculate_lead_score() contra el mismo lead de prueba — ninguna debe
+     fallar con "invalid input syntax for type uuid" en db.refresh().
 
 NOTA DE ALCANCE (explícita, per instrucción del usuario 2026-08-25): esto
-es una mitigación puntual sobre los 3 call-sites confirmados arriba — NO
+es una mitigación puntual sobre los 6 call-sites confirmados arriba — NO
 es garantía de que el mismo problema no exista en otros lugares del código
 que combinan set_tenant_context con múltiples commits (webhooks.py,
-prediction_service.py, contact_executor.py, etc. — auditoría pendiente,
-alcance separado).
+contact_executor.py, etc. — auditoría pendiente, alcance separado, ver el
+backlog).
 
 Uso:
     .venv/Scripts/python.exe scripts/test_tenant_context_pool_mitigation.py
@@ -113,7 +119,7 @@ async def _setup_tenant() -> dict:
         db.add(conv)
         await db.flush()
         await db.commit()
-        return {"tenant_id": tenant.id, "branch_id": branch.id}
+        return {"tenant_id": tenant.id, "branch_id": branch.id, "lead_id": lead.id}
 
 
 async def _cleanup_tenant(ctx: dict) -> None:
@@ -156,6 +162,41 @@ async def _check_b() -> tuple[bool, str]:
     return ok, detail
 
 
+# ── c) Regresión end-to-end real contra _score_inner (calculate_lead_score) ─
+# Se llama _score_inner directamente (no calculate_lead_score) porque este
+# último atrapa toda excepción internamente (return {}) — el mismo diseño
+# que ocultó el incidente real hasta que se agregó el log de éxito/fallo.
+# Llamando _score_inner directo, cualquier excepción real se propaga y el
+# test la detecta, en vez de depender de parsear logs.
+
+async def _one_score_inner_run(ctx: dict, i: int) -> tuple[int, str, str | None]:
+    from app.services.prediction_service import _score_inner
+    try:
+        await _score_inner(ctx["lead_id"], ctx["tenant_id"])
+        return (i, "OK", None)
+    except Exception as e:
+        return (i, "FAIL", f"{type(e).__name__}: {str(e)[:200]}")
+
+
+async def _check_c() -> tuple[bool, str]:
+    ctx = await _setup_tenant()
+    try:
+        results = await asyncio.gather(*[_one_score_inner_run(ctx, i) for i in range(15)])
+    finally:
+        await _cleanup_tenant(ctx)
+
+    uuid_fails = [r for r in results if r[1] == "FAIL" and "uuid" in (r[2] or "").lower()]
+    other_fails = [r for r in results if r[1] == "FAIL" and "uuid" not in (r[2] or "").lower()]
+    ok = len(uuid_fails) == 0
+    detail = (
+        f"total=15 uuid_fails={len(uuid_fails)} otros_fails={len(other_fails)} "
+        f"(otros_fails esperables: llamadas reales a Claude bajo concurrencia)"
+    )
+    if uuid_fails:
+        detail += f" ejemplo_uuid_fail={uuid_fails[0]}"
+    return ok, detail
+
+
 async def main() -> int:
     print("=" * 70)
     print("  test_tenant_context_pool_mitigation.py")
@@ -173,6 +214,12 @@ async def main() -> int:
     results.append((
         "b. 15 invocaciones reales concurrentes de _process_message_inner — 0 fallos de uuid esperados",
         ok_b, detail_b,
+    ))
+
+    ok_c, detail_c = await _check_c()
+    results.append((
+        "c. 15 invocaciones reales concurrentes de _score_inner (prediction_service.py) — 0 fallos de uuid esperados",
+        ok_c, detail_c,
     ))
 
     return _report(results)
