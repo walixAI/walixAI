@@ -1,11 +1,16 @@
 # Backlog: Fuga de contexto de tenant entre sesiones bajo contención del pool de conexiones
 
-> Fecha: 2026-08-25. Hallazgo surgido del diagnóstico de "el bot no envía
-> WhatsApp" / "process_message crashea intermitentemente" — dos incidentes
-> reales confirmados con logs de Railway (Erick 01:57 UTC, Antonio 17:08 y
-> 17:31 UTC). Mitigado puntualmente en `review/mitigate-tenant-context-pool-leak`;
-> este documento registra el hallazgo completo, lo mitigado, lo NO auditado
-> todavía, y el fix arquitectónico correcto pendiente.
+> Fecha: 2026-08-25 (actualizado el mismo día con un tercer incidente real
+> encontrado en `prediction_service.py`). Hallazgo surgido del diagnóstico
+> de "el bot no envía WhatsApp" / "process_message crashea
+> intermitentemente" — tres incidentes reales confirmados con logs de
+> Railway, mismo error exacto en 3 módulos distintos (Erick 01:57 UTC en
+> `bot_engine.py`, Antonio 17:08 UTC en `bot_engine.py`, Antonio 17:31 UTC
+> en `qualifier.py` Y en `prediction_service.py` — dos módulos fallando en
+> la misma ejecución). Mitigado puntualmente en
+> `review/mitigate-tenant-context-pool-leak`; este documento registra el
+> hallazgo completo, lo mitigado, lo NO auditado todavía, y el fix
+> arquitectónico correcto pendiente.
 
 ---
 
@@ -111,13 +116,36 @@ después del único `commit()` de esa sesión falló con el mismo error.
 | 2 | `backend/app/ai/bot_engine.py` — paso 4b | `commit()` de `AIOutcomeFeedback` | todo lo que sigue en la sesión (incluido el commit del paso 11) |
 | 3 | `backend/app/ai/bot_engine.py` — paso 11 | `commit()` que persiste el mensaje del bot (el que falló en producción, Erick y Antonio) | pasos 11b-14 (scoring, Redis, envío WhatsApp) |
 | 4 | `backend/app/ai/qualifier.py::qualify_lead` | `commit()` que persiste la calificación (línea ~177) | `db.refresh(lead)` y `advance_lead_stage`/`detect_risk`/`notify_assistant`/`escalate_to_human` |
+| 5 | `backend/app/services/prediction_service.py::_score_inner` | `commit()` que persiste `LeadScore`/`lead.current_score` (línea ~222) | `db.refresh(new_score_rec)` |
 
-Patrón aplicado en los 4 puntos: `await set_tenant_context(db, tenant_id)`
+Patrón aplicado en los 5 puntos: `await set_tenant_context(db, tenant_id)`
 inmediatamente después de cada `commit()`, antes de la siguiente query.
 Verificado con `test_tenant_context_pool_mitigation.py` (0/40 mismatches,
-15/15 invocaciones reales de `_process_message_inner` sin fallo de uuid) y
-regresión completa (`test_rls.py` 5/5, `test_webhook.py`,
-`test_lead_scoring_task.py`, `test_whatsapp_send_visibility.py`).
+15/15 invocaciones reales de `_process_message_inner` sin fallo de uuid,
+15/15 invocaciones reales de `_score_inner` sin fallo de uuid) y regresión
+completa (`test_rls.py` 5/5, `test_webhook.py`, `test_lead_scoring_task.py`,
+`test_whatsapp_send_visibility.py`).
+
+**Evidencia real del call-site #5** (Railway, deployment `5dee2439`, antes
+de que esta mitigación existiera — confirmando que el bug es preexistente,
+no introducido por los otros 5 fixes):
+```
+2026-08-25 17:31:59,179 [ERROR] app.services.prediction_service: calculate_lead_score: failed for lead=a6526073-246f-4003-af9e-dcb13e62d986
+...
+asyncpg.exceptions.InvalidTextRepresentationError: invalid input syntax for type uuid: ""
+...
+File "/app/app/services/prediction_service.py", line 73, in calculate_lead_score
+    result = await _score_inner(lead_id, tenant_id)
+File "/app/app/services/prediction_service.py", line 223, in _score_inner
+    await db.refresh(new_score_rec)
+```
+Mismo error exacto, mismo patrón `commit()` → `refresh()` inmediato, que
+`qualifier.py::qualify_lead`. Verificado que en el deployment posterior a
+esta mitigación (`09b56a17`, ya con el fix de los otros 5 sitios pero
+`_score_inner` aún sin tocar en ese momento) el scoring corrió 9 veces sin
+ningún fallo — muestra más chica/tráfico más bajo, no contradice el
+hallazgo, solo confirma que es intermitente (esperado del mecanismo:
+depende de contención real del pool, no ocurre en cada invocación).
 
 ### NO auditados todavía (fuera de alcance de esta mitigación)
 
@@ -131,10 +159,6 @@ alguno tiene queries después del primer commit:
 - `backend/app/api/webhooks.py` — el flujo de resolución de tenant
   (`fn_lookup_tenant_by_wa_phone_id` + `set_tenant_context`) antes de
   invocar `process_message` en background.
-- `backend/app/services/prediction_service.py::_score_inner` — un solo
-  commit al final según lectura previa del código (prompt de scoring,
-  2026-08-25), probablemente NO expuesto, pero no confirmado con el mismo
-  rigor que los 4 call-sites de arriba.
 - `backend/app/ai/contact_executor.py`
 - `backend/app/ai/copilot_tools.py` (varias ramas de `execute_tool`)
 - `backend/app/ai/command_interpreter.py`
@@ -212,5 +236,5 @@ resolver esto a nivel de pool primero.
 **No activar `walix_app` como rol de runtime en producción hasta que el fix
 arquitectónico de la sección 4 esté implementado y verificado** — la
 mitigación puntual de la sección 3 NO es suficiente para ese cambio,
-porque solo cubre 4 call-sites confirmados de un universo más grande no
+porque solo cubre 5 call-sites confirmados de un universo más grande no
 auditado (sección 3).
