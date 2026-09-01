@@ -18,9 +18,14 @@ qualification:
     criteria            — comma-separated list of what makes a lead "calificado"
     disqualifiers       — comma-separated list of explicit disqualifiers
     escalation_triggers — comma-separated list of situations requiring escalation
-    required_fields     — list of {name, description} dicts for industry-specific
-                          fields; build_qualification_json_schema appends the 4
-                          fixed output fields automatically
+    required_fields     — list of {name, description, label} dicts for industry-
+                          specific fields; build_qualification_json_schema uses
+                          name/description (appends the 4 fixed output fields
+                          automatically); label is the human-readable UI string
+                          exposed to the frontend via GET /branches/{id}/
+                          qualification-config (frontend/.../ContactSidePanel.tsx)
+                          — optional, fields without it aren't shown as curated
+                          columns in that panel
     name_field          — which required_field to sync into lead.name (or None)
     phone_field         — which required_field to sync into lead.contact_phone (or None)
     status_map          — qualification_status string -> LeadStatus value string
@@ -33,6 +38,11 @@ messages:
 channel_rules:
     max_chars       — soft character limit per WhatsApp message
     extra_rules     — additional industry-specific formatting rules
+
+agent_role_label (top-level, sibling of bot_persona/qualification/messages/channel_rules):
+    singular / plural — human role assignable to leads in this vertical (e.g.
+                        "médico"/"médicos" for salud), used by
+                        AssignmentDropdown.tsx instead of a hardcoded role name
 """
 
 # ── Shared qualification prompt template ──────────────────────────────────────
@@ -91,12 +101,12 @@ Cuando tengas los 3 datos y el niño cumpla los criterios, indica que lo turnar�
 con uno de nuestros médicos especialistas para agendar la cita."""
 
 _SALUD_REQUIRED_FIELDS = [
-    {"name": "child_age",           "description": "número o null"},
+    {"name": "child_age",           "description": "número o null", "label": "Edad del niño"},
     {"name": "child_age_in_range",  "description": "true si está entre 3 y 15, false si no, null si no se mencionó"},
-    {"name": "consultation_reason", "description": "texto del motivo o null"},
+    {"name": "consultation_reason", "description": "texto del motivo o null", "label": "Motivo de consulta"},
     {"name": "reason_qualifies",    "description": "true si es talla baja/crecimiento lento/déficit hormonal, false si no, null si no se mencionó"},
-    {"name": "parent_name",         "description": "nombre del padre/madre o null"},
-    {"name": "parent_city",         "description": "ciudad mencionada o null"},
+    {"name": "parent_name",         "description": "nombre del padre/madre o null", "label": "Nombre del padre/tutor"},
+    {"name": "parent_city",         "description": "ciudad mencionada o null", "label": "Ciudad"},
     {"name": "contact_phone",       "description": "número de teléfono si el padre mencionó uno DIFERENTE al de WhatsApp, de lo contrario null"},
     {"name": "branch_suggested",    "description": '"Monterrey" o "Santa Fe CDMX" o "Condesa CDMX" o "fuera_cobertura" o null'},
 ]
@@ -132,14 +142,14 @@ Calificar al prospecto recopilando:
 6. Nombre del prospecto"""
 
 _INMOBILIARIA_REQUIRED_FIELDS = [
-    {"name": "budget_min",          "description": "presupuesto mínimo en pesos MXN, número o null"},
-    {"name": "budget_max",          "description": "presupuesto máximo en pesos MXN, número o null"},
-    {"name": "operation_type",      "description": '"compra" o "renta" o null'},
-    {"name": "property_type",       "description": '"casa" o "departamento" o "terreno" o "local_comercial" o null'},
-    {"name": "location_preference", "description": "colonia, municipio o zona deseada, texto o null"},
-    {"name": "bedrooms",            "description": "número de recámaras deseadas, entero o null"},
-    {"name": "client_name",         "description": "nombre del prospecto o null"},
-    {"name": "purchase_timeline",   "description": '"inmediato" o "1_3_meses" o "3_6_meses" o "mas_de_6_meses" o null'},
+    {"name": "budget_min",          "description": "presupuesto mínimo en pesos MXN, número o null", "label": "Presupuesto mínimo"},
+    {"name": "budget_max",          "description": "presupuesto máximo en pesos MXN, número o null", "label": "Presupuesto máximo"},
+    {"name": "operation_type",      "description": '"compra" o "renta" o null', "label": "Tipo de operación"},
+    {"name": "property_type",       "description": '"casa" o "departamento" o "terreno" o "local_comercial" o null', "label": "Tipo de propiedad"},
+    {"name": "location_preference", "description": "colonia, municipio o zona deseada, texto o null", "label": "Zona de interés"},
+    {"name": "bedrooms",            "description": "número de recámaras deseadas, entero o null", "label": "Recámaras"},
+    {"name": "client_name",         "description": "nombre del prospecto o null", "label": "Nombre"},
+    {"name": "purchase_timeline",   "description": '"inmediato" o "1_3_meses" o "3_6_meses" o "mas_de_6_meses" o null', "label": "Tiempo de compra"},
 ]
 
 
@@ -172,13 +182,13 @@ Calificar al prospecto recopilando:
 5. Ciudad o municipio"""
 
 _EDUCACION_REQUIRED_FIELDS = [
-    {"name": "education_level",     "description": '"preescolar" o "primaria" o "secundaria" o "preparatoria" o "licenciatura" o "posgrado" o null'},
-    {"name": "program_interest",    "description": "carrera o programa de interés, texto o null"},
-    {"name": "student_age",         "description": "edad del estudiante en años, número o null"},
-    {"name": "start_date",          "description": "ciclo o fecha de inicio deseada, texto o null"},
-    {"name": "contact_name",        "description": "nombre del padre/tutor o estudiante o null"},
-    {"name": "contact_city",        "description": "ciudad o municipio mencionado o null"},
-    {"name": "scholarship_interest","description": "true si preguntó por becas, false si no, null si no se mencionó"},
+    {"name": "education_level",     "description": '"preescolar" o "primaria" o "secundaria" o "preparatoria" o "licenciatura" o "posgrado" o null', "label": "Nivel educativo"},
+    {"name": "program_interest",    "description": "carrera o programa de interés, texto o null", "label": "Programa de interés"},
+    {"name": "student_age",         "description": "edad del estudiante en años, número o null", "label": "Edad"},
+    {"name": "start_date",          "description": "ciclo o fecha de inicio deseada, texto o null", "label": "Fecha de inicio"},
+    {"name": "contact_name",        "description": "nombre del padre/tutor o estudiante o null", "label": "Nombre"},
+    {"name": "contact_city",        "description": "ciudad o municipio mencionado o null", "label": "Ciudad"},
+    {"name": "scholarship_interest","description": "true si preguntó por becas, false si no, null si no se mencionó", "label": "Interés en becas"},
 ]
 
 
@@ -213,13 +223,13 @@ Calificar al prospecto recopilando:
 5. Nombre del solicitante"""
 
 _FINTECH_REQUIRED_FIELDS = [
-    {"name": "product_type",        "description": '"credito_personal" o "credito_empresarial" o "ahorro" o "inversion" o null'},
-    {"name": "amount_needed",       "description": "monto requerido o a invertir en pesos MXN, número o null"},
-    {"name": "monthly_income",      "description": "ingreso mensual estimado en pesos MXN, número o null"},
-    {"name": "employment_status",   "description": '"empleado" o "independiente" o "empresario" o "desempleado" o null'},
-    {"name": "loan_purpose",        "description": "para qué necesita el crédito o producto, texto o null"},
-    {"name": "client_name",         "description": "nombre del solicitante o null"},
-    {"name": "has_existing_debt",   "description": "true si mencionó deudas activas, false si no, null si no se mencionó"},
+    {"name": "product_type",        "description": '"credito_personal" o "credito_empresarial" o "ahorro" o "inversion" o null', "label": "Producto de interés"},
+    {"name": "amount_needed",       "description": "monto requerido o a invertir en pesos MXN, número o null", "label": "Monto requerido"},
+    {"name": "monthly_income",      "description": "ingreso mensual estimado en pesos MXN, número o null", "label": "Ingreso mensual"},
+    {"name": "employment_status",   "description": '"empleado" o "independiente" o "empresario" o "desempleado" o null', "label": "Situación laboral"},
+    {"name": "loan_purpose",        "description": "para qué necesita el crédito o producto, texto o null", "label": "Motivo del crédito"},
+    {"name": "client_name",         "description": "nombre del solicitante o null", "label": "Nombre"},
+    {"name": "has_existing_debt",   "description": "true si mencionó deudas activas, false si no, null si no se mencionó", "label": "Deudas activas"},
 ]
 
 
@@ -282,6 +292,7 @@ INDUSTRY_TEMPLATES: dict[str, dict] = {
                 "Si necesitas listar opciones, usa números: '1. ' '2. '",
             ],
         },
+        "agent_role_label": {"singular": "médico", "plural": "médicos"},
     },
 
     "inmobiliaria": {
@@ -319,6 +330,7 @@ INDUSTRY_TEMPLATES: dict[str, dict] = {
                 "No menciones precios de propiedades que no hayas confirmado",
             ],
         },
+        "agent_role_label": {"singular": "asesor", "plural": "asesores"},
     },
 
     "educacion": {
@@ -357,6 +369,7 @@ INDUSTRY_TEMPLATES: dict[str, dict] = {
                 "Si mencionan becas, aclara que el proceso requiere cumplir requisitos oficiales",
             ],
         },
+        "agent_role_label": {"singular": "asesor", "plural": "asesores"},
     },
 
     "fintech": {
@@ -395,5 +408,6 @@ INDUSTRY_TEMPLATES: dict[str, dict] = {
                 "Transmite confidencialidad en cada mensaje",
             ],
         },
+        "agent_role_label": {"singular": "asesor financiero", "plural": "asesores financieros"},
     },
 }

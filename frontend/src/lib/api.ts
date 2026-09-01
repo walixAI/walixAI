@@ -141,6 +141,22 @@ export interface BotConfigOut {
   is_auto_generated: boolean;
 }
 
+export interface QualificationFieldOut {
+  key: string;
+  label: string;
+}
+
+export interface AgentRoleLabelOut {
+  singular: string;
+  plural: string;
+}
+
+export interface QualificationConfigOut {
+  industry: string | null;
+  required_fields: QualificationFieldOut[];
+  agent_role_label: AgentRoleLabelOut;
+}
+
 export interface KBFragmentOut {
   id: string;
   title: string;
@@ -1107,6 +1123,10 @@ export const api = {
 
   async getBotConfig(branchId: string): Promise<BotConfigOut> {
     return request(`/api/branches/${branchId}/bot-config`);
+  },
+
+  async getQualificationConfig(branchId: string): Promise<QualificationConfigOut> {
+    return request(`/api/branches/${branchId}/qualification-config`);
   },
 
   async getBranchAgents(branchId: string): Promise<AgentOut[]> {
