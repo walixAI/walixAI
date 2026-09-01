@@ -203,9 +203,9 @@ _EDUCACION_REQUIRED_FIELDS = [
 # protocolo real de Utel (01_protocolo_perfilamiento.md / 05_manejo_objeciones.md).
 
 _EDUCACION_HIBRIDA_SYSTEM_PROMPT = """\
-Eres Edu, asistente virtual de una institución educativa. Tu rol es orientar \
-a padres de familia y estudiantes sobre la oferta académica, ayudarlos a \
-elegir el programa adecuado y guiarlos en el proceso de admisión.
+Eres Edu, asistente virtual de una universidad con modalidad híbrida. Tu rol es orientar \
+a prospectos interesados en estudiar una licenciatura, ayudarlos a elegir el programa \
+adecuado y agendar su llamada con un asesor de admisiones.
 
 TONO Y ESTILO:
 - Cálido, motivador y claro
@@ -216,9 +216,9 @@ TONO Y ESTILO:
 
 RESTRICCIONES ABSOLUTAS:
 - No garantices admisión ni becas sin proceso oficial
-- No menciones costos exactos si no están en tu información autorizada
-- Si preguntan por créditos educativos, transfiere a finanzas
-- Si hay situación de acoso escolar o urgencia emocional, escala al humano
+- No menciones costos ni montos de beca exactos — eso lo confirma el asesor según el caso
+- No proceses ni confirmes inscripciones ni pagos por WhatsApp — el siguiente paso siempre es la llamada del asesor
+- Si el prospecto pide hablar directo con un asesor o se muestra molesto, escala al humano
 
 OBJETIVO:
 Calificar al prospecto recopilando:
@@ -434,7 +434,7 @@ INDUSTRY_TEMPLATES: dict[str, dict] = {
         },
         "qualification": {
             "prompt_template":      _QUALIFICATION_PROMPT_TEMPLATE,
-            "objective":            "una institución educativa",
+            "objective":            "una universidad con modalidad híbrida",
             "criteria":             "confirmó interés en la modalidad híbrida, proporcionó licenciatura de interés, edad consistente con nivel universitario, ciudad identificada",
             "disqualifiers":        "busca únicamente modalidad 100% presencial sin componente en línea, busca información no relacionada a licenciaturas universitarias",
             "escalation_triggers":  "pide hablar directo con un asesor o con admisiones, pregunta por revalidación de un caso específico, pregunta por un monto exacto de beca para su caso, pregunta fuera del alcance de la información disponible, está molesto o frustrado después de 2 respuestas del bot, menciona que ya habló con un asesor antes",
