@@ -35,11 +35,21 @@ function AgentAvatar({ name, role }: { name: string; role: string }) {
   );
 }
 
-interface Props {
-  lead: LeadDetail;
+interface RoleLabel {
+  singular: string;
+  plural: string;
 }
 
-export function AssignmentDropdown({ lead }: Props) {
+// Fallback genérico mientras carga /qualification-config o si el branch no
+// tiene industria configurada — ver ContactSidePanel.tsx.
+const DEFAULT_ROLE_LABEL: RoleLabel = { singular: "especialista", plural: "especialistas" };
+
+interface Props {
+  lead: LeadDetail;
+  roleLabel?: RoleLabel;
+}
+
+export function AssignmentDropdown({ lead, roleLabel = DEFAULT_ROLE_LABEL }: Props) {
   const qc = useQueryClient();
 
   // Cached agents list — fetched once per component mount
@@ -76,7 +86,7 @@ export function AssignmentDropdown({ lead }: Props) {
         const data = await api.getBranchAgents(lead.branch_id);
         setAgents(data);
       } catch {
-        toast.error("No se pudo cargar la lista de médicos");
+        toast.error(`No se pudo cargar la lista de ${roleLabel.plural}`);
         setLoadingAgents(false);
         return;
       }
@@ -92,7 +102,7 @@ export function AssignmentDropdown({ lead }: Props) {
       qc.invalidateQueries({ queryKey: ["leads", "whatsapp"] });
       setOpen(false);
       setSelected(null);
-      toast.success(`Lead asignado a ${updated.assigned_to_name ?? "el médico"}`);
+      toast.success(`Lead asignado a ${updated.assigned_to_name ?? `el ${roleLabel.singular}`}`);
     },
     onError: (e: Error) => toast.error("Error al asignar", { description: e.message }),
   });
@@ -102,7 +112,7 @@ export function AssignmentDropdown({ lead }: Props) {
     ? ""
     : isAssigned
     ? "Reasignar"
-    : "Asignar al médico";
+    : `Asignar al ${roleLabel.singular}`;
 
   return (
     <div ref={containerRef} className="relative">

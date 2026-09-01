@@ -1,11 +1,23 @@
+import { useQuery } from "@tanstack/react-query";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { StatusBadge } from "./StatusBadge";
-import type { LeadDetail } from "@/lib/api";
+import { api, type LeadDetail } from "@/lib/api";
 import { WBadge } from "@/components/walix/Badge";
 import { AssignmentDropdown } from "./AssignmentDropdown";
 import { cn } from "@/lib/utils";
 import type { ServiceWindow, WindowTone } from "@/lib/whatsapp/serviceWindow";
 import type { GuidanceCard } from "@/lib/whatsapp/guidance";
+
+// Fallback mientras carga /qualification-config o si falla — coincide con el
+// esquema "salud" para no dejar el panel en blanco (la clínica es el tenant
+// con más tráfico); una vez resuelve la query, se reemplaza por los campos
+// reales del branch.
+const FALLBACK_QUAL_FIELDS = [
+  { key: "parent_name", label: "Nombre del padre/tutor" },
+  { key: "child_age", label: "Edad del niño" },
+  { key: "consultation_reason", label: "Motivo de consulta" },
+  { key: "parent_city", label: "Ciudad" },
+];
 
 const WINDOW_BADGE: Record<WindowTone, { bg: string; text: string; label: string }> = {
   open:    { bg: "bg-success/10",  text: "text-success",  label: "Abierta" },
@@ -36,12 +48,13 @@ interface Props {
 export function ContactSidePanel({ lead, serviceWindow, guidance }: Props) {
   const qData = lead.qualification_data as Record<string, unknown>;
 
-  const qualFields = [
-    { key: "parent_name", label: "Nombre del padre/tutor" },
-    { key: "child_age", label: "Edad del nino" },
-    { key: "consultation_reason", label: "Motivo de consulta" },
-    { key: "parent_city", label: "Ciudad" },
-  ];
+  const { data: qualConfig } = useQuery({
+    queryKey: ["qualification-config", lead.branch_id],
+    queryFn: () => api.getQualificationConfig(lead.branch_id),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const qualFields = qualConfig?.required_fields ?? FALLBACK_QUAL_FIELDS;
 
   const score = lead.qualification_score;
 
@@ -149,7 +162,7 @@ export function ContactSidePanel({ lead, serviceWindow, guidance }: Props) {
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
               Asignacion
             </h3>
-            <AssignmentDropdown lead={lead} />
+            <AssignmentDropdown lead={lead} roleLabel={qualConfig?.agent_role_label} />
           </section>
 
           {/* Info del lead */}

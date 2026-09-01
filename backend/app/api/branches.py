@@ -68,6 +68,61 @@ async def _require_branch_access(
     )
 
 
+class QualificationFieldOut(BaseModel):
+    key: str
+    label: str
+
+
+class AgentRoleLabelOut(BaseModel):
+    singular: str
+    plural: str
+
+
+class QualificationConfigOut(BaseModel):
+    industry: str | None
+    required_fields: list[QualificationFieldOut]
+    agent_role_label: AgentRoleLabelOut
+
+
+_DEFAULT_AGENT_ROLE_LABEL = {"singular": "especialista", "plural": "especialistas"}
+
+
+@router.get("/{branch_id}/qualification-config", response_model=QualificationConfigOut)
+async def get_qualification_config(
+    branch_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QualificationConfigOut:
+    """Config de calificación/rol de agente del branch para el frontend (cualquier
+    usuario con acceso al branch, no solo owner/gerente/it — a diferencia de
+    /bot-config, que expone datos administrativos del prompt/onboarding).
+
+    Reemplaza los campos y el rol "médico" hardcodeados en ContactSidePanel.tsx
+    y AssignmentDropdown.tsx por la config real de la industria del branch
+    (mismo INDUSTRY_TEMPLATES que ya usa el backend para calificar leads).
+    """
+    from app.ai.config_loader import get_branch_config
+
+    await _require_branch_access(current_user, branch_id, db)
+    branch = await db.get(Branch, branch_id)
+    if not branch or branch.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sucursal no encontrada")
+
+    config = await get_branch_config(branch_id, db)
+    required_fields = config.get("qualification", {}).get("required_fields", [])
+    role_label = config.get("agent_role_label", _DEFAULT_AGENT_ROLE_LABEL)
+
+    return QualificationConfigOut(
+        industry=branch.industry,
+        required_fields=[
+            QualificationFieldOut(key=f["name"], label=f.get("label", f["name"]))
+            for f in required_fields
+            if f.get("label")
+        ],
+        agent_role_label=AgentRoleLabelOut(**role_label),
+    )
+
+
 @router.get("/{branch_id}/agents", response_model=list[AgentOut])
 async def list_branch_agents(
     branch_id: uuid.UUID,
