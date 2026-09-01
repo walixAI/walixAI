@@ -192,6 +192,61 @@ _EDUCACION_REQUIRED_FIELDS = [
 ]
 
 
+# ── educacion_hibrida ─────────────────────────────────────────────────────────
+# Entrada específica para universidades con modelo híbrido (en línea entre
+# semana + sesión presencial semanal) tipo Utel — NO reemplaza "educacion",
+# que sigue siendo la plantilla genérica para cualquier otro cliente de la
+# vertical educativa. bot_persona (nombre, tono, restricciones) y
+# messages/channel_rules/agent_role_label se heredan tal cual de "educacion";
+# solo el bloque OBJETIVO del system_prompt y el required_fields/criteria/
+# disqualifiers/escalation_triggers de qualification son específicos del
+# protocolo real de Utel (01_protocolo_perfilamiento.md / 05_manejo_objeciones.md).
+
+_EDUCACION_HIBRIDA_SYSTEM_PROMPT = """\
+Eres Edu, asistente virtual de una institución educativa. Tu rol es orientar \
+a padres de familia y estudiantes sobre la oferta académica, ayudarlos a \
+elegir el programa adecuado y guiarlos en el proceso de admisión.
+
+TONO Y ESTILO:
+- Cálido, motivador y claro
+- Mensajes breves, máximo 3 oraciones
+- Sin markdown ni asteriscos
+- Español de México, accesible para cualquier nivel educativo
+- Siempre valida el interés del padre/estudiante antes de informar
+
+RESTRICCIONES ABSOLUTAS:
+- No garantices admisión ni becas sin proceso oficial
+- No menciones costos exactos si no están en tu información autorizada
+- Si preguntan por créditos educativos, transfiere a finanzas
+- Si hay situación de acoso escolar o urgencia emocional, escala al humano
+
+OBJETIVO:
+Calificar al prospecto recopilando:
+1. Nombre completo
+2. Edad
+3. Ciudad
+4. Licenciatura de interés
+5. Confirmación de que quiere la modalidad híbrida (estudia en línea entre semana + una
+   sesión presencial semanal para desarrollar Power Skills)
+6. Sede presencial preferida o sugerida según su ciudad
+7. Horario en el que un asesor le puede llamar
+
+Cuando tengas estos datos, indica que un asesor lo contactará en el horario señalado para
+resolver dudas específicas de la licenciatura, la inversión según beca aplicable, y comenzar
+el proceso de inscripción. No proceses ni confirmes una inscripción por WhatsApp — el
+siguiente paso siempre es la llamada del asesor."""
+
+_EDUCACION_HIBRIDA_REQUIRED_FIELDS = [
+    {"name": "contact_name",        "description": "nombre completo del prospecto o null", "label": "Nombre completo"},
+    {"name": "age",                 "description": "edad del prospecto en años, número o null", "label": "Edad"},
+    {"name": "city",                "description": "ciudad donde se encuentra el prospecto, texto o null", "label": "Ciudad"},
+    {"name": "program_interest",    "description": "licenciatura de interés (nombre del programa), texto o null", "label": "Licenciatura de interés"},
+    {"name": "hybrid_confirmed",    "description": "true si el prospecto confirmó que quiere la modalidad híbrida (en línea + sesión presencial semanal), false si prefiere otra modalidad, null si no se ha confirmado", "label": "Modalidad híbrida confirmada"},
+    {"name": "preferred_sede",      "description": "sede presencial preferida o sugerida según su ciudad, texto o null", "label": "Sede preferida"},
+    {"name": "contact_time_window", "description": "franja horaria en la que un asesor puede llamarlo por teléfono, texto libre o null", "label": "Horario de contacto"},
+]
+
+
 # ── fintech ───────────────────────────────────────────────────────────────────
 
 _FINTECH_SYSTEM_PROMPT = """\
@@ -345,6 +400,45 @@ INDUSTRY_TEMPLATES: dict[str, dict] = {
             "disqualifiers":        "nivel solicitado fuera de la oferta de la institución, modalidad no disponible (e.g. solo en línea si no se ofrece)",
             "escalation_triggers":  "situación de acoso escolar, urgencia emocional del padre o estudiante, queja grave sobre la institución",
             "required_fields":      _EDUCACION_REQUIRED_FIELDS,
+            "name_field":           "contact_name",
+            "phone_field":          None,
+            "status_map":           _DEFAULT_STATUS_MAP,
+            "sentiment_map":        _DEFAULT_SENTIMENT_MAP,
+        },
+        "messages": {
+            "welcome_meta": (
+                "¡Hola {name}! 🎓 Nos da mucho gusto que estés considerando "
+                "nuestra institución.\n\n"
+                "Soy Edu, tu orientador virtual. ¿Para qué nivel educativo "
+                "estás buscando información?"
+            ),
+            "escalation": (
+                "Te voy a conectar con nuestro equipo de admisiones para que "
+                "puedan orientarte de manera personalizada."
+            ),
+        },
+        "channel_rules": {
+            "max_chars": 300,
+            "extra_rules": [
+                "Usa lenguaje motivador y accesible para cualquier nivel educativo",
+                "Si mencionan becas, aclara que el proceso requiere cumplir requisitos oficiales",
+            ],
+        },
+        "agent_role_label": {"singular": "asesor", "plural": "asesores"},
+    },
+
+    "educacion_hibrida": {
+        "bot_persona": {
+            "name": "Edu",
+            "system_prompt": _EDUCACION_HIBRIDA_SYSTEM_PROMPT,
+        },
+        "qualification": {
+            "prompt_template":      _QUALIFICATION_PROMPT_TEMPLATE,
+            "objective":            "una institución educativa",
+            "criteria":             "confirmó interés en la modalidad híbrida, proporcionó licenciatura de interés, edad consistente con nivel universitario, ciudad identificada",
+            "disqualifiers":        "busca únicamente modalidad 100% presencial sin componente en línea, busca información no relacionada a licenciaturas universitarias",
+            "escalation_triggers":  "pide hablar directo con un asesor o con admisiones, pregunta por revalidación de un caso específico, pregunta por un monto exacto de beca para su caso, pregunta fuera del alcance de la información disponible, está molesto o frustrado después de 2 respuestas del bot, menciona que ya habló con un asesor antes",
+            "required_fields":      _EDUCACION_HIBRIDA_REQUIRED_FIELDS,
             "name_field":           "contact_name",
             "phone_field":          None,
             "status_map":           _DEFAULT_STATUS_MAP,
